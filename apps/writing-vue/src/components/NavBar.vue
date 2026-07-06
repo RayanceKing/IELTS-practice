@@ -1,8 +1,8 @@
 <template>
   <nav class="nav-shell glass-toolbar">
     <div class="nav-inner">
-      <router-link to="/writing" class="brand-block">
-        <strong class="brand-title">📚 考试总览系统</strong>
+      <router-link to="/" class="brand-block">
+        <strong class="brand-title">IELTS Practice</strong>
         <span class="brand-subtitle">Practice Shell</span>
       </router-link>
 
@@ -24,9 +24,10 @@
 
 <script setup>
 const navItems = [
-  { to: '/writing', label: '写作' },
-  { to: '/topics', label: '写作题库' },
-  { to: '/history', label: '写作记录' },
+  { to: '/', label: '总览' },
+  { to: '/topics', label: '题库' },
+  { to: '/writing', label: '练习' },
+  { to: '/history', label: '历史' },
   { to: '/settings', label: '设置' }
 ]
 </script>

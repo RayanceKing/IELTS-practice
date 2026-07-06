@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -43,6 +44,12 @@ BANK_SOCIETY_TOPIC_TEXT = "Some people believe remote work weakens communities, 
 BANK_SOCIETY_TOPIC_LABEL_SNIPPET = "Some people believe remote work weakens communities"
 BANK_MISSING_TOPIC_TEXT = "Some people think online education platforms should replace physical classrooms. Discuss both views and give your opinion."
 COMPOSE_WAIT_COUNT = 0
+
+
+def npm_command(*args: str) -> list[str]:
+    if sys.platform == "win32":
+        return [str(Path(os.environ.get("ComSpec", "cmd.exe"))), "/d", "/s", "/c", "npm", *args]
+    return ["npm", *args]
 
 try:
     from playwright.async_api import async_playwright  # type: ignore[import-untyped]
@@ -72,10 +79,12 @@ def ensure_bundle() -> None:
     if not is_bundle_stale():
         return
     completed = subprocess.run(
-        ["npm", "run", "build:writing"],
+        npm_command("run", "build:writing"),
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if completed.returncode != 0:
         detail = completed.stdout or completed.stderr or "unknown build failure"
@@ -420,12 +429,12 @@ async def assert_writing_top_nav_stays_in_writing_module(page, entry_url: str) -
     await open_compose_entry(page, entry_url)
     await assert_not_reading_home(page, "compose-entry")
 
-    await assert_writing_nav_target(page, "写作题库", "/topics", ".topic-manage-page")
+    await assert_writing_nav_target(page, "题库", "/topics", ".topic-manage-page")
     topic_heading = await page.locator(".topic-manage-page .page-title").text_content()
     if not topic_heading or "Question" not in topic_heading:
         raise AssertionError(f"writing_topics_heading_mismatch:{topic_heading}")
 
-    await assert_writing_nav_target(page, "写作记录", "/history", ".history-page")
+    await assert_writing_nav_target(page, "历史", "/history", ".history-page")
     history_heading = await page.locator(".history-page .page-header").text_content()
     if not history_heading or "Performance Analytics" not in history_heading:
         raise AssertionError(f"writing_history_heading_mismatch:{history_heading}")
@@ -435,7 +444,7 @@ async def assert_writing_top_nav_stays_in_writing_module(page, entry_url: str) -
     if settings_panels < 3:
         raise AssertionError(f"writing_settings_three_panel_missing:{settings_panels}")
 
-    await assert_writing_nav_target(page, "写作", "/writing", ".compose-page")
+    await assert_writing_nav_target(page, "练习", "/writing", ".compose-page")
     await wait_for_compose(page)
 
     await page.click(".brand-block")
@@ -844,7 +853,7 @@ async def run_regression() -> dict:
             "bankSocietyTopicId": BANK_SOCIETY_TOPIC_ID,
             "missingBankTopicId": BANK_MISSING_TOPIC_ID,
             "startCallCount": 1,
-            "topNavRoutes": ["#/writing", "#/topics", "#/history", "#/settings"],
+            "topNavRoutes": ["#/", "#/topics", "#/writing", "#/history", "#/settings"],
         },
     }
 

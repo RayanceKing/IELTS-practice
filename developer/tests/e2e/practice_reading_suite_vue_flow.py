@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +21,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DIST_ENTRY = REPO_ROOT / "dist" / "writing" / "index.html"
 LOCAL_API_BASE_URL = "http://127.0.0.1:3921"
+
+
+def npm_command(*args: str) -> list[str]:
+    if sys.platform == "win32":
+        return [str(Path(os.environ.get("ComSpec", "cmd.exe"))), "/d", "/s", "/c", "npm", *args]
+    return ["npm", *args]
 SUITE_SESSION_ID = "suite-e2e-1"
 
 try:
@@ -50,10 +57,12 @@ def ensure_bundle() -> None:
     ):
         return
     completed = subprocess.run(
-        ["npm", "run", "build:writing"],
+        npm_command("run", "build:writing"),
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if completed.returncode != 0:
         detail = completed.stdout or completed.stderr or "unknown build failure"

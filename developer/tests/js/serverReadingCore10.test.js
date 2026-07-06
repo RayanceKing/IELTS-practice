@@ -10,9 +10,13 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const repoRoot = path.resolve(__dirname, '..', '..', '..')
 const require = createRequire(import.meta.url)
+const npmCommand = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'npm'
+const npmArgs = process.platform === 'win32'
+  ? ['/d', '/s', '/c', 'npm', 'run', 'build:server']
+  : ['run', 'build:server']
 
 function ensureServerBundle() {
-  execFileSync('npm', ['run', 'build:server'], {
+  execFileSync(npmCommand, npmArgs, {
     cwd: repoRoot,
     stdio: 'inherit'
   })

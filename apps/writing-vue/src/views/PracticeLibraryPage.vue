@@ -270,16 +270,14 @@
       :format-backup-date="formatBackupDate"
       @clear-practice-cache="clearPracticeCache"
       @load-reading-data="loadReadingData"
-      @switch-background-theme="switchBackgroundTheme"
-      @start-onboarding-tour="startOnboardingTour"
       @show-reading-library-config-list="showReadingLibraryConfigList"
       @force-refresh-reading-data="forceRefreshReadingData"
+      @open-global-settings="openGlobalSettings"
       @create-reading-backup="createReadingBackup"
       @show-reading-backup-list="showReadingBackupList"
       @export-reading-archive="exportReadingArchive"
       @trigger-reading-archive-import="triggerReadingArchiveImport"
       @reading-archive-import-change="handleReadingArchiveImportChange"
-      @open-update-manager="openUpdateManager"
       @download-reading-backup="downloadReadingBackup"
       @restore-reading-backup="restoreReadingBackup"
       @delete-reading-backup="deleteReadingBackup"
@@ -849,7 +847,17 @@ function updateRouteView(view) {
 
 function showView(view) {
   if (!legacyViews.some((item) => item.value === view)) return
+  if (view === 'settings') {
+    openGlobalSettings()
+    return
+  }
   activeView.value = view
+}
+
+function openGlobalSettings(event) {
+  event?.preventDefault?.()
+  event?.stopImmediatePropagation?.()
+  router.push({ name: 'Settings' }).catch(() => {})
 }
 
 function hasAcceptedLicense() {
@@ -4302,17 +4310,17 @@ function updateSegmentedIndicators() {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
-.practice-library-open-source #settings-view {
+.practice-library-open-source #reading-preferences-view {
   margin-top: 20px;
 }
 
-.practice-library-open-source #settings-view .hero-settings-group {
+.practice-library-open-source #reading-preferences-view .hero-settings-group {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 20px;
 }
 
-.practice-library-open-source #settings-view .hero-panel {
+.practice-library-open-source #reading-preferences-view .hero-panel {
   position: relative;
   overflow: hidden;
   padding: 32px;
@@ -4325,7 +4333,7 @@ function updateSegmentedIndicators() {
   transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.3s ease, border-color 0.3s ease;
 }
 
-.practice-library-open-source #settings-view .hero-panel:hover {
+.practice-library-open-source #reading-preferences-view .hero-panel:hover {
   transform: translateY(-4px);
   border-color: rgba(255, 255, 255, 0.7);
   box-shadow:
@@ -4333,7 +4341,7 @@ function updateSegmentedIndicators() {
     inset 0 0 0 1px rgba(255, 255, 255, 0.6);
 }
 
-.practice-library-open-source #settings-view .hero-panel::before {
+.practice-library-open-source #reading-preferences-view .hero-panel::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -4347,12 +4355,12 @@ function updateSegmentedIndicators() {
   pointer-events: none;
 }
 
-.practice-library-open-source #settings-view .hero-panel > * {
+.practice-library-open-source #reading-preferences-view .hero-panel > * {
   position: relative;
   z-index: 1;
 }
 
-.practice-library-open-source #settings-view h3 {
+.practice-library-open-source #reading-preferences-view h3 {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -4362,20 +4370,20 @@ function updateSegmentedIndicators() {
   font-weight: 700;
 }
 
-.practice-library-open-source #settings-view .hero-panel__muted {
+.practice-library-open-source #reading-preferences-view .hero-panel__muted {
   margin: 0 0 24px;
   color: var(--bauhaus-text-muted);
   font-size: 0.9rem;
 }
 
-.practice-library-open-source #settings-view .hero-settings-actions {
+.practice-library-open-source #reading-preferences-view .hero-settings-actions {
   display: flex;
   flex-flow: row wrap;
   gap: 12px;
   margin-top: 8px;
 }
 
-.practice-library-open-source #settings-view .hero-settings-actions .btn {
+.practice-library-open-source #reading-preferences-view .hero-settings-actions .btn {
   flex: 1 1 auto;
   min-width: 140px;
   display: flex;
@@ -4383,7 +4391,7 @@ function updateSegmentedIndicators() {
   justify-content: center;
 }
 
-.practice-library-open-source #settings-view .btn {
+.practice-library-open-source #reading-preferences-view .btn {
   position: relative;
   z-index: 1;
   overflow: hidden;
@@ -4396,7 +4404,7 @@ function updateSegmentedIndicators() {
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.practice-library-open-source #settings-view .btn::after {
+.practice-library-open-source #reading-preferences-view .btn::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -4405,63 +4413,61 @@ function updateSegmentedIndicators() {
   transition: opacity 0.3s ease;
 }
 
-.practice-library-open-source #settings-view .btn:hover {
+.practice-library-open-source #reading-preferences-view .btn:hover {
   transform: translateY(-3px) scale(1.02);
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
 }
 
-.practice-library-open-source #settings-view .btn:hover::after {
+.practice-library-open-source #reading-preferences-view .btn:hover::after {
   opacity: 1;
 }
 
-.practice-library-open-source #settings-view #clear-cache-btn {
+.practice-library-open-source #reading-preferences-view #clear-cache-btn {
   color: var(--bauhaus-accent-red);
   background: rgba(255, 255, 255, 0.7);
   border: 1px solid rgba(220, 38, 38, 0.2);
 }
 
-.practice-library-open-source #settings-view #clear-cache-btn:hover {
+.practice-library-open-source #reading-preferences-view #clear-cache-btn:hover {
   color: #fff;
   background: var(--bauhaus-accent-red);
   border-color: transparent;
   box-shadow: 0 12px 24px rgba(220, 38, 38, 0.3);
 }
 
-.practice-library-open-source #settings-view #load-library-btn,
-.practice-library-open-source #settings-view #library-config-btn,
-.practice-library-open-source #settings-view #force-refresh-btn,
-.practice-library-open-source #settings-view #theme-switcher-btn-entry,
-.practice-library-open-source #settings-view #show-onboarding-btn {
+.practice-library-open-source #reading-preferences-view #load-library-btn,
+.practice-library-open-source #reading-preferences-view #library-config-btn,
+.practice-library-open-source #reading-preferences-view #force-refresh-btn,
+.practice-library-open-source #reading-preferences-view #open-global-settings-btn {
   color: var(--bauhaus-text-main);
   background: rgba(255, 255, 255, 0.7);
   border: 1px solid rgba(15, 23, 42, 0.15);
 }
 
-.practice-library-open-source #settings-view #load-library-btn:hover,
-.practice-library-open-source #settings-view #library-config-btn:hover,
-.practice-library-open-source #settings-view #force-refresh-btn:hover,
-.practice-library-open-source #settings-view #theme-switcher-btn-entry:hover,
-.practice-library-open-source #settings-view #show-onboarding-btn:hover {
+.practice-library-open-source #reading-preferences-view #load-library-btn:hover,
+.practice-library-open-source #reading-preferences-view #library-config-btn:hover,
+.practice-library-open-source #reading-preferences-view #force-refresh-btn:hover,
+.practice-library-open-source #reading-preferences-view #open-global-settings-btn:hover {
   color: #fff;
   background: var(--bauhaus-accent-blue);
   border-color: transparent;
   box-shadow: 0 12px 24px rgba(37, 99, 235, 0.3);
 }
 
-.practice-library-open-source #settings-view .data-mgmt-btn {
+.practice-library-open-source #reading-preferences-view .data-mgmt-btn {
   color: var(--bauhaus-accent-dark);
   background: rgba(255, 255, 255, 0.7);
   border: 1px solid rgba(15, 23, 42, 0.15);
 }
 
-.practice-library-open-source #settings-view .data-mgmt-btn:hover {
+.practice-library-open-source #reading-preferences-view .data-mgmt-btn:hover {
   color: #fff;
   background: var(--bauhaus-accent-dark);
   border-color: transparent;
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.25);
 }
 
-.practice-library-open-source #settings-view .settings-file-input {
+.practice-library-open-source #reading-preferences-view .settings-file-input {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -4469,7 +4475,7 @@ function updateSegmentedIndicators() {
   pointer-events: none;
 }
 
-.practice-library-open-source #settings-view .system-info-surface {
+.practice-library-open-source #reading-preferences-view .system-info-surface {
   display: grid;
   gap: 4px;
   margin-top: 15px;
@@ -4483,11 +4489,11 @@ function updateSegmentedIndicators() {
   -webkit-backdrop-filter: blur(12px);
 }
 
-.practice-library-open-source #settings-view .system-info-status {
+.practice-library-open-source #reading-preferences-view .system-info-status {
   color: var(--color-success);
 }
 
-.practice-library-open-source #settings-view .legacy-team-links {
+.practice-library-open-source #reading-preferences-view .legacy-team-links {
   display: block;
   margin-top: 30px;
   padding-top: 20px;
@@ -4495,20 +4501,20 @@ function updateSegmentedIndicators() {
   border-top: 1px solid rgba(255, 255, 255, 0.2);
 }
 
-.practice-library-open-source #settings-view .legacy-team-links a {
+.practice-library-open-source #reading-preferences-view .legacy-team-links a {
   display: block;
   text-decoration: none;
   font-size: 0.9em;
   transition: opacity 0.2s, color 0.3s ease;
 }
 
-.practice-library-open-source #settings-view .hero-settings-links__feedback {
+.practice-library-open-source #reading-preferences-view .hero-settings-links__feedback {
   margin-bottom: 12px;
   color: #ff1c1c;
   font-weight: 700;
 }
 
-.practice-library-open-source #settings-view .hero-settings-links__github {
+.practice-library-open-source #reading-preferences-view .hero-settings-links__github {
   color: gray;
 }
 
@@ -4681,7 +4687,7 @@ function updateSegmentedIndicators() {
     justify-content: flex-start;
   }
 
-  .practice-library-open-source #settings-view .hero-settings-group {
+  .practice-library-open-source #reading-preferences-view .hero-settings-group {
     grid-template-columns: 1fr;
   }
 

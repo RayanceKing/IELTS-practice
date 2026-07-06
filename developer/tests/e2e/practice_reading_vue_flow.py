@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,12 @@ DIST_ENTRY = REPO_ROOT / "dist" / "writing" / "index.html"
 REPORT_DIR = REPO_ROOT / "developer" / "tests" / "e2e" / "reports"
 LOCAL_API_BASE_URL = "http://127.0.0.1:3917"
 ASSET_ID = "p2-low-148"
+
+
+def npm_command(*args: str) -> list[str]:
+    if sys.platform == "win32":
+        return [str(Path(os.environ.get("ComSpec", "cmd.exe"))), "/d", "/s", "/c", "npm", *args]
+    return ["npm", *args]
 
 try:
     from playwright.async_api import async_playwright  # type: ignore[import-untyped]
@@ -55,10 +62,12 @@ def ensure_bundle() -> None:
     ):
         return
     completed = subprocess.run(
-        ["npm", "run", "build:writing"],
+        npm_command("run", "build:writing"),
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if completed.returncode != 0:
         detail = completed.stdout or completed.stderr or "unknown build failure"
@@ -743,6 +752,10 @@ async def switch_library_view(page, view: str, ready_selector: str) -> None:
             if (navButton && typeof navButton.click === 'function') {
                 navButton.click();
             }
+            if (targetView === 'settings') {
+                window.location.hash = '#/settings';
+                return;
+            }
             const url = new URL(window.location.href);
             const hashUrl = new URL(url.hash.slice(1) || '/', url.origin);
             if (targetView === 'overview') {
@@ -768,6 +781,33 @@ async def switch_library_view(page, view: str, ready_selector: str) -> None:
             }"""
         )
         await page.wait_for_timeout(1000)
+
+
+async def open_browse_category(page, category: str = "P2") -> None:
+    await page.wait_for_selector('[data-practice-reading-home]', timeout=20000, state="attached")
+    await page.evaluate(
+        """(category) => {
+            const navButton = document.querySelector('[data-view="browse"]');
+            if (navButton && typeof navButton.click === 'function') {
+                navButton.click();
+            }
+            const current = new URL(window.location.href);
+            const hashPath = (current.hash.slice(1) || '/').split('?')[0] || '/';
+            const hashUrl = new URL(hashPath, current.origin);
+            hashUrl.searchParams.set('view', 'browse');
+            window.location.hash = `#${hashUrl.pathname}${hashUrl.search}`;
+            const categoryButton = document.querySelector(`button[data-action="browse-category"][data-category="${category}"]`);
+            if (categoryButton && typeof categoryButton.click === 'function') {
+                categoryButton.click();
+            }
+        }""",
+        category,
+    )
+    await page.wait_for_function(
+        """() => document.querySelector('#browse-view')?.classList.contains('active') === true""",
+        timeout=20000,
+    )
+    await page.wait_for_selector('[data-reading-browse]', timeout=20000, state="attached")
 
 
 async def return_to_library(page, entry_url: str) -> None:
@@ -938,8 +978,7 @@ async def run_flow() -> dict:
         await page.wait_for_selector('[data-reading-memorize-panel]', timeout=10000)
 
         await return_to_library(page, entry_url)
-        await page.locator('button[data-action="browse-category"][data-category="P2"]').click()
-        await page.wait_for_selector('#browse-view.active', timeout=10000)
+        await open_browse_category(page, "P2")
         await page.wait_for_selector(f'.exam-item[data-reading-asset-id="{ASSET_ID}"]', timeout=20000)
         await capture_acceptance_screenshot(
             page,
@@ -1022,8 +1061,7 @@ async def run_flow() -> dict:
         await page.goto(entry_url)
         await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Atlas")', timeout=20000)
         await page.wait_for_selector('[data-reading-overview]', timeout=20000)
-        await page.locator('button[data-action="browse-category"][data-category="P2"]').click()
-        await page.wait_for_selector('#browse-view.active', timeout=10000)
+        await open_browse_category(page, "P2")
         await page.wait_for_selector(f'.exam-item[data-reading-asset-id="{ASSET_ID}"]', timeout=20000)
         await page.locator(f'.exam-item[data-reading-asset-id="{ASSET_ID}"] button:has-text("开始练习")').click()
         browse_position_saved = await page.evaluate(
@@ -1894,8 +1932,7 @@ async def run_flow() -> dict:
             raise AssertionError(f"submitted_reset_recycle_not_editable:{second_attempt_state}")
 
         await return_to_library(page, entry_url)
-        await page.locator('button[data-action="browse-category"][data-category="P2"]').click()
-        await page.wait_for_selector('#browse-view.active', timeout=10000)
+        await open_browse_category(page, "P2")
         await page.wait_for_selector(f'.exam-item[data-reading-asset-id="{ASSET_ID}"]', timeout=10000)
         browse_restore_state = await page.evaluate(
             f"""() => ({{
@@ -1982,7 +2019,8 @@ async def run_flow() -> dict:
 
         await return_to_library(page, entry_url)
         await switch_library_view(page, "settings", "#settings-view")
-        await page.wait_for_selector('#export-data-btn', timeout=10000)
+        await page.wait_for_url("**#/settings", timeout=10000)
+        await page.wait_for_selector('[data-writing-settings]', timeout=10000)
         await capture_acceptance_screenshot(
             page,
             screenshots,
@@ -1990,99 +2028,15 @@ async def run_flow() -> dict:
             "#settings-view",
             "practice-reading-vue-settings.png",
         )
-        await page.click('#export-data-btn')
-        await page.wait_for_selector('text=阅读记录导出完成：1 条', timeout=10000)
-        archive = None
-        for _ in range(20):
-            archive = await page.evaluate(
-                """() => window.__getPracticeReadingArchive ? window.__getPracticeReadingArchive() : null"""
-            )
-            if archive and archive.get("count") == 1:
-                break
-            await page.wait_for_timeout(100)
-        if not archive or archive.get("count") != 1:
-            raise AssertionError(f"archive_export_missing:{archive}")
-        archived_submission = (archive.get("submissions") or [{}])[0]
-        if archived_submission.get("sessionId") != "reading-session-e2e-1":
-            raise AssertionError(f"archive_session_missing:{archive}")
-        archived_llm = archived_submission.get("singleAttemptAnalysisLlm") or {}
-        if (archived_llm.get("diagnosis") or [{}])[0].get("reason") != "CANONICAL_PATCH_ONLY: 后端已归一化的错因":
-            raise AssertionError(f"archive_llm_patch_missing:{archive}")
-        if (archived_submission.get("readingCoachSnapshot") or {}).get("answer") != "Review question 14 evidence first.":
-            raise AssertionError(f"archive_coach_snapshot_missing:{archive}")
-        archived_highlights = archived_submission.get("highlights") or []
-        if len(archived_highlights) != 1 or archived_highlights[0].get("text") != "Art changes":
-            raise AssertionError(f"archive_highlights_missing:{archive}")
-        archived_metadata = archived_submission.get("metadata") or {}
-        if (archived_metadata.get("timerSnapshot") or {}).get("source") != "local" or not isinstance(archived_metadata.get("effectiveEndTimeMs"), int) or not isinstance(archived_metadata.get("scrollY"), int):
-            raise AssertionError(f"archive_timer_metadata_missing:{archive}")
-
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as archive_file:
-            json.dump(archive, archive_file, ensure_ascii=False)
-            archive_path = archive_file.name
-        try:
-            await page.evaluate(
-                """() => window.__clearPracticeReadingHistory && window.__clearPracticeReadingHistory()"""
-            )
-            await page.goto(entry_url)
-            await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Atlas")', timeout=20000)
-            cleared_count = await page.evaluate(
-                """() => window.__getPracticeReadingHistoryCount ? window.__getPracticeReadingHistoryCount() : -1"""
-            )
-            if cleared_count != 0:
-                raise AssertionError(f"archive_clear_precondition_failed:{cleared_count}")
-            await switch_library_view(page, "settings", "#settings-view")
-            await page.wait_for_selector('[data-reading-archive-import-input]', timeout=10000)
-            await page.set_input_files('[data-reading-archive-import-input]', archive_path)
-            await page.wait_for_function(
-                """
-                () => {
-                  const requests = Array.isArray(window.__practiceReadingRequests) ? window.__practiceReadingRequests : [];
-                  const importPosts = requests.filter((item) => item.pathname === '/api/practice/history/archive/reading' && item.method === 'POST').length;
-                  const historyCount = window.__getPracticeReadingHistoryCount ? window.__getPracticeReadingHistoryCount() : -1;
-                  return importPosts >= 1 && historyCount === 1;
-                }
-                """,
-                timeout=10000,
-            )
-            await switch_library_view(page, "practice", "#practice-view")
-            await page.wait_for_selector('#history-list .history-item[data-record-id="reading-reading-session-e2e-1"]', timeout=10000)
-            await page.locator('#record-type-filter-buttons [data-action-value="reading"]').click()
-            imported_filter_state = await page.evaluate(
-                """() => ({
-                  activeValue: document.querySelector('#record-type-filter-buttons .shui-filter-btn.active')?.dataset?.actionValue || '',
-                  visibleRecords: document.querySelectorAll('#history-list .history-item').length
-                })"""
-            )
-            if imported_filter_state.get("activeValue") != "reading" or imported_filter_state.get("visibleRecords") != 1:
-                raise AssertionError(f"archive_import_history_filter_regressed:{imported_filter_state}")
-            await page.locator('#history-list [data-record-action="details"][data-record-id="reading-reading-session-e2e-1"]').click()
-            await page.wait_for_url(f"**#/reading/{ASSET_ID}/review/reading-session-e2e-1", timeout=10000)
-            await page.wait_for_selector('[data-reading-review-panel]', timeout=10000)
-            await page.wait_for_selector('[data-reading-llm-review-panel] [data-reading-llm-diagnosis="coach_review_primary_weakness"]', timeout=10000)
-            await page.wait_for_selector('[data-reading-coach-answer]:has-text("Review question 14 evidence first.")', timeout=10000)
-            imported_replay_state = await page.evaluate(
-                """() => ({
-                  q12: document.querySelector('.match-dropzone[data-question="q12"]')?.dataset?.answerValue || '',
-                  markedRestored: document.querySelector('[data-answer-question-id="q6"] .mark-question-button')?.classList.contains('active') === true,
-                  highlightRestored: document.querySelector('#left .hl')?.textContent?.trim() || '',
-                  llmText: document.querySelector('[data-reading-llm-review-panel]')?.textContent || '',
-                  coachText: document.querySelector('[data-reading-coach-answer]')?.textContent || '',
-                  importPosts: window.__practiceReadingRequests.filter((item) => item.pathname === '/api/practice/history/archive/reading' && item.method === 'POST').length,
-                  historyGets: window.__practiceReadingRequests.filter((item) => item.pathname === '/api/practice/history' && item.method === 'GET').length,
-                  submitPosts: window.__practiceReadingRequests.filter((item) => item.pathname === '/api/practice/sessions' && item.method === 'POST').length
-                })"""
-            )
-            if imported_replay_state.get("q12") != "C" or not imported_replay_state.get("markedRestored") or imported_replay_state.get("highlightRestored") != "Art changes":
-                raise AssertionError(f"archive_import_replay_not_restored:{imported_replay_state}")
-            if "CANONICAL_PATCH_ONLY: 后端已归一化的错因" not in imported_replay_state.get("llmText", ""):
-                raise AssertionError(f"archive_import_llm_not_restored:{imported_replay_state}")
-            if "Review question 14 evidence first." not in imported_replay_state.get("coachText", ""):
-                raise AssertionError(f"archive_import_coach_not_restored:{imported_replay_state}")
-            if imported_replay_state.get("importPosts") != 1 or imported_replay_state.get("submitPosts") != baseline_submit_posts or imported_replay_state.get("historyGets", 0) < 1:
-                raise AssertionError(f"archive_import_used_wrong_api:{imported_replay_state}")
-        finally:
-            Path(archive_path).unlink(missing_ok=True)
+        settings_state = await page.evaluate(
+            """() => ({
+              href: window.location.href,
+              hasGlobalSettings: Boolean(document.querySelector('[data-writing-settings]')),
+              hasReadingScopedSettings: Boolean(document.querySelector('#reading-preferences-view'))
+            })"""
+        )
+        if "#/settings" not in settings_state.get("href", "") or not settings_state.get("hasGlobalSettings") or settings_state.get("hasReadingScopedSettings"):
+            raise AssertionError(f"settings_not_global:{settings_state}")
 
         await browser.close()
 

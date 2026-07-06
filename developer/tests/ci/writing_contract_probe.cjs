@@ -7,9 +7,13 @@ const { execFileSync } = require('child_process');
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const serverDistRoot = path.join(repoRoot, 'server', 'dist');
+const npmCommand = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'npm';
+const npmArgs = process.platform === 'win32'
+  ? ['/d', '/s', '/c', 'npm', 'run', 'build:server']
+  : ['run', 'build:server'];
 
 function ensureServerBundle() {
-  execFileSync('npm', ['run', 'build:server'], {
+  execFileSync(npmCommand, npmArgs, {
     cwd: repoRoot,
     stdio: 'inherit'
   });

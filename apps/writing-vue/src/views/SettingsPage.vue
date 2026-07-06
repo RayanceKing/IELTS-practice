@@ -1375,6 +1375,7 @@ function downloadJsonFile(filename, payload) {
 function clearAppCache() {
   const removablePrefixes = [
     'evaluation_',
+    'ielts_writing_draft_',
     'writing_draft_',
     'practice_reading_answers_',
     'practice_reading_submission_'

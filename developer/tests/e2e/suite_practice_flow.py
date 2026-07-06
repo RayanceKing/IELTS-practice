@@ -25,6 +25,17 @@ INDEX_URL = f"{INDEX_PATH.as_uri()}?test_env=1"
 REPORT_DIR = REPO_ROOT / "developer" / "tests" / "e2e" / "reports"
 STABLE_SUITE_EXAMS = ["p1-low-67", "p2-low-148", "p3-high-32"]
 
+
+def _configure_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_configure_utf8_stdio()
+
 try:
     from playwright.async_api import (  # type: ignore[import-untyped]
         Browser,

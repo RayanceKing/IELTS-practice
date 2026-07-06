@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from difflib import SequenceMatcher
@@ -20,6 +21,17 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _configure_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_configure_utf8_stdio()
 
 
 class _HTMLDoctypeParser(HTMLParser):
@@ -463,6 +475,8 @@ def _check_generated_reading_js_syntax() -> Tuple[bool, dict]:
                     check=False,
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     timeout=15,
                 )
             except Exception as exc:  # pragma: no cover - defensive guard
@@ -724,6 +738,8 @@ def _run_json_subprocess(
             check=True,
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=timeout,
             env=env,
         )
@@ -753,13 +769,27 @@ def _run_json_subprocess(
     return True, payload
 
 
+def _resolve_command(command: List[str]) -> List[str]:
+    if not command:
+        return command
+    if command[0].lower() == "python3":
+        return [sys.executable, *command[1:]]
+    if os.name == "nt" and command[0].lower() == "npm":
+        npm_cmd = shutil.which("npm.cmd") or shutil.which("npm")
+        if npm_cmd:
+            return [npm_cmd, *command[1:]]
+    return command
+
+
 def _run_command(command: List[str], timeout: int) -> Tuple[bool, str]:
     try:
         completed = subprocess.run(
-            command,
+            _resolve_command(command),
             check=True,
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=timeout,
             cwd=REPO_ROOT,
         )
@@ -1151,6 +1181,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             sanitizer_passed = False
@@ -1192,6 +1224,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1221,6 +1255,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1246,10 +1282,12 @@ def run_checks() -> Tuple[List[dict], bool]:
     if simulation_nb_drag_test.exists():
         try:
             completed_sim_nb_drag = subprocess.run(
-                ["python3", str(simulation_nb_drag_test)],
+                _resolve_command(["python3", str(simulation_nb_drag_test)]),
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=240,
             )
         except subprocess.TimeoutExpired:
@@ -1279,10 +1317,12 @@ def run_checks() -> Tuple[List[dict], bool]:
     if simulation_roundtrip_restore_test.exists():
         try:
             completed_sim_roundtrip_restore = subprocess.run(
-                ["python3", str(simulation_roundtrip_restore_test)],
+                _resolve_command(["python3", str(simulation_roundtrip_restore_test)]),
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=360,
             )
         except subprocess.TimeoutExpired:
@@ -1312,10 +1352,12 @@ def run_checks() -> Tuple[List[dict], bool]:
     if writing_compose_draft_test.exists():
         try:
             completed_writing_compose_draft = subprocess.run(
-                ["python3", str(writing_compose_draft_test)],
+                _resolve_command(["python3", str(writing_compose_draft_test)]),
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=240,
             )
         except subprocess.TimeoutExpired:
@@ -1345,10 +1387,12 @@ def run_checks() -> Tuple[List[dict], bool]:
     if practice_reading_vue_test.exists():
         try:
             completed_practice_reading_vue = subprocess.run(
-                ["python3", str(practice_reading_vue_test)],
+                _resolve_command(["python3", str(practice_reading_vue_test)]),
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=180,
             )
         except subprocess.TimeoutExpired:
@@ -1378,10 +1422,12 @@ def run_checks() -> Tuple[List[dict], bool]:
     if practice_reading_suite_vue_test.exists():
         try:
             completed_practice_reading_suite_vue = subprocess.run(
-                ["python3", str(practice_reading_suite_vue_test)],
+                _resolve_command(["python3", str(practice_reading_suite_vue_test)]),
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=180,
             )
         except subprocess.TimeoutExpired:
@@ -1473,6 +1519,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1502,6 +1550,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1531,6 +1581,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1560,6 +1612,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1589,6 +1643,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1632,6 +1688,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1695,6 +1753,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=120,
             )
         except subprocess.TimeoutExpired:
@@ -1721,6 +1781,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=120,
             )
         except subprocess.TimeoutExpired:
@@ -1807,6 +1869,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1837,6 +1901,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1866,6 +1932,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1895,6 +1963,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1924,6 +1994,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1953,6 +2025,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -1982,6 +2056,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -2011,6 +2087,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -2040,6 +2118,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             output_text = exc.stdout or exc.stderr or str(exc)
@@ -2117,6 +2197,8 @@ def run_checks() -> Tuple[List[dict], bool]:
                     check=True,
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     timeout=30,
                 )
             except subprocess.TimeoutExpired:
@@ -2152,10 +2234,12 @@ def run_checks() -> Tuple[List[dict], bool]:
     if reading_question_audit_script.exists():
         try:
             completed_reading_audit = subprocess.run(
-                ["python3", str(reading_question_audit_script), "--mode", "quick"],
+                _resolve_command(["python3", str(reading_question_audit_script), "--mode", "quick"]),
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=480,
             )
         except subprocess.TimeoutExpired:
@@ -2197,7 +2281,7 @@ def run_checks() -> Tuple[List[dict], bool]:
     pdf_audit_script = REPO_ROOT / "developer" / "tests" / "ci" / "audit_pdf_checklist_and_mona.py"
     if pdf_audit_script.exists():
         pdf_audit_passed, pdf_audit_detail = _run_json_subprocess(
-            ["python3", str(pdf_audit_script)],
+            _resolve_command(["python3", str(pdf_audit_script)]),
             timeout=120,
         )
 
@@ -2210,7 +2294,7 @@ def run_checks() -> Tuple[List[dict], bool]:
     reading_integrity_script = REPO_ROOT / "developer" / "tests" / "ci" / "check_reading_data_integrity.py"
     if reading_integrity_script.exists():
         reading_integrity_passed, reading_integrity_detail = _run_json_subprocess(
-            ["python3", str(reading_integrity_script)],
+            _resolve_command(["python3", str(reading_integrity_script)]),
             timeout=30,
             parse_mode="last-line",
         )
@@ -2226,7 +2310,7 @@ def run_checks() -> Tuple[List[dict], bool]:
         checklist_env = os.environ.copy()
         checklist_env["CHECKLIST_IGNORE_RUN_STATIC_CLAIM"] = "1"
         checklist_consistency_ok, checklist_payload_or_error = _run_json_subprocess(
-            ["python3", str(checklist_consistency_script)],
+            _resolve_command(["python3", str(checklist_consistency_script)]),
             timeout=30,
             env=checklist_env,
         )

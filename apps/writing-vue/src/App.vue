@@ -21,8 +21,6 @@ import ShuiBackground from './components/ShuiBackground.vue'
 
 const route = useRoute()
 const framelessRouteNames = new Set([
-  'PracticeLibrary',
-  'PracticeLibraryAlias',
   'PracticeReading',
   'PracticeReadingSuite',
   'PracticeReadingReview'

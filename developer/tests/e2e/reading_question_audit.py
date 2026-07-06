@@ -29,6 +29,17 @@ EXIT_OK = 0
 EXIT_FAIL = 1
 EXIT_ERROR = 2
 
+
+def _configure_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_configure_utf8_stdio()
+
 try:
     from playwright.async_api import (  # type: ignore[import-untyped]
         Browser,
@@ -105,6 +116,8 @@ def _run_cmd_json(cmd: Sequence[str], cwd: Path = REPO_ROOT) -> Dict[str, Any]:
         cwd=str(cwd),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     if completed.returncode != 0:
@@ -125,6 +138,8 @@ def _run_git_changed_exam_ids() -> Set[str]:
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     if completed.returncode != 0:
