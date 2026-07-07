@@ -1,7 +1,7 @@
 <template>
   <div class="container hero-shell practice-library-legacy practice-library-open-source" data-practice-reading-home>
     <div class="hero-header">
-      <h1 class="hero-brand-title" aria-label="IELTS Atlas">
+      <h1 class="hero-brand-title" aria-label="IELTS Practice">
         <span class="hero-brand-mark" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
             <path d="M4.5 20V8.2a2.7 2.7 0 0 1 2.7-2.7H10"></path>
@@ -11,7 +11,7 @@
             <path d="M9 9.5h1.3M13.7 9.5H15"></path>
           </svg>
         </span>
-        <span class="hero-brand-text">IELTS Atlas</span>
+        <span class="hero-brand-text">IELTS Practice</span>
         <span class="hero-brand-subtitle">项目仅授权ZYZ Reading Walks 提供分发，小红书号：276752989</span>
         <a
           href="https://www.xiaohongshu.com/user/profile/5b4d76744eacab058489e72f"

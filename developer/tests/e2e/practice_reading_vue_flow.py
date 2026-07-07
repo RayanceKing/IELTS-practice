@@ -939,7 +939,7 @@ async def run_flow() -> dict:
         await install_api_stub(page)
 
         await page.goto(entry_url)
-        await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Atlas")', timeout=20000)
+        await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Practice")', timeout=20000)
         await page.wait_for_selector('[data-reading-overview]', timeout=20000)
         await accept_license_modal(page)
         await capture_acceptance_screenshot(
@@ -969,7 +969,7 @@ async def run_flow() -> dict:
             raise AssertionError(f"legacy_memorize_mode_not_rendered:{legacy_memorize_state}")
 
         await page.goto(entry_url)
-        await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Atlas")', timeout=20000)
+        await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Practice")', timeout=20000)
         await page.click('[data-view="more"]')
         await page.wait_for_selector('[data-action="open-reading-memorize"]', timeout=10000)
         await page.click('[data-action="open-reading-memorize"]')
@@ -1043,7 +1043,7 @@ async def run_flow() -> dict:
             raise AssertionError(f"endless_pool_included_pdf_only_asset:{endless_filter_state}")
 
         await page.goto(entry_url)
-        await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Atlas")', timeout=20000)
+        await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Practice")', timeout=20000)
         await page.wait_for_selector('[data-reading-overview]', timeout=20000)
         await page.locator('button[data-action="start-random-practice"][data-category="P2"]').click()
         await page.wait_for_url(f"**#/reading/{ASSET_ID}", timeout=10000)
@@ -1059,7 +1059,7 @@ async def run_flow() -> dict:
             raise AssertionError(f"random_practice_route_failed:{random_route_state}")
 
         await page.goto(entry_url)
-        await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Atlas")', timeout=20000)
+        await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Practice")', timeout=20000)
         await page.wait_for_selector('[data-reading-overview]', timeout=20000)
         await open_browse_category(page, "P2")
         await page.wait_for_selector(f'.exam-item[data-reading-asset-id="{ASSET_ID}"]', timeout=20000)

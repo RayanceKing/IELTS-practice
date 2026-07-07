@@ -46,6 +46,17 @@ BANK_MISSING_TOPIC_TEXT = "Some people think online education platforms should r
 COMPOSE_WAIT_COUNT = 0
 
 
+def configure_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+configure_utf8_stdio()
+
+
 def npm_command(*args: str) -> list[str]:
     if sys.platform == "win32":
         return [str(Path(os.environ.get("ComSpec", "cmd.exe"))), "/d", "/s", "/c", "npm", *args]
@@ -363,7 +374,21 @@ async def install_api_stub(page) -> None:
 async def wait_for_compose(page) -> None:
     global COMPOSE_WAIT_COUNT
     COMPOSE_WAIT_COUNT += 1
-    await page.wait_for_selector('h2:has-text("作文输入")', timeout=20000)
+    try:
+        await page.wait_for_selector('h2:has-text("作文输入")', timeout=20000)
+    except Exception as exc:  # noqa: BLE001
+        state = await page.evaluate(
+            """
+            () => ({
+              url: location.href,
+              title: document.title,
+              navText: document.querySelector('.nav-shell')?.innerText || '',
+              headings: Array.from(document.querySelectorAll('h1, h2')).map((item) => item.textContent.trim()),
+              bodyText: document.body.innerText.slice(0, 800)
+            })
+            """
+        )
+        raise AssertionError(f"compose_heading_not_visible:{COMPOSE_WAIT_COUNT}:{json.dumps(state, ensure_ascii=False)}") from exc
     try:
         await page.wait_for_selector('#custom-topic-text', timeout=20000)
     except Exception as exc:  # noqa: BLE001
@@ -429,10 +454,8 @@ async def assert_writing_top_nav_stays_in_writing_module(page, entry_url: str) -
     await open_compose_entry(page, entry_url)
     await assert_not_reading_home(page, "compose-entry")
 
-    await assert_writing_nav_target(page, "题库", "/topics", ".topic-manage-page")
-    topic_heading = await page.locator(".topic-manage-page .page-title").text_content()
-    if not topic_heading or "Question" not in topic_heading:
-        raise AssertionError(f"writing_topics_heading_mismatch:{topic_heading}")
+    await assert_writing_nav_target(page, "写作", "/writing", ".compose-page")
+    await wait_for_compose(page)
 
     await assert_writing_nav_target(page, "历史", "/history", ".history-page")
     history_heading = await page.locator(".history-page .page-header").text_content()
@@ -444,13 +467,11 @@ async def assert_writing_top_nav_stays_in_writing_module(page, entry_url: str) -
     if settings_panels < 3:
         raise AssertionError(f"writing_settings_three_panel_missing:{settings_panels}")
 
-    await assert_writing_nav_target(page, "练习", "/writing", ".compose-page")
-    await wait_for_compose(page)
-
     await page.click(".brand-block")
-    await page.wait_for_url("**#/writing", timeout=10000)
+    await page.wait_for_url("**#/", timeout=10000)
+    await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Practice")', timeout=20000)
+    await assert_writing_nav_target(page, "写作", "/writing", ".compose-page")
     await wait_for_compose(page)
-    await assert_not_reading_home(page, "brand")
 
 
 async def run_regression() -> dict:
@@ -853,7 +874,7 @@ async def run_regression() -> dict:
             "bankSocietyTopicId": BANK_SOCIETY_TOPIC_ID,
             "missingBankTopicId": BANK_MISSING_TOPIC_ID,
             "startCallCount": 1,
-            "topNavRoutes": ["#/", "#/topics", "#/writing", "#/history", "#/settings"],
+            "topNavRoutes": ["#/", "#/?view=browse", "#/writing", "#/history", "#/settings"],
         },
     }
 

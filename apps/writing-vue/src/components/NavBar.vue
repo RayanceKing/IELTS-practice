@@ -3,16 +3,17 @@
     <div class="nav-inner">
       <router-link to="/" class="brand-block">
         <strong class="brand-title">IELTS Practice</strong>
-        <span class="brand-subtitle">Practice Shell</span>
+        <span class="brand-subtitle">Reading + Writing</span>
       </router-link>
 
       <div class="nav-cluster">
         <div class="nav-links glass-pill">
           <router-link
             v-for="item in navItems"
-            :key="item.to"
+            :key="item.key"
             :to="item.to"
             class="nav-item"
+            :class="{ 'is-active': isNavActive(item) }"
           >
             <span class="nav-label">{{ item.label }}</span>
           </router-link>
@@ -23,13 +24,28 @@
 </template>
 
 <script setup>
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
+
 const navItems = [
-  { to: '/', label: '总览' },
-  { to: '/topics', label: '题库' },
-  { to: '/writing', label: '练习' },
-  { to: '/history', label: '历史' },
-  { to: '/settings', label: '设置' }
+  { key: 'overview', to: '/', label: '总览', path: '/', view: undefined },
+  { key: 'reading', to: { path: '/', query: { view: 'browse' } }, label: '阅读', path: '/', view: 'browse' },
+  { key: 'writing', to: '/writing', label: '写作', path: '/writing' },
+  { key: 'history', to: '/history', label: '历史', path: '/history' },
+  { key: 'settings', to: '/settings', label: '设置', path: '/settings' }
 ]
+
+function firstQueryValue(value) {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function isNavActive(item) {
+  if (route.path !== item.path) return false
+  if (item.path !== '/') return true
+  const view = firstQueryValue(route.query.view)
+  return item.view === undefined ? !view : view === item.view
+}
 </script>
 
 <style scoped>
@@ -105,7 +121,7 @@ const navItems = [
 }
 
 .nav-item:hover,
-.nav-item.router-link-active {
+.nav-item.is-active {
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.58);
   box-shadow: 0 1px 4px rgba(37, 35, 44, 0.08);
