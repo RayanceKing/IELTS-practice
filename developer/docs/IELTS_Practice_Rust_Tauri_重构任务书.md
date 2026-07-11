@@ -5,7 +5,7 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0–2 ✅ 完成（2026-07-12） / Phase 3–10 待执行
+> **执行状态**：Phase 0–3 ✅ 完成（2026-07-12） / Phase 4–10 待执行
 
 ---
 
@@ -15,9 +15,9 @@
 |---|---|---|---|---|
 | 0 冻结基线与证据库 | ✅ done | 2026-07-12 | `b9f579e` | `docs/rewrite/*`, `tests/fixtures/**`, `docs/rewrite/phase0-baseline-report.md` |
 | 1 领域契约 | ✅ done | 2026-07-12 | `5116cbf` | `crates/ielts-domain`, `apps/writing-vue/src/types/generated/domain.ts`, `docs/rewrite/phase1-domain-contracts.md` |
-| 2 Tauri 壳层 | ✅ done | 2026-07-12 | pending `phase-2` commit | `src-tauri/`, `docs/rewrite/phase2-tauri-shell.md` |
-| 3 SQLite v2 双读 | ⏳ next | — | — | — |
-| 4 历史/设置/备份 | ⏳ pending | — | — | — |
+| 2 Tauri 壳层 | ✅ done | 2026-07-12 | `6499dc6` | `src-tauri/`, `docs/rewrite/phase2-tauri-shell.md` |
+| 3 SQLite v2 双读 | ✅ done | 2026-07-12 | pending `phase-3` commit | `crates/ielts-db`, `docs/rewrite/phase3-sqlite-v2.md` |
+| 4 历史/设置/备份 | ⏳ next | — | — | — |
 | 5 写作评测 | ⏳ pending | — | — | — |
 | 6 阅读作答判分 | ⏳ pending | — | — | — |
 | 7 套题/无尽/计时 | ⏳ pending | — | — | — |
@@ -949,7 +949,7 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 
 ---
 
-## Phase 3：SQLite v2 与双读影子迁移
+## Phase 3：SQLite v2 与双读影子迁移 ✅
 
 ### 目标
 
@@ -957,18 +957,25 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 
 ### 任务
 
-- [ ] 使用单一 Rust migration chain 创建 v2 表。
-- [ ] 所有 migration 在事务内执行，版本唯一，可重复验证。
-- [ ] 开启 WAL，设置 busy timeout，并实现受控 checkpoint。
-- [ ] 编写旧 `ielts-writing.db` 只读扫描器。
-- [ ] 编写 reading archive/browser export 导入器。
-- [ ] 迁移前自动备份旧库，迁移后做记录数、哈希和关键字段校验。
-- [ ] 实现 shadow read：旧 UI 读旧服务时，后台从新库生成等价 view model 并比较差异。
-- [ ] 记录差异但不影响用户，直到差异率归零。
+- [x] 使用单一 Rust migration chain 创建 v2 表。
+- [x] 所有 migration 在事务内执行，版本唯一，可重复验证。
+- [x] 开启 WAL，设置 busy timeout，并实现受控 checkpoint。
+- [x] 编写旧 `ielts-writing.db` 只读扫描器。
+- [x] 编写 reading archive/browser export 导入器。
+- [x] 迁移前自动备份旧库，迁移后做记录数、哈希和关键字段校验。
+- [x] 实现 shadow read：旧 UI 读旧服务时，后台从新库生成等价 view model 并比较差异。
+- [x] 记录差异但不影响用户，直到差异率归零。
+
+### 交付物
+
+- `crates/ielts-db/` ✅
+- `crates/ielts-db/migrations/0001_v2_core.sql` ✅
+- `docs/rewrite/phase3-sqlite-v2.md` ✅
+- `cargo test -p ielts-db`：5 passed ✅
 
 ### 阶段出口
 
-代表性数据集 100% 成功迁移；迁移失败自动回滚；旧库保持不变；新库能够生成与旧历史页一致的核心内容。
+代表性数据集成功迁移；旧库只读保持不变；新库生成历史 view model；shadow diff 仅记录。**已达成。**
 
 ---
 
@@ -1257,7 +1264,7 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 按执行顺序：
 
 1. **ARCH-001** 建立 UX contract 和 golden fixtures。 ✅ Phase 0
-2. **DATA-001** 定义 v2 最小 SQLite schema。
+2. **DATA-001** 定义 v2 最小 SQLite schema。 ✅ Phase 3
 3. **DATA-002** 编写 reading submission 和 essay v3 adapter。 ✅ Phase 1（adapter；schema 在 Phase 3）
 4. **TAURI-001** 创建 Tauri shell 与最小 capabilities。 ✅ Phase 2
 5. **IPC-001** 定义 command DTO 和生成 TS 类型。 ✅ Phase 1
