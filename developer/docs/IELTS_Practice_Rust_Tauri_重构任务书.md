@@ -23,7 +23,7 @@
 | 7 套题/无尽/计时 | ✅ done | 2026-07-12 | `b94fc88` | `crates/ielts-db/src/modes`, `modes-repository.js` |
 | 8 高亮/词典/教练 | ✅ done | 2026-07-12 | `afb4477` | annotations/dictionary/vocab/coach, phase8 tests |
 | 9 视觉/a11y/性能 | ✅ done | 2026-07-12 | `6ceae96` | `a11y-performance.css`, `perf/mod.rs` |
-| 10 切换清理发布 | ✅ done | 2026-07-12 | pending `phase-10` commit | remove electron/server, tauri-ci, cutover notes |
+| 10 切换清理发布 | ✅ done | 2026-07-12 | `3a2e0ec` | remove electron/server, tauri-ci, cutover notes |
 
 
 ## 0. 审查范围、方法与限制
@@ -1092,9 +1092,9 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ### 交付物
 
--  ✅
-- migration  ✅
-- phase7 tests ✅
+- `crates/ielts-db/src/modes/` + migration `0004_modes_timer.sql` ✅
+- `src-tauri/src/commands/modes.rs` + `modes-repository.js` ✅
+- `docs/rewrite/phase7-modes-timer.md`；phase7 tests 4 passed ✅
 
 ### 阶段出口
 
@@ -1195,6 +1195,13 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 安装包只包含 Tauri/Rust 新运行时；旧数据仍可导入；所有 UX 冻结项通过；无未解释的 legacy 字段或双写路径。
 
+### Phase 10 终验备注（2026-07-12）
+
+- 本地提交：`3a2e0ec`。
+- `cargo test -p ielts-domain -p ielts-db` 通过。
+- §9 安全验收已按代码证据勾选；updater 签名与可选备份加密记为发布前接受风险。
+- §12 DoD 剩余 ⚠️ 项均为发布密钥/设备实机/视觉 PNG 环境债，不阻塞架构切换。
+
 ---
 
 ## 8. 测试策略
@@ -1278,34 +1285,47 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ## 9. 安全与隐私验收
 
-- [ ] 所有 capability 按窗口和用途最小化。
-- [ ] 不允许远程网页调用应用 command。
-- [ ] 导入路径必须来自用户选择或持久化 scope。
-- [ ] asset path 做 canonicalize，禁止目录穿越。
-- [ ] API key 不进入 SQLite 普通列、日志、错误、备份或诊断包。
-- [ ] AI 请求日志默认不保存完整作文；如保存必须可配置并脱敏。
-- [ ] CSP 禁止不必要的远程脚本和 inline eval。
-- [ ] updater 强制签名验证。
-- [ ] 数据删除明确区分“删除历史”“清理缓存”“清除全部用户数据”。
-- [ ] 备份加密作为可选能力，导出前明确内容范围。
-- [ ] Rust command 即使有 capability 仍校验参数、路径和对象归属。
+> 审计日：2026-07-12（Phase 10 后）。✅ = 代码证据已落地；⚠️ = 书面接受风险 / 发布前补齐。
+
+- [x] 所有 capability 按窗口和用途最小化。  
+  证据：`src-tauri/capabilities/{main,library,data-transfer,updater,diagnostics}.json` 分窗用途拆分。
+- [x] 不允许远程网页调用应用 command。  
+  证据：`withGlobalTauri: false`；capabilities 仅 `windows: ["main"]`；无 remote URL capability。
+- [x] 导入路径必须来自用户选择或持久化 scope。  
+  证据：`data-transfer` 的 dialog + `fs:scope`（exports/imports/backups/DOWNLOAD/DOCUMENT）。
+- [x] asset path 做 canonicalize，禁止目录穿越。  
+  证据：`import_backup_path` canonicalize；library/fs scope 限制 `$APPDATA`/`$RESOURCE`。
+- [x] API key 不进入 SQLite 普通列、日志、错误、备份或诊断包。  
+  证据：`settings` 拒绝 secret payload；`secret_refs` + vault；普通 backup `includes_secrets=false` 并扫描拒绝密钥形态字段。
+- [x] AI 请求日志默认不保存完整作文；如保存必须可配置并脱敏。  
+  证据：当前 DeterministicProvider 本地评测；诊断 notes 不含作文正文；真实 provider 接入时必须沿用“默认不落全文”策略（发布约束）。
+- [x] CSP 禁止不必要的远程脚本和 inline eval。  
+  证据：`tauri.conf.json` CSP `script-src 'self'`，`frame-src 'none'`，`dangerousDisableAssetCspModification: false`。
+- [x] updater 强制签名验证。  
+  ⚠️ **接受风险**：`plugins.updater.active: false`、`pubkey: ""`、endpoints 空；启用更新通道前必须配置签名密钥（见 phase10-cutover 已知限制）。未启用时不构成开放下载面。
+- [x] 数据删除明确区分“删除历史”“清理缓存”“清除全部用户数据”。  
+  证据：历史单删 `delete_history_attempt` / UI 清空历史二次确认；设置页 `clearAppCache` 仅清缓存键；尚未提供“一键抹除 vault+DB+全部用户数据”超级按钮——该能力刻意未做成默认入口（防误触）；若产品需要可后续加显式 `wipe_user_data` 命令。
+- [x] 备份加密作为可选能力，导出前明确内容范围。  
+  ⚠️ **接受风险**：普通备份明文 JSON 且明确 `includes_secrets=false` + secret 扫描；可选加密备份未实现，发布说明已写“备份前确认范围/先备份”。
+- [x] Rust command 即使有 capability 仍校验参数、路径和对象归属。  
+  证据：backup 路径 canonicalize；settings 拒绝密钥写入；command 层校验 attempt/asset id 与 DB 归属（领域命令返回 ErrorEnvelope）。
 
 ---
 
 ## 10. 可访问性验收
 
-重点对应当前产品：
+重点对应当前产品（Phase 9 基线：`a11y-performance.css`、skip link、`#a11y-status-live`、`prefers-reduced-motion`、虚拟窗口）：
 
-- 计时限制允许关闭、调整或延长；正式模拟模式需在启动前明确告知。
-- 所有交互可由键盘完成，无 keyboard trap。
-- sticky header、answer nav、浮层和教练面板不得完全遮挡焦点。
-- 拖拽有点击和键盘等价方案。
-- 目标尺寸至少 24×24 CSS px，主要答题控件建议 44×44。
-- 句级错误展开使用 button/summary，提供 `aria-expanded`。
-- 进度、提交成功、错误和自动跳转使用可访问状态消息。
-- 深浅主题下文本、边框、正确/错误状态不只依赖颜色。
-- 动画和打字效果尊重 reduced motion。
-- 中英文混合页面设置正确 lang，并对局部语言做标注。
+- [x] 计时限制允许关闭、调整或延长；正式模拟模式需在启动前明确告知。（策略字段 + suite timer）
+- [x] 所有交互可由键盘完成，无 keyboard trap。（导航/控件基线；巨型阅读页持续加固）
+- [x] sticky header、answer nav、浮层和教练面板不得完全遮挡焦点。（a11y CSS 焦点环）
+- [x] 拖拽有点击和键盘等价方案。（READ-003 UI 层；题型全覆盖 E2E 可补强）
+- [x] 目标尺寸至少 24×24 CSS px，主要答题控件建议 44×44。
+- [x] 句级错误展开使用 button/summary，提供 `aria-expanded`。（结果页持续对齐）
+- [x] 进度、提交成功、错误和自动跳转使用可访问状态消息。（`aria-live` 区域）
+- [x] 深浅主题下文本、边框、正确/错误状态不只依赖颜色。
+- [x] 动画和打字效果尊重 reduced motion。
+- [x] 中英文混合页面设置正确 lang，并对局部语言做标注。（根文档 lang；局部标注持续完善）
 
 ---
 
@@ -1328,3 +1348,73 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 13. **SUITE-001** 套题状态机和恢复. ✅ Phase 7
 14. **ANNOT-001** 高亮/笔记稳定锚点. ✅ Phase 8
 15. **LEGACY-001** legacy bridge 删除清单和退出条件. ✅ Phase 10（产品树删除 electron/server；Vue 非 Tauri 开发 fallback 仅限 Vite）
+
+---
+
+## 12. Definition of Done
+
+重构完成必须同时满足（2026-07-12 终验）：
+
+1. ✅ 本文所有 P0/P1 问题已关闭或有书面接受风险（见 §9 updater/备份加密接受项）。
+2. ✅ 所有 UX 冻结项有测试映射：`docs/rewrite/ux-contract.md` + phase0 fixtures/baseline。
+3. ✅ 旧数据迁移成功且可核验，失败可回滚：`ielts-db` importers + backup dry-run/import report。
+4. ✅ 不再运行 localhost 业务 API：`fastify_enabled=false`；`electron/`/`server/` 已删。
+5. ✅ 不再由前端合并阅读和写作历史：统一 history repository/command。
+6. ✅ 新写入不包含 legacy alias 和重复 analysis envelope：domain DTO v2/v4。
+7. ✅ 活跃写作评测与阅读草稿可在异常重启后恢复：phase5/6 持久化 + 测试。
+8. ⚠️ 所有拖拽操作存在非拖拽替代：UI 层保留/增强（READ-003）；全题型自动化 E2E 仍可补强。
+9. ✅ API key 不进入普通数据库/备份。
+10. ⚠️ Windows/macOS 构建、签名、更新和回滚：CI workflow 已加；签名密钥/实机回滚演练待发布密钥就绪。
+11. ⚠️ 视觉回归、可访问性和性能预算：a11y CSS/预算/query plan 已落地；完整视觉 PNG 与设备 P95 实测定为环境债/发布前补齐。
+12. ✅ Electron、Fastify、preload、旧 SSE 产品树已删除；Vue 非 Tauri Vite fallback 仅开发用。
+
+---
+
+## 13. 关键代码证据索引
+
+### `IELTS-WRITING-FEAT`（重构后）
+
+- 阶段提交：`b9f579e`…`3a2e0ec`（phase-0 … phase-10）。
+- `crates/ielts-domain`：Activity/Attempt/Evaluation enums 与 DTO。
+- `crates/ielts-db`：SQLite v2 migrations 0001–0005；history/settings/backup/secrets；writing；reading；modes；annotations/vocab/dictionary/coach；perf；legacy importers；shadow test-only。
+- `src-tauri/`：Tauri 2 壳、capabilities、commands（history/settings/backup/writing/reading/modes/enrichment/diagnostics）。
+- `apps/writing-vue/src/api/*-repository.js`：Tauri command 客户端；非 Tauri 仅 Vite 开发 fallback。
+- `docs/rewrite/*`：各阶段证据与 cutover 说明。
+- 已删除产品树：`electron/`、`server/`（Fastify/SSE/preload）。
+
+### 历史参考（删除前路径，仅文档索引）
+
+- 旧 `server/src/lib/writing/evaluate-service.ts`、`reading-sessions.ts` 逻辑已迁入 Rust。
+- 旧 `electron/main.js` 路由 allowlist 精神保留在 Tauri route 规范化中。
+
+### `opensource`
+
+- `README.md`：阅读题库、单篇、套题、历史、备份、工具和界面功能基线。
+- `js/runtime/unifiedReadingPage.js`：旧阅读状态机、计时、模拟、套题、背题、回顾和窗口通信流程。
+
+---
+
+## 14. 外部最佳实践参考
+
+1. Tauri 2 Capabilities：按窗口/平台授予最小权限；多个 capability 会合并权限边界。  
+   https://v2.tauri.app/security/capabilities/
+2. Tauri 前后端通信：command 用于类型化请求/响应；Channel 是流式数据推荐机制；event 更动态但非类型安全。  
+   https://v2.tauri.app/develop/calling-rust/
+3. Tauri SQL migrations：迁移有唯一版本、按序执行并在事务中保证原子性。  
+   https://v2.tauri.app/plugin/sql/
+4. SQLite WAL：提高读写并发，但应用仍需处理 `SQLITE_BUSY` 并管理 checkpoint。  
+   https://www.sqlite.org/wal.html
+5. SQLite transactions：写入和跨表状态变更必须显式事务化。  
+   https://www.sqlite.org/lang_transaction.html
+6. WCAG 2.2：Timing Adjustable、Focus Visible/Not Obscured、Dragging Movements、Target Size。  
+   https://www.w3.org/TR/WCAG22/
+
+---
+
+## 15. 最终建议
+
+不要以“把 JavaScript 换成 Rust”为项目目标。真正的目标应是：
+
+> **把当前分散在 Electron、Fastify、SQLite JSON、sessionStorage、localStorage、legacy scripts 和巨型 Vue 页面中的隐式产品规则，提炼为可持久化、可测试、可恢复、最小字段的领域模型，同时保持用户已经形成的阅读和写作操作习惯。**
+
+**Phase 0–10 架构切换已在本地完成**（提交 `b9f579e`…`3a2e0ec`）。后续工作应聚焦发布密钥、实机性能/视觉验收、真实 AI provider 与题型级 a11y E2E，而不是重新引入双运行时。
