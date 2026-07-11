@@ -67,9 +67,22 @@ pub fn run() {
             commands::settings::delete_secret,
             commands::backup::create_backup,
             commands::backup::import_backup_path,
+            commands::writing::writing_save_draft,
+            commands::writing::writing_get_draft,
+            commands::writing::writing_submit_attempt,
+            commands::writing::writing_start_evaluation,
+            commands::writing::writing_list_evaluation_events,
+            commands::writing::writing_cancel_evaluation,
+            commands::writing::writing_get_evaluation,
         ])
         .setup(|app| {
             let paths = app.state::<app::state::AppPaths>();
+            let db = app.state::<app::state::AppDb>();
+            match db.with_conn(|conn| ielts_db::recover_interrupted_sessions(conn)) {
+                Ok(n) if n > 0 => tracing::warn!(count = n, "marked interrupted evaluation sessions"),
+                Ok(_) => {}
+                Err(err) => tracing::error!(error = %err, "failed to recover evaluation sessions"),
+            }
             tracing::info!(
                 app_data = %paths.app_data.display(),
                 db = %paths.v2_db_path().display(),

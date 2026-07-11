@@ -87,7 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_annotations_asset ON attempt_annotations(asset_id
 
 CREATE TABLE IF NOT EXISTS writing_evaluations (
   id TEXT PRIMARY KEY NOT NULL,
-  attempt_id TEXT NOT NULL UNIQUE,
+  attempt_id TEXT NOT NULL,
   status TEXT NOT NULL,
   stage TEXT NOT NULL,
   provider_id TEXT,
@@ -102,6 +102,9 @@ CREATE TABLE IF NOT EXISTS writing_evaluations (
   updated_at TEXT NOT NULL,
   FOREIGN KEY (attempt_id) REFERENCES attempts(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_writing_evaluations_attempt_updated
+  ON writing_evaluations(attempt_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS reading_suites (
   id TEXT PRIMARY KEY NOT NULL,

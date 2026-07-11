@@ -10,6 +10,7 @@ pub mod migrate;
 pub mod secrets;
 pub mod settings;
 pub mod shadow;
+pub mod writing;
 pub mod sqlite;
 
 pub use backup::*;
@@ -19,4 +20,5 @@ pub use migrate::*;
 pub use secrets::*;
 pub use settings::*;
 pub use shadow::*;
+pub use writing::*;
 pub use sqlite::*;

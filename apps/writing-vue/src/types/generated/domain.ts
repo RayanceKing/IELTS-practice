@@ -328,3 +328,37 @@ export interface CommandResponse<T> {
   error?: ErrorEnvelope
 }
 
+/** Phase 5 — writing evaluation */
+
+export interface SaveDraftCommand {
+  attemptId: string
+  activity: Activity
+  mode: AttemptMode
+  assetId?: string | null
+  contentText?: string | null
+  promptSnapshot?: string | null
+  idempotencyKey: string
+}
+
+export interface SubmitAttemptCommand {
+  attemptId: string
+  idempotencyKey: string
+}
+
+export interface StartEvaluationCommand {
+  attemptId: string
+  idempotencyKey: string
+  taskType?: string | null
+  retryOf?: string | null
+}
+
+export interface EvaluationEvent {
+  evaluationId: string
+  sequence: number
+  revision: number
+  eventType: string
+  stage?: EvaluationStage | null
+  payload: unknown
+  createdAt: string
+}
+

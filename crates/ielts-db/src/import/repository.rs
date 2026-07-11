@@ -133,6 +133,12 @@ pub fn upsert_writing_evaluation(
         .transpose()
         .map_err(|e| DbError::Import(e.to_string()))?;
 
+    // Import path replaces the latest evaluation for this attempt (not all lineage rows).
+    // Multiple evaluations from retry lineage are created by the evaluation service, not import.
+    conn.execute(
+        "DELETE FROM writing_evaluations WHERE attempt_id = ?1",
+        params![attempt_id],
+    )?;
     conn.execute(
         "INSERT INTO writing_evaluations (
             id, attempt_id, status, stage, provider_id, model, rubric_version, prompt_version,
@@ -140,15 +146,7 @@ pub fn upsert_writing_evaluation(
         ) VALUES (
             ?1, ?2, ?3, ?4, NULL, NULL, 'ielts-v1', 'default',
             ?5, ?6, ?7, NULL, NULL, ?8
-        )
-        ON CONFLICT(attempt_id) DO UPDATE SET
-            status=excluded.status,
-            stage=excluded.stage,
-            result_json=excluded.result_json,
-            degradation_json=excluded.degradation_json,
-            error_json=excluded.error_json,
-            updated_at=excluded.updated_at
-        ",
+        )",
         params![
             id,
             attempt_id,

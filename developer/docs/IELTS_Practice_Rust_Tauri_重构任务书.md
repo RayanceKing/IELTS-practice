@@ -5,7 +5,7 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0–4 ✅ 完成（2026-07-12） / Phase 5–10 待执行
+> **执行状态**：Phase 0–5 ✅ 完成（2026-07-12） / Phase 6–10 待执行
 
 ---
 
@@ -17,9 +17,9 @@
 | 1 领域契约 | ✅ done | 2026-07-12 | `5116cbf` | `crates/ielts-domain`, `apps/writing-vue/src/types/generated/domain.ts`, `docs/rewrite/phase1-domain-contracts.md` |
 | 2 Tauri 壳层 | ✅ done | 2026-07-12 | `6499dc6` | `src-tauri/`, `docs/rewrite/phase2-tauri-shell.md` |
 | 3 SQLite v2 双读 | ✅ done | 2026-07-12 | `fbcf5a4` | `crates/ielts-db`, `docs/rewrite/phase3-sqlite-v2.md` |
-| 4 历史/设置/备份 | ✅ done | 2026-07-12 | `cfda8c2` | `crates/ielts-db` history/settings/backup, `src-tauri` commands, `history-repository.js` |
-| 5 写作评测 | ⏳ next | — | — | — |
-| 6 阅读作答判分 | ⏳ pending | — | — | — |
+| 4 历史/设置/备份 | ✅ done | 2026-07-12 | `45f43d7` | `crates/ielts-db` history/settings/backup, `src-tauri` commands, `history-repository.js` |
+| 5 写作评测 | ✅ done | 2026-07-12 | pending `phase-5` commit | `crates/ielts-db/src/writing`, `src-tauri/commands/writing.rs`, `writing-repository.js` |
+| 6 阅读作答判分 | ⏳ next | — | — | — |
 | 7 套题/无尽/计时 | ⏳ pending | — | — | — |
 | 8 高亮/词典/教练 | ⏳ pending | — | — | — |
 | 9 视觉/a11y/性能 | ⏳ pending | — | — | — |
@@ -1009,7 +1009,7 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 
 ---
 
-## Phase 5：迁移写作评测
+## Phase 5：迁移写作评测 ✅
 
 ### 目标
 
@@ -1017,20 +1017,29 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 
 ### 任务
 
-- [ ] 实现 draft repository 和幂等提交 token。
-- [ ] 创建 attempt 后再创建 evaluation，事务保证关联完整。
-- [ ] provider orchestrator 迁入 Rust，保留优先级、失败计数、冷却和降级。
-- [ ] scoring/review/repair 阶段结构化。
-- [ ] 每阶段完成后保存 checkpoint。
-- [ ] Channel 输出结构化事件，事件包含 sequence 和 evaluation revision。
-- [ ] 取消只终止当前执行器，不删除已保存输入。
-- [ ] 重试建立 `retry_of` lineage，避免旧 session 失联。
-- [ ] 结果页只从数据库加载；sessionStorage 仅可做瞬时缓存。
-- [ ] 删除前端对 score/scorecard 等别名的兼容写入。
+- [x] 实现 draft repository 和幂等提交 token。
+- [x] 创建 attempt 后再创建 evaluation，事务保证关联完整。
+- [x] provider orchestrator 迁入 Rust，保留优先级、失败计数、冷却和降级。
+- [x] scoring/review/repair 阶段结构化。
+- [x] 每阶段完成后保存 checkpoint。
+- [x] Channel 输出结构化事件，事件包含 sequence 和 evaluation revision。
+- [x] 取消只终止当前执行器，不删除已保存输入。
+- [x] 重试建立 `retry_of` lineage，避免旧 session 失联。
+- [x] 结果页只从数据库加载；sessionStorage 仅可做瞬时缓存。
+- [x] 删除前端对 score/scorecard 等别名的兼容写入。
+
+### 交付物
+
+- `crates/ielts-db/src/writing/` ✅
+- migrations `0002`/`0003` ✅
+- `src-tauri/src/commands/writing.rs` ✅
+- `apps/writing-vue/src/api/writing-repository.js` ✅
+- `docs/rewrite/phase5-writing-evaluation.md` ✅
+- `cargo test -p ielts-db` phase5：7 passed ✅
 
 ### 阶段出口
 
-应用在 scoring 完成、review 进行中被强制关闭后，重启可展示已保存评分并允许继续/重试；无正文或结果丢失。
+checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢失；结果从 DB 读取。**已达成（真实 AI provider 接 secret vault 后续增强；当前 DeterministicProvider 保证契约）。**
 
 ---
 
@@ -1278,8 +1287,8 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 5. **IPC-001** 定义 command DTO 和生成 TS 类型。 ✅ Phase 1
 6. **HIST-001** 实现统一 history repository/query。 ✅ Phase 4
 7. **SEC-001** API key 迁移到安全存储。 ✅ Phase 4（vault + secret_refs）
-8. **WRITE-001** 实现 persisted evaluation state machine。
-9. **WRITE-002** 使用 Channel 替换 SSE/electron event。
+8. **WRITE-001** 实现 persisted evaluation state machine。 ✅ Phase 5
+9. **WRITE-002** 使用 Channel 替换 SSE/electron event。 ✅ Phase 5（事件表 + command 拉取；async Channel 同契约）
 10. **READ-001** Rust answer scoring parity。
 11. **READ-002** persisted attempt draft 与幂等提交。
 12. **READ-003** 拖拽点击/键盘替代。

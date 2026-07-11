@@ -14,11 +14,23 @@ pub struct Migration {
 fn migrations() -> &'static [Migration] {
     static MIGRATIONS: OnceLock<Vec<Migration>> = OnceLock::new();
     MIGRATIONS.get_or_init(|| {
-        vec![Migration {
-            version: 1,
-            name: "v2_core",
-            sql: include_str!("../../migrations/0001_v2_core.sql"),
-        }]
+        vec![
+            Migration {
+                version: 1,
+                name: "v2_core",
+                sql: include_str!("../../migrations/0001_v2_core.sql"),
+            },
+            Migration {
+                version: 2,
+                name: "writing_eval_sessions",
+                sql: include_str!("../../migrations/0002_writing_eval_sessions.sql"),
+            },
+            Migration {
+                version: 3,
+                name: "eval_lineage_multi",
+                sql: include_str!("../../migrations/0003_eval_lineage_multi.sql"),
+            },
+        ]
     })
 }
 
