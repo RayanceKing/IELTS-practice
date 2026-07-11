@@ -5,7 +5,7 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0 ✅ 完成（2026-07-12） / Phase 1–10 待执行
+> **执行状态**：Phase 0–1 ✅ 完成（2026-07-12） / Phase 2–10 待执行
 
 ---
 
@@ -13,9 +13,9 @@
 
 | Phase | 状态 | 完成日 | 本地提交 | 关键证据 |
 |---|---|---|---|---|
-| 0 冻结基线与证据库 | ✅ done | 2026-07-12 | pending `phase-0` commit | `docs/rewrite/*`, `tests/fixtures/**`, `docs/rewrite/phase0-baseline-report.md` |
-| 1 领域契约 | ⏳ next | — | — | — |
-| 2 Tauri 壳层 | ⏳ pending | — | — | — |
+| 0 冻结基线与证据库 | ✅ done | 2026-07-12 | `b9f579e` | `docs/rewrite/*`, `tests/fixtures/**`, `docs/rewrite/phase0-baseline-report.md` |
+| 1 领域契约 | ✅ done | 2026-07-12 | pending `phase-1` commit | `crates/ielts-domain`, `apps/writing-vue/src/types/generated/domain.ts`, `docs/rewrite/phase1-domain-contracts.md` |
+| 2 Tauri 壳层 | ⏳ next | — | — | — |
 | 3 SQLite v2 双读 | ⏳ pending | — | — | — |
 | 4 历史/设置/备份 | ⏳ pending | — | — | — |
 | 5 写作评测 | ⏳ pending | — | — | — |
@@ -879,7 +879,7 @@ frontend/
 
 ---
 
-## Phase 1：建立新领域契约，不改变现有 UI
+## Phase 1：建立新领域契约，不改变现有 UI ✅
 
 ### 目标
 
@@ -887,17 +887,30 @@ frontend/
 
 ### 任务
 
-- [ ] 定义 `Activity`、`AttemptMode`、`AttemptStatus`、`EvaluationStatus`、`SuiteStatus` Rust enum。
-- [ ] 定义 reading asset v2 和 writing evaluation v4 schema。
-- [ ] 定义统一错误 envelope：code、message、retryable、context、cause_id。
-- [ ] 定义 command DTO 并生成 TypeScript 类型。
-- [ ] 为旧 reading submission、essay evaluation v3 编写纯转换函数。
-- [ ] 禁止新业务代码写 legacy alias。
-- [ ] 为转换器增加 golden tests 和 property tests。
+- [x] 定义 `Activity`、`AttemptMode`、`AttemptStatus`、`EvaluationStatus`、`SuiteStatus` Rust enum。
+- [x] 定义 reading asset v2 和 writing evaluation v4 schema。
+- [x] 定义统一错误 envelope：code、message、retryable、context、cause_id。
+- [x] 定义 command DTO 并生成 TypeScript 类型。
+- [x] 为旧 reading submission、essay evaluation v3 编写纯转换函数。
+- [x] 禁止新业务代码写 legacy alias。
+- [x] 为转换器增加 golden tests 和 property tests。
+
+### 交付物
+
+- `crates/ielts-domain/` ✅
+- `apps/writing-vue/src/types/generated/domain.ts` ✅
+- `docs/rewrite/phase1-domain-contracts.md` ✅
+- `cargo test -p ielts-domain`：7 passed ✅
 
 ### 阶段出口
 
-同一夹具经 old → new → view model 转换后，用户看到的分数、答案、反馈和历史标题完全一致。
+同一夹具经 old → new → view model 转换后，用户看到的分数、答案、反馈和历史标题完全一致。**已达成。**
+
+### Phase 1 备注
+
+- Workspace 根 `Cargo.toml` 已加入 `crates/ielts-domain`。
+- 本阶段不改变现有 Electron/Vue 运行时行为。
+- 新写入禁止 legacy alias；仅 adapter 读取旧字段。
 
 ---
 
@@ -1237,9 +1250,9 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 
 1. **ARCH-001** 建立 UX contract 和 golden fixtures。 ✅ Phase 0
 2. **DATA-001** 定义 v2 最小 SQLite schema。
-3. **DATA-002** 编写 reading submission 和 essay v3 adapter。
+3. **DATA-002** 编写 reading submission 和 essay v3 adapter。 ✅ Phase 1（adapter；schema 在 Phase 3）
 4. **TAURI-001** 创建 Tauri shell 与最小 capabilities。
-5. **IPC-001** 定义 command DTO 和生成 TS 类型。
+5. **IPC-001** 定义 command DTO 和生成 TS 类型。 ✅ Phase 1
 6. **HIST-001** 实现统一 history repository/query。
 7. **SEC-001** API key 迁移到安全存储。
 8. **WRITE-001** 实现 persisted evaluation state machine。

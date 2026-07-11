@@ -97,3 +97,6 @@ node_modules/
 # 日志文件 (electron/utils/logger.js 生成)
 logs/
 *.log
+
+# Rust
+/target/
