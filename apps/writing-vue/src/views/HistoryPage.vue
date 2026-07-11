@@ -492,6 +492,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { essays as essaysApi } from '@/api/client.js'
 import { practiceHistory } from '@/api/practice-client.js'
+import { historyRepository } from '@/api/history-repository.js'
 import RadarChart from '@/components/RadarChart.vue'
 import LineChart from '@/components/LineChart.vue'
 import { debounce } from '@/utils/debounce.js'
@@ -825,35 +826,32 @@ async function loadEssays() {
   }
 
   try {
-    const shouldLoadWriting = shouldLoadWritingHistory(filtersSnapshot)
-    const shouldLoadReading = shouldLoadReadingHistory(filtersSnapshot)
-    const mergedLimit = Math.max(1, paginationSnapshot.page * paginationSnapshot.limit)
-    const [writingResult, readingResult] = await Promise.all([
-      shouldLoadWriting
-        ? essaysApi.list(buildApiFilters(filtersSnapshot), { page: 1, limit: mergedLimit })
-        : Promise.resolve({ data: [], total: 0 }),
-      shouldLoadReading
-        ? practiceHistory.listAll({ activity: 'reading' })
-        : Promise.resolve({ data: [], total: 0 })
-    ])
+    const activity =
+      filtersSnapshot.task_type === 'reading'
+        ? 'reading'
+        : filtersSnapshot.task_type && filtersSnapshot.task_type !== 'reading'
+          ? 'writing'
+          : null
+    const offset = (paginationSnapshot.page - 1) * paginationSnapshot.limit
+    const page = await historyRepository.listHistory({
+      activity,
+      limit: paginationSnapshot.limit,
+      offset,
+      search: filtersSnapshot.search || '',
+      startDate: filtersSnapshot.start_date || '',
+      endDate: filtersSnapshot.end_date || '',
+      minScore: filtersSnapshot.min_score,
+      maxScore: filtersSnapshot.max_score
+    })
     if (!listRequestGate.isCurrent(requestId)) return
 
-    const writingRecords = (Array.isArray(writingResult.data) ? writingResult.data : []).map(normalizeWritingHistoryRecord)
-    const readingRecords = filterReadingHistory(
-      (Array.isArray(readingResult.data) ? readingResult.data : []).map(normalizeReadingHistoryRecord),
-      filtersSnapshot
-    )
-    const combined = [...writingRecords, ...readingRecords].sort(compareHistoryRecords)
-    const writingTotal = shouldLoadWriting ? Number(writingResult.total || writingRecords.length || 0) : 0
-    const readingTotal = shouldLoadReading ? readingRecords.length : 0
-    const offset = (paginationSnapshot.page - 1) * paginationSnapshot.limit
-    essaysList.value = combined.slice(offset, offset + paginationSnapshot.limit)
-    total.value = writingTotal + readingTotal
-    writingHistoryTotal.value = writingTotal
-    readingHistoryTotal.value = readingTotal
+    essaysList.value = page.items || []
+    total.value = Number(page.total || 0)
+    writingHistoryTotal.value = activity === 'reading' ? 0 : total.value
+    readingHistoryTotal.value = activity === 'writing' ? 0 : total.value
     keepVisibleSelections()
     await loadStatistics({
-      totalCount: writingTotal,
+      totalCount: Number(page.total || 0),
       rangeValue: statisticsRange.value,
       parentListRequestId: requestId
     })
@@ -1061,6 +1059,38 @@ function downloadCsvFile(filename, csvContent) {
 
 // 导出CSV
 async function exportCSV() {
+  // Prefer unified repository (single source). Falls through to legacy dual export on failure.
+  try {
+    const filtersSnapshot = { ...filters.value }
+    const activity =
+      filtersSnapshot.task_type === 'reading'
+        ? 'reading'
+        : filtersSnapshot.task_type && filtersSnapshot.task_type !== 'reading'
+          ? 'writing'
+          : null
+    const { result } = await historyRepository.exportHistory('csv', {
+      activity,
+      search: filtersSnapshot.search || '',
+      startDate: filtersSnapshot.start_date || '',
+      endDate: filtersSnapshot.end_date || '',
+      minScore: filtersSnapshot.min_score,
+      maxScore: filtersSnapshot.max_score
+    })
+    if (result?.body) {
+      const blob = new Blob([result.body], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const dateStr = new Date().toISOString().slice(0, 10)
+      a.href = url
+      a.download = `ielts-history-${dateStr}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      return
+    }
+  } catch (err) {
+    console.warn('unified export failed, falling back', err)
+  }
+
   clearPageNotice()
 
   try {

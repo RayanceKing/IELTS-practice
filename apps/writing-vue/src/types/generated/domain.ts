@@ -237,3 +237,94 @@ export function assertNoLegacyEvaluationAliases(payload: Record<string, unknown>
     }
   }
 }
+
+/** Phase 4 — unified history / settings / backup */
+
+export interface ListHistoryQuery {
+  activity?: Activity | null
+  limit?: number
+  offset?: number
+  cursor?: string | null
+  search?: string | null
+  startDate?: string | null
+  endDate?: string | null
+  minScore?: number | null
+  maxScore?: number | null
+}
+
+export interface HistoryListItemVm {
+  id: string
+  activity: Activity
+  title: string
+  status: AttemptStatus
+  mode: AttemptMode
+  submittedAt?: string | null
+  durationMs: number
+  scoreValue?: number | null
+  scoreScale?: ScoreScale | null
+  scoreLabel: string
+  scoreDisplay: string
+}
+
+export interface ListHistoryPage {
+  items: HistoryListItemVm[]
+  total: number
+  limit: number
+  offset: number
+  nextCursor?: string | null
+}
+
+export interface HistoryDetailResponse {
+  summary: HistoryListItemVm
+  attempt: AttemptRecord
+  evaluation?: WritingEvaluationV4 | null
+}
+
+export type HistoryExportFormat = 'csv' | 'markdown' | 'json'
+
+export interface ExportHistoryResult {
+  format: HistoryExportFormat
+  body: string
+  recordCount: number
+}
+
+export interface SettingEntry {
+  namespace: string
+  key: string
+  value: unknown
+  updatedAt: string
+}
+
+export interface SecretRef {
+  name: string
+  refId: string
+  updatedAt: string
+}
+
+export interface BackupManifest {
+  schemaVersion: number
+  createdAt: string
+  appVersion: string
+  includesSecrets: boolean
+  attemptCount: number
+  settingsCount: number
+  secretRefCount: number
+  checksumSha256: string
+}
+
+export interface ImportBackupReport {
+  dryRun: boolean
+  ok: boolean
+  attemptImported: number
+  settingsImported: number
+  secretRefsImported: number
+  errors: string[]
+  warnings: string[]
+}
+
+export interface CommandResponse<T> {
+  ok: boolean
+  data?: T
+  error?: ErrorEnvelope
+}
+

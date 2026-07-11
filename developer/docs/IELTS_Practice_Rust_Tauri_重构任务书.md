@@ -5,7 +5,7 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0–3 ✅ 完成（2026-07-12） / Phase 4–10 待执行
+> **执行状态**：Phase 0–4 ✅ 完成（2026-07-12） / Phase 5–10 待执行
 
 ---
 
@@ -16,9 +16,9 @@
 | 0 冻结基线与证据库 | ✅ done | 2026-07-12 | `b9f579e` | `docs/rewrite/*`, `tests/fixtures/**`, `docs/rewrite/phase0-baseline-report.md` |
 | 1 领域契约 | ✅ done | 2026-07-12 | `5116cbf` | `crates/ielts-domain`, `apps/writing-vue/src/types/generated/domain.ts`, `docs/rewrite/phase1-domain-contracts.md` |
 | 2 Tauri 壳层 | ✅ done | 2026-07-12 | `6499dc6` | `src-tauri/`, `docs/rewrite/phase2-tauri-shell.md` |
-| 3 SQLite v2 双读 | ✅ done | 2026-07-12 | pending `phase-3` commit | `crates/ielts-db`, `docs/rewrite/phase3-sqlite-v2.md` |
-| 4 历史/设置/备份 | ⏳ next | — | — | — |
-| 5 写作评测 | ⏳ pending | — | — | — |
+| 3 SQLite v2 双读 | ✅ done | 2026-07-12 | `fbcf5a4` | `crates/ielts-db`, `docs/rewrite/phase3-sqlite-v2.md` |
+| 4 历史/设置/备份 | ✅ done | 2026-07-12 | `cfda8c2` | `crates/ielts-db` history/settings/backup, `src-tauri` commands, `history-repository.js` |
+| 5 写作评测 | ⏳ next | — | — | — |
 | 6 阅读作答判分 | ⏳ pending | — | — | — |
 | 7 套题/无尽/计时 | ⏳ pending | — | — | — |
 | 8 高亮/词典/教练 | ⏳ pending | — | — | — |
@@ -979,7 +979,7 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 
 ---
 
-## Phase 4：迁移统一历史、设置和备份
+## Phase 4：迁移统一历史、设置和备份 ✅
 
 ### 目标
 
@@ -987,17 +987,25 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 
 ### 任务
 
-- [ ] 实现统一 history command：分页、activity、日期、分数、搜索。
-- [ ] 重写历史页，不再在前端合并两个结果集。
-- [ ] 定义 reading 和 writing 的统一 summary + 类型化 detail。
-- [ ] 实现按 activity 的 CSV/Markdown/JSON 导出模板。
-- [ ] 实现备份 manifest、schema 校验、dry-run 导入和导入报告。
-- [ ] 设置分层并迁移 localStorage 偏好。
-- [ ] API key 转移到 OS keychain/Stronghold；SQLite 仅保留引用。
+- [x] 实现统一 history command：分页、activity、日期、分数、搜索。
+- [x] 重写历史页，不再在前端合并两个结果集。
+- [x] 定义 reading 和 writing 的统一 summary + 类型化 detail。
+- [x] 实现按 activity 的 CSV/Markdown/JSON 导出模板。
+- [x] 实现备份 manifest、schema 校验、dry-run 导入和导入报告。
+- [x] 设置分层并迁移 localStorage 偏好。
+- [x] API key 转移到 OS keychain/Stronghold；SQLite 仅保留引用。
+
+### 交付物
+
+- `crates/ielts-db/src/{history,settings,backup,secrets}` ✅
+- `src-tauri/src/commands/{history,settings,backup}.rs` ✅
+- `apps/writing-vue/src/api/history-repository.js` ✅
+- `docs/rewrite/phase4-history-settings.md` ✅
+- `cargo test -p ielts-db`：phase3 5 + phase4 4 passed ✅
 
 ### 阶段出口
 
-历史页只有一个 repository；全局分页准确；导出后可在空库恢复；普通备份不包含密钥。
+历史页只有一个 repository；全局分页准确；导出后可在空库恢复；普通备份不包含密钥。**已达成（Electron 双源 merge 下沉到 repository fallback，页面不再合并）。**
 
 ---
 
@@ -1268,8 +1276,8 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 3. **DATA-002** 编写 reading submission 和 essay v3 adapter。 ✅ Phase 1（adapter；schema 在 Phase 3）
 4. **TAURI-001** 创建 Tauri shell 与最小 capabilities。 ✅ Phase 2
 5. **IPC-001** 定义 command DTO 和生成 TS 类型。 ✅ Phase 1
-6. **HIST-001** 实现统一 history repository/query。
-7. **SEC-001** API key 迁移到安全存储。
+6. **HIST-001** 实现统一 history repository/query。 ✅ Phase 4
+7. **SEC-001** API key 迁移到安全存储。 ✅ Phase 4（vault + secret_refs）
 8. **WRITE-001** 实现 persisted evaluation state machine。
 9. **WRITE-002** 使用 Channel 替换 SSE/electron event。
 10. **READ-001** Rust answer scoring parity。

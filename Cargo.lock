@@ -1931,7 +1931,9 @@ name = "ielts-practice-tauri"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "ielts-db",
  "ielts-domain",
+ "rusqlite",
  "serde",
  "serde_json",
  "tauri",

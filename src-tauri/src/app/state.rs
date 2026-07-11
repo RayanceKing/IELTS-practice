@@ -1,7 +1,10 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use serde::Serialize;
+
+use ielts_db::{migrate, open_connection, DbOpenOptions, DbResult, SecretVault};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +56,52 @@ impl AppPaths {
         }
         Ok(())
     }
+
+    pub fn v2_db_path(&self) -> PathBuf {
+        self.db_dir.join("ielts-practice-v2.db")
+    }
+
+    pub fn vault_path(&self) -> PathBuf {
+        self.app_data.join("secrets").join("vault.json")
+    }
+}
+
+/// Process-local SQLite handle. Commands take short-lived locks.
+pub struct AppDb {
+    conn: Mutex<rusqlite::Connection>,
+    pub path: PathBuf,
+}
+
+impl AppDb {
+    pub fn open(paths: &AppPaths) -> DbResult<Self> {
+        paths.ensure_layout().map_err(ielts_db::DbError::Io)?;
+        let path = paths.v2_db_path();
+        let mut conn = open_connection(&DbOpenOptions::create(&path))?;
+        migrate(&mut conn)?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+            path,
+        })
+    }
+
+    pub fn with_conn<T>(
+        &self,
+        f: impl FnOnce(&rusqlite::Connection) -> DbResult<T>,
+    ) -> DbResult<T> {
+        let guard = self
+            .conn
+            .lock()
+            .map_err(|_| ielts_db::DbError::Message("db lock poisoned".into()))?;
+        f(&guard)
+    }
+}
+
+pub struct AppVault(pub SecretVault);
+
+impl AppVault {
+    pub fn open(paths: &AppPaths) -> DbResult<Self> {
+        Ok(Self(SecretVault::open(paths.vault_path())?))
+    }
 }
 
 fn default_app_data_dir() -> PathBuf {
@@ -85,7 +134,6 @@ pub fn discover_legacy_dirs() -> Vec<PathBuf> {
         push_if_exists(base.join("IELTS Practice"));
         push_if_exists(base.join("ielts-practice"));
         push_if_exists(base.join("ielts-writing"));
-        // electron-builder default style
         push_if_exists(base.join("ielts-practice-app"));
     }
 
