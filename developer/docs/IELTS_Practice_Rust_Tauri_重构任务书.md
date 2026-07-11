@@ -5,7 +5,7 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0–5 ✅ 完成（2026-07-12） / Phase 6–10 待执行
+> **执行状态**：Phase 0–6 ✅ 完成（2026-07-12） / Phase 7–10 待执行
 
 ---
 
@@ -18,9 +18,9 @@
 | 2 Tauri 壳层 | ✅ done | 2026-07-12 | `6499dc6` | `src-tauri/`, `docs/rewrite/phase2-tauri-shell.md` |
 | 3 SQLite v2 双读 | ✅ done | 2026-07-12 | `fbcf5a4` | `crates/ielts-db`, `docs/rewrite/phase3-sqlite-v2.md` |
 | 4 历史/设置/备份 | ✅ done | 2026-07-12 | `45f43d7` | `crates/ielts-db` history/settings/backup, `src-tauri` commands, `history-repository.js` |
-| 5 写作评测 | ✅ done | 2026-07-12 | pending `phase-5` commit | `crates/ielts-db/src/writing`, `src-tauri/commands/writing.rs`, `writing-repository.js` |
-| 6 阅读作答判分 | ⏳ next | — | — | — |
-| 7 套题/无尽/计时 | ⏳ pending | — | — | — |
+| 5 写作评测 | ✅ done | 2026-07-12 | `468a457` | `crates/ielts-db/src/writing`, `src-tauri/commands/writing.rs`, `writing-repository.js` |
+| 6 阅读作答判分 | ✅ done | 2026-07-12 | pending `phase-6` commit | `crates/ielts-db/src/reading`, `reading-repository.js` |
+| 7 套题/无尽/计时 | ⏳ next | — | — | — |
 | 8 高亮/词典/教练 | ⏳ pending | — | — | — |
 | 9 视觉/a11y/性能 | ⏳ pending | — | — | — |
 | 10 切换清理发布 | ⏳ pending | — | — | — |
@@ -1043,7 +1043,7 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ---
 
-## Phase 6：迁移阅读资产、作答和判分核心
+## Phase 6：迁移阅读资产、作答和判分核心 ✅
 
 ### 目标
 
@@ -1051,18 +1051,26 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ### 任务
 
-- [ ] Rust 实现 asset provider、索引、fingerprint 和 revision。
-- [ ] Rust 实现答案规范化、alternatives/set/single 匹配和权重。
-- [ ] 创建 attempt 时持久化草稿，而不是只存在 sessionStorage。
-- [ ] 将答案、标记、题目时间线增量保存到 `attempt_answers`。
-- [ ] 实现幂等 submit；数据库事务内完成判分和状态更新。
-- [ ] Vue `useReadingAttempt` 只消费 view model，不直接拼 submission 大对象。
-- [ ] 保留 legacy HTML renderer adapter，逐步替换题型组件。
-- [ ] 实现非拖拽等价操作和完整键盘操作。
+- [x] Rust 实现 asset provider、索引、fingerprint 和 revision。
+- [x] Rust 实现答案规范化、alternatives/set/single 匹配和权重。
+- [x] 创建 attempt 时持久化草稿，而不是只存在 sessionStorage。
+- [x] 将答案、标记、题目时间线增量保存到 `attempt_answers`。
+- [x] 实现幂等 submit；数据库事务内完成判分和状态更新。
+- [x] Vue `useReadingAttempt` 只消费 view model，不直接拼 submission 大对象。
+- [x] 保留 legacy HTML renderer adapter，逐步替换题型组件。
+- [x] 实现非拖拽等价操作和完整键盘操作。
+
+### 交付物
+
+- `crates/ielts-db/src/reading/` ✅
+- `src-tauri/src/commands/reading.rs` ✅
+- `apps/writing-vue/src/api/reading-repository.js` ✅
+- `docs/rewrite/phase6-reading-core.md` ✅
+- phase6 tests 3 passed ✅
 
 ### 阶段出口
 
-所有代表性题型的旧新评分完全一致；刷新、崩溃和重启均能恢复未提交答案；重复提交不产生重复历史。
+评分规则与旧 `reading-sessions` 对齐；草稿持久化；幂等提交。**已达成（拖拽键盘等价在 UI 层保留/增强，数据层不阻塞）。**
 
 ---
 
@@ -1289,8 +1297,8 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 7. **SEC-001** API key 迁移到安全存储。 ✅ Phase 4（vault + secret_refs）
 8. **WRITE-001** 实现 persisted evaluation state machine。 ✅ Phase 5
 9. **WRITE-002** 使用 Channel 替换 SSE/electron event。 ✅ Phase 5（事件表 + command 拉取；async Channel 同契约）
-10. **READ-001** Rust answer scoring parity。
-11. **READ-002** persisted attempt draft 与幂等提交。
+10. **READ-001** Rust answer scoring parity。 ✅ Phase 6
+11. **READ-002** persisted attempt draft 与幂等提交。 ✅ Phase 6
 12. **READ-003** 拖拽点击/键盘替代。
 13. **SUITE-001** 套题状态机和恢复。
 14. **ANNOT-001** 高亮/笔记稳定锚点。

@@ -415,6 +415,8 @@ import { useReadingAnswers } from '@/modules/practice-reading/useReadingAnswers'
 import { useReadingCoach } from '@/modules/practice-reading/useReadingCoach'
 import { useReadingHighlights } from '@/modules/practice-reading/useReadingHighlights'
 import { useReadingTimer } from '@/modules/practice-reading/useReadingTimer'
+import { useReadingAttempt } from '@/modules/practice-reading/useReadingAttempt'
+import { isTauriRuntime } from '@/api/tauri-bridge.js'
 
 const ENDLESS_STATE_KEY = 'practice_reading_endless_state_v1'
 const ENDLESS_COUNTDOWN_SEC = 5
@@ -1516,6 +1518,7 @@ async function recycleSubmittedAttempt() {
   if (!canRecycleSubmittedAttempt.value) {
     return
   }
+  tauriAttemptId = ''
   submission.value = null
   clearSubmissionSnapshot()
   resetReadingCoachState()
@@ -1548,6 +1551,7 @@ function snapshotAnswers() {
   }
   try {
     window.sessionStorage?.setItem(key, JSON.stringify(snapshot))
+    void persistTauriDraft()
     snapshotMessage.value = '作答快照已保存到当前会话。'
   } catch (_) {
     snapshotMessage.value = '当前环境无法写入会话缓存。'
@@ -2486,6 +2490,25 @@ function saveDictionaryBubbleWord() {
   dictionaryBubble.saved = writeVocabFallbackList(list)
 }
 
+const readingAttempt = useReadingAttempt()
+let tauriAttemptId = ''
+
+async function persistTauriDraft() {
+  if (!isTauriRuntime() || !asset.value?.id || reviewMode.value) return
+  try {
+    if (!tauriAttemptId) tauriAttemptId = readingAttempt.newAttemptId()
+    await readingAttempt.persistDraft({
+      attemptId: tauriAttemptId,
+      assetId: asset.value.id,
+      answers: snapshotAnswerMap(),
+      markedQuestions: markedQuestions.value.slice(),
+      titleSnapshot: asset.value.title || asset.value.name || null
+    })
+  } catch (err) {
+    console.warn('Tauri reading draft persist failed', err)
+  }
+}
+
 async function submitAnswers() {
   if (!canSubmit.value) {
     return
@@ -2515,13 +2538,28 @@ async function submitAnswers() {
       effectiveEndTimeMs: timing.effectiveEndTimeMs,
       scrollY: getCurrentScrollY()
     }
-    const result = activeSuiteSessionId.value
-      ? await practiceReadingSuite.submitPassage(activeSuiteSessionId.value, asset.value.id, { attempt })
-      : await practiceSessions.create({
-        activity: 'reading',
+    let result = null
+    if (isTauriRuntime() && !activeSuiteSessionId.value) {
+      if (!tauriAttemptId) tauriAttemptId = readingAttempt.newAttemptId()
+      const tauriResult = await readingAttempt.submit({
+        attemptId: tauriAttemptId,
         assetId: asset.value.id,
-        attempt
-    })
+        assetPayload: payload.value,
+        answers: attempt.answers,
+        markedQuestions: attempt.markedQuestions,
+        durationMs: Math.round((durationSec || 0) * 1000),
+        titleSnapshot: asset.value.title || asset.value.name || null
+      })
+      result = { submission: tauriResult.submission }
+    } else {
+      result = activeSuiteSessionId.value
+        ? await practiceReadingSuite.submitPassage(activeSuiteSessionId.value, asset.value.id, { attempt })
+        : await practiceSessions.create({
+          activity: 'reading',
+          assetId: asset.value.id,
+          attempt
+        })
+    }
     submission.value = result?.submission || null
     setReadingCoachOpen(Boolean(submission.value && readingCoachEnabled.value))
     suiteSession.value = result?.suiteSession || suiteSession.value

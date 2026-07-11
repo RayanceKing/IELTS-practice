@@ -74,6 +74,10 @@ pub fn run() {
             commands::writing::writing_list_evaluation_events,
             commands::writing::writing_cancel_evaluation,
             commands::writing::writing_get_evaluation,
+            commands::reading::reading_list_assets,
+            commands::reading::reading_save_draft,
+            commands::reading::reading_patch_answer,
+            commands::reading::reading_submit_attempt,
         ])
         .setup(|app| {
             let paths = app.state::<app::state::AppPaths>();
