@@ -6,3 +6,4 @@ pub mod routes;
 pub mod settings;
 pub mod writing;
 pub mod reading;
+pub mod modes;

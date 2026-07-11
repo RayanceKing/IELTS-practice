@@ -30,6 +30,11 @@ fn migrations() -> &'static [Migration] {
                 name: "eval_lineage_multi",
                 sql: include_str!("../../migrations/0003_eval_lineage_multi.sql"),
             },
+            Migration {
+                version: 4,
+                name: "modes_timer",
+                sql: include_str!("../../migrations/0004_modes_timer.sql"),
+            },
         ]
     })
 }

@@ -27,7 +27,7 @@ fn migration_applies_and_is_idempotent() {
     let version: i64 = conn
         .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn migrate_function_transactional_versions() {
     let path = dir.path().join("m.db");
     let mut conn = open_connection(&DbOpenOptions::create(path)).unwrap();
     let applied = migrate(&mut conn).unwrap();
-    assert_eq!(applied, vec![1, 2, 3]);
+    assert_eq!(applied, vec![1, 2, 3, 4]);
     let applied_again = migrate(&mut conn).unwrap();
     assert!(applied_again.is_empty());
 }

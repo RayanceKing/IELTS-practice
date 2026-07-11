@@ -42,6 +42,9 @@ fn build_where(filter: &HistoryFilter) -> (String, Vec<Box<dyn ToSql>>) {
     let mut clauses: Vec<String> = Vec::new();
     let mut binds: Vec<Box<dyn ToSql>> = Vec::new();
 
+    // Memorize attempts are temporary read-only sessions; never list in normal history.
+    clauses.push("mode != 'memorize'".into());
+
     if let Some(activity) = filter.activity {
         clauses.push("activity = ?".into());
         binds.push(Box::new(activity_str(activity).to_string()));

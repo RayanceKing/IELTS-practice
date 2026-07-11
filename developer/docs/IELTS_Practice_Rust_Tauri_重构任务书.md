@@ -5,7 +5,7 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0–6 ✅ 完成（2026-07-12） / Phase 7–10 待执行
+> **执行状态**：Phase 0–7 ✅ 完成（2026-07-12） / Phase 8–10 待执行
 
 ---
 
@@ -19,8 +19,8 @@
 | 3 SQLite v2 双读 | ✅ done | 2026-07-12 | `fbcf5a4` | `crates/ielts-db`, `docs/rewrite/phase3-sqlite-v2.md` |
 | 4 历史/设置/备份 | ✅ done | 2026-07-12 | `45f43d7` | `crates/ielts-db` history/settings/backup, `src-tauri` commands, `history-repository.js` |
 | 5 写作评测 | ✅ done | 2026-07-12 | `468a457` | `crates/ielts-db/src/writing`, `src-tauri/commands/writing.rs`, `writing-repository.js` |
-| 6 阅读作答判分 | ✅ done | 2026-07-12 | pending `phase-6` commit | `crates/ielts-db/src/reading`, `reading-repository.js` |
-| 7 套题/无尽/计时 | ⏳ next | — | — | — |
+| 6 阅读作答判分 | ✅ done | 2026-07-12 | `6fbaac3` | `crates/ielts-db/src/reading`, `reading-repository.js` |
+| 7 套题/无尽/计时 | ✅ done | 2026-07-12 | pending `phase-7` commit | `crates/ielts-db/src/modes`, `modes-repository.js` |
 | 8 高亮/词典/教练 | ⏳ pending | — | — | — |
 | 9 视觉/a11y/性能 | ⏳ pending | — | — | — |
 | 10 切换清理发布 | ⏳ pending | — | — | — |
@@ -1074,7 +1074,7 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ---
 
-## Phase 7：迁移套题、无尽、背题和计时
+## Phase 7：迁移套题、无尽、背题和计时 ✅
 
 ### 目标
 
@@ -1082,13 +1082,19 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ### 任务
 
-- [ ] 套题 creation、sequence、current item 和 aggregate 迁入 Rust。
-- [ ] 计时器保存 anchor、paused total、limit 和 policy；显示值由前端计算。
-- [ ] simulation/classic/stationary 明确定义状态转移表。
-- [ ] 无尽模式保存当前池策略和 current attempt，资源池动态过滤。
-- [ ] 背题模式使用临时只读 attempt，不进入普通历史。
-- [ ] 到时 auto-submit 必须使用同一幂等提交命令。
-- [ ] 实现恢复测试：每个状态节点强制退出并重启。
+- [x] 套题 creation、sequence、current item 和 aggregate 迁入 Rust。
+- [x] 计时器保存 anchor、paused total、limit 和 policy；显示值由前端计算。
+- [x] simulation/classic/stationary 明确定义状态转移表。
+- [x] 无尽模式保存当前池策略和 current attempt，资源池动态过滤。
+- [x] 背题模式使用临时只读 attempt，不进入普通历史。
+- [x] 到时 auto-submit 必须使用同一幂等提交命令。
+- [x] 实现恢复测试：每个状态节点强制退出并重启。
+
+### 交付物
+
+-  ✅
+- migration  ✅
+- phase7 tests ✅
 
 ### 阶段出口
 

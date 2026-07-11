@@ -417,6 +417,7 @@ import { useReadingHighlights } from '@/modules/practice-reading/useReadingHighl
 import { useReadingTimer } from '@/modules/practice-reading/useReadingTimer'
 import { useReadingAttempt } from '@/modules/practice-reading/useReadingAttempt'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
+import { submitSuitePassage as tauriSubmitSuitePassage } from '@/api/modes-repository.js'
 
 const ENDLESS_STATE_KEY = 'practice_reading_endless_state_v1'
 const ENDLESS_COUNTDOWN_SEC = 5
@@ -2539,7 +2540,53 @@ async function submitAnswers() {
       scrollY: getCurrentScrollY()
     }
     let result = null
-    if (isTauriRuntime() && !activeSuiteSessionId.value) {
+    if (isTauriRuntime() && activeSuiteSessionId.value) {
+      const suiteResult = await tauriSubmitSuitePassage({
+        suiteId: activeSuiteSessionId.value,
+        assetId: asset.value.id,
+        assetPayload: payload.value,
+        answers: attempt.answers,
+        markedQuestions: attempt.markedQuestions,
+        durationMs: Math.round((durationSec || 0) * 1000),
+        titleSnapshot: asset.value.title || asset.value.name || null,
+        timerSnapshot: attempt.timerSnapshot || null
+      })
+      const rawSub = suiteResult.result && suiteResult.result.submission
+      const submission = rawSub
+        ? {
+            sessionId: rawSub.attempt && rawSub.attempt.id,
+            attemptId: rawSub.attempt && rawSub.attempt.id,
+            assetId: asset.value.id,
+            activity: 'reading',
+            status: 'submitted',
+            score: rawSub.score && rawSub.score.accuracy,
+            correctCount: rawSub.score && rawSub.score.correct,
+            questionCount: rawSub.score && rawSub.score.total,
+            percentage: rawSub.score && rawSub.score.percentage,
+            duration: Math.round((durationSec || 0)),
+            answers: attempt.answers,
+            markedQuestions: attempt.markedQuestions,
+            answerComparison: Object.fromEntries(
+              (rawSub.comparisons || []).map((entry) => [
+                entry.questionId,
+                {
+                  questionId: entry.questionId,
+                  userAnswer: entry.userAnswer,
+                  correctAnswer: entry.correctAnswer,
+                  isCorrect: entry.isCorrect,
+                  weight: entry.weight,
+                  matchMode: entry.matchMode
+                }
+              ])
+            ),
+            source: 'tauri'
+          }
+        : null
+      result = {
+        submission,
+        suiteSession: (suiteResult.result && suiteResult.result.suiteSession) || null
+      }
+    } else if (isTauriRuntime()) {
       if (!tauriAttemptId) tauriAttemptId = readingAttempt.newAttemptId()
       const tauriResult = await readingAttempt.submit({
         attemptId: tauriAttemptId,

@@ -78,6 +78,18 @@ pub fn run() {
             commands::reading::reading_save_draft,
             commands::reading::reading_patch_answer,
             commands::reading::reading_submit_attempt,
+            commands::modes::suite_create,
+            commands::modes::suite_get,
+            commands::modes::suite_submit_passage,
+            commands::modes::suite_cancel,
+            commands::modes::endless_create,
+            commands::modes::endless_get,
+            commands::modes::endless_advance,
+            commands::modes::endless_submit,
+            commands::modes::memorize_create,
+            commands::modes::memorize_finish,
+            commands::modes::timer_elapsed_seconds,
+            commands::modes::timer_should_auto_submit,
         ])
         .setup(|app| {
             let paths = app.state::<app::state::AppPaths>();
