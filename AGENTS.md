@@ -1,9 +1,12 @@
 # IELTS Practice Repository Guide
 
 ## Component map
-- **`index.html`** – main renderer entry for the packaged Electron IELTS client.
-- **`js/`** – application logic (state management, recommendation engine, UI controllers).  Module naming follows feature-based folders.
-- **`css/`** – theme and layout styles for all public pages.
+- **`src-tauri/`** – Tauri 2 host (commands, capabilities, app shell).
+- **`crates/ielts-domain`**, **`crates/ielts-db`** – domain contracts and SQLite v2 persistence.
+- **`apps/writing-vue/`** – Vue UI (reading + writing practice shell).
+- **`index.html`** – legacy static entry retained for non-shipping tooling only.
+- **`js/`** – legacy application logic folders (historical; not the Tauri product path).
+- **`css/`** – theme and layout styles for public pages.
 - **`templates/`** – HTML shells for alternative themes and experimental layouts.
 - **`assets/`** – static data and media resources.
   - **`developer/doc/Wiki/`** – curated wiki pages describing feature specs and historical decisions.
@@ -86,4 +89,4 @@ Before starting any task, carefully examine the following five layers of questio
 
 Adhere to this playbook for every directory under the repository root.
 
-The product target is the packaged Electron desktop client. Prefer solutions that align with Electron renderer/main/server architecture rather than preserving legacy `file://` compatibility hacks.
+The product target is the packaged **Tauri 2** desktop client (Phase 10 cutover). Electron/Fastify are removed from the shipping tree. Prefer solutions that align with Tauri command/capability + Rust domain/SQLite architecture rather than preserving Electron/Fastify or legacy `file://` compatibility hacks.

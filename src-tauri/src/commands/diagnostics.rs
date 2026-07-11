@@ -53,9 +53,10 @@ pub fn get_startup_diagnostics(paths: State<'_, AppPaths>) -> StartupDiagnostics
             .collect(),
         fastify_enabled: false,
         notes: vec![
-            "Phase 2 shell: Vue UI only; domain services not fully migrated.".into(),
+            "Phase 10 cutover: Tauri/Rust is the only shipping runtime.".into(),
             "No localhost Fastify business API is started.".into(),
-            "User database migration is deferred to Phase 3.".into(),
+            "SQLite v2 is primary store; legacy importers remain for one-shot migration.".into(),
+            "Shadow dual-read is test-only; production path is single-source.".into(),
             "Updater plugin is present; endpoints/pubkey inactive until release signing.".into(),
         ],
     }

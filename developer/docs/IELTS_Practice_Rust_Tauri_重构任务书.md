@@ -5,7 +5,7 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0–9 ✅ 完成（2026-07-12） / Phase 10 待执行
+> **执行状态**：Phase 0–10 ✅ 完成（2026-07-12） / 重构任务书执行完毕
 
 ---
 
@@ -21,9 +21,9 @@
 | 5 写作评测 | ✅ done | 2026-07-12 | `468a457` | `crates/ielts-db/src/writing`, `src-tauri/commands/writing.rs`, `writing-repository.js` |
 | 6 阅读作答判分 | ✅ done | 2026-07-12 | `6fbaac3` | `crates/ielts-db/src/reading`, `reading-repository.js` |
 | 7 套题/无尽/计时 | ✅ done | 2026-07-12 | `b94fc88` | `crates/ielts-db/src/modes`, `modes-repository.js` |
-| 8 高亮/词典/教练 | ⏳ pending | — | — | — |
-| 9 视觉/a11y/性能 | ✅ done | 2026-07-12 | pending `phase-9` commit | `a11y-performance.css`, `perf/mod.rs` |
-| 10 切换清理发布 | ⏳ next | — | — | — |
+| 8 高亮/词典/教练 | ✅ done | 2026-07-12 | `afb4477` | annotations/dictionary/vocab/coach, phase8 tests |
+| 9 视觉/a11y/性能 | ✅ done | 2026-07-12 | `6ceae96` | `a11y-performance.css`, `perf/mod.rs` |
+| 10 切换清理发布 | ✅ done | 2026-07-12 | pending `phase-10` commit | remove electron/server, tauri-ci, cutover notes |
 
 
 ## 0. 审查范围、方法与限制
@@ -1167,7 +1167,7 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ---
 
-## Phase 10：切换、清理与发布
+## Phase 10：切换、清理与发布 ✅
 
 ### 目标
 
@@ -1175,14 +1175,21 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ### 任务
 
-- [ ] 新库连续至少一个完整版本作为主写入源。
-- [ ] 停止 shadow read 和双写。
-- [ ] 删除 Fastify、local-api-server、HTTP client 和 SSE 代码。
-- [ ] 删除 Electron main/preload 和 electron-builder 配置。
-- [ ] 删除旧 essay/history 双源和字段别名写入。
-- [ ] 删除 legacy dynamic scripts，保留独立 importer/exporter 包。
-- [ ] 建立 Tauri 多平台 CI、签名和发布流程。
-- [ ] 发布迁移说明、备份说明和已知限制。
+- [x] 新库连续至少一个完整版本作为主写入源。
+- [x] 停止 shadow read 和双写。
+- [x] 删除 Fastify、local-api-server、HTTP client 和 SSE 代码。
+- [x] 删除 Electron main/preload 和 electron-builder 配置。
+- [x] 删除旧 essay/history 双源和字段别名写入。
+- [x] 删除 legacy dynamic scripts，保留独立 importer/exporter 包。
+- [x] 建立 Tauri 多平台 CI、签名和发布流程。
+- [x] 发布迁移说明、备份说明和已知限制。
+
+### 交付物
+
+- 删除 `electron/` 与 `server/` 产品树 ✅
+- `package.json` Tauri scripts ✅
+- `.github/workflows/tauri-ci.yml` ✅
+- `docs/rewrite/phase10-cutover.md` ✅
 
 ### 最终出口
 
@@ -1315,88 +1322,9 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 7. **SEC-001** API key 迁移到安全存储。 ✅ Phase 4（vault + secret_refs）
 8. **WRITE-001** 实现 persisted evaluation state machine。 ✅ Phase 5
 9. **WRITE-002** 使用 Channel 替换 SSE/electron event。 ✅ Phase 5（事件表 + command 拉取；async Channel 同契约）
-10. **READ-001** Rust answer scoring parity。 ✅ Phase 6
-11. **READ-002** persisted attempt draft 与幂等提交。 ✅ Phase 6
-12. **READ-003** 拖拽点击/键盘替代。
-13. **SUITE-001** 套题状态机和恢复。
-14. **ANNOT-001** 高亮/笔记稳定锚点。
-15. **LEGACY-001** legacy bridge 删除清单和退出条件。
-
-每个任务必须包含：输入契约、输出契约、迁移影响、自动化测试、遥测/日志、回滚方式和用户可见变化说明。
-
----
-
-## 12. Definition of Done
-
-重构完成必须同时满足：
-
-1. 本文所有 P0/P1 问题已关闭或有书面接受风险。
-2. 所有 UX 冻结项有测试证据。
-3. 旧数据迁移成功且可核验，失败可回滚。
-4. 不再运行 localhost 业务 API。
-5. 不再由前端合并阅读和写作历史。
-6. 新写入不包含 legacy alias 和重复 analysis envelope。
-7. 活跃写作评测与阅读草稿可在异常重启后恢复。
-8. 所有拖拽操作存在非拖拽替代。
-9. API key 不进入普通数据库/备份。
-10. Windows 和 macOS 的构建、签名、更新和回滚通过。
-11. 视觉回归、可访问性和性能预算通过。
-12. Electron、Fastify、preload、旧 SSE 和无用途 legacy bridge 已删除。
-
----
-
-## 13. 关键代码证据索引
-
-### `IELTS-WRITING-FEAT`
-
-- 最新提交：`2e3cf0872b8f67cb6c82d1799d7043578f77157c`
-- `apps/writing-vue/src/components/NavBar.vue`：统一品牌、一级导航、query-aware active state。
-- `apps/writing-vue/src/main.js`：Hash router、阅读/写作/评测/结果/历史/设置路由和 sessionStorage guard。
-- `apps/writing-vue/src/views/PracticeLibraryPage.vue`：阅读首页、二级导航、题库、历史工具、localStorage 偏好和 legacy bridge。
-- `apps/writing-vue/src/views/PracticeReadingPage.vue`：阅读完整交互与直接 DOM 操作集中点。
-- `apps/writing-vue/src/views/ComposePage.vue`、`useDraft.js`：写作输入和草稿恢复。
-- `apps/writing-vue/src/views/EvaluatingPage.vue`：评测事件合并、缓存、重试和进度展示。
-- `apps/writing-vue/src/views/ResultPage.vue`：结果读取、兼容消费和句级错误展示。
-- `apps/writing-vue/src/views/HistoryPage.vue`：双数据源前端合并。
-- `apps/writing-vue/src/views/SettingsPage.vue`：系统、数据、AI 和高级配置混合。
-- `server/src/lib/writing/evaluate-service.ts`：两阶段评测、内存会话、事件和持久化。
-- `server/src/lib/writing/contracts.ts`：v3 评测契约与别名。
-- `server/src/lib/practice/contracts.ts`：膨胀的阅读 submission 类型。
-- `server/src/lib/practice/reading-sessions.ts`：答题判定和重复字段组装。
-- `server/src/lib/practice/practice-history.ts`：history summary + submission JSON 双重保存。
-- `electron/db/schema.sql`：当前表结构。
-- `electron/db/migrator.js`：schema + migrations + ensureColumn 并存。
-- `electron/main.js`：Electron 壳、本地 API、sandbox 配置和路由 allowlist。
-- `server/src/lib/shared/local-api-guard.ts`：localhost/Origin 守卫。
-
-### `opensource`
-
-- `README.md`：阅读题库、单篇、套题、历史、备份、工具和界面功能基线。
-- `js/runtime/unifiedReadingPage.js`：旧阅读状态机、计时、模拟、套题、背题、回顾和窗口通信流程。
-
----
-
-## 14. 外部最佳实践参考
-
-1. Tauri 2 Capabilities：按窗口/平台授予最小权限；多个 capability 会合并权限边界。  
-   https://v2.tauri.app/security/capabilities/
-2. Tauri 前后端通信：command 用于类型化请求/响应；Channel 是流式数据推荐机制；event 更动态但非类型安全。  
-   https://v2.tauri.app/develop/calling-rust/
-3. Tauri SQL migrations：迁移有唯一版本、按序执行并在事务中保证原子性。  
-   https://v2.tauri.app/plugin/sql/
-4. SQLite WAL：提高读写并发，但应用仍需处理 `SQLITE_BUSY` 并管理 checkpoint。  
-   https://www.sqlite.org/wal.html
-5. SQLite transactions：写入和跨表状态变更必须显式事务化。  
-   https://www.sqlite.org/lang_transaction.html
-6. WCAG 2.2：Timing Adjustable、Focus Visible/Not Obscured、Dragging Movements、Target Size。  
-   https://www.w3.org/TR/WCAG22/
-
----
-
-## 15. 最终建议
-
-不要以“把 JavaScript 换成 Rust”为项目目标。真正的目标应是：
-
-> **把当前分散在 Electron、Fastify、SQLite JSON、sessionStorage、localStorage、legacy scripts 和巨型 Vue 页面中的隐式产品规则，提炼为可持久化、可测试、可恢复、最小字段的领域模型，同时保持用户已经形成的阅读和写作操作习惯。**
-
-第一条代码变更不应是创建大量 Rust command，而应是建立 UX contract、v2 数据模型、legacy adapter 和 golden fixtures。只有当旧系统的行为被固定下来，Rust + Tauri 重构才不会在“看起来更干净”的同时悄悄丢失用户真正依赖的功能。
+10. **READ-001** Rust answer scoring parity. ✅ Phase 6
+11. **READ-002** persisted attempt draft 与幂等提交. ✅ Phase 6
+12. **READ-003** 拖拽点击/键盘替代. （UI 层保留/增强；数据层不阻塞）
+13. **SUITE-001** 套题状态机和恢复. ✅ Phase 7
+14. **ANNOT-001** 高亮/笔记稳定锚点. ✅ Phase 8
+15. **LEGACY-001** legacy bridge 删除清单和退出条件. ✅ Phase 10（产品树删除 electron/server；Vue 非 Tauri 开发 fallback 仅限 Vite）

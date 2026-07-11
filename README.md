@@ -1,3 +1,16 @@
+# IELTS Practice
+
+Native desktop client (**Tauri 2 + Rust + Vue**).
+
+```bash
+npm run prepare:writing && npm run build:writing
+cargo tauri dev
+```
+
+See `docs/rewrite/phase10-cutover.md` for migration notes.
+
+---
+
 # IELTS 练习系统使用说明
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sallowayma-git/IELTS-practice)
 ## 系统简介

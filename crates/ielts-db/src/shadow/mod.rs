@@ -1,3 +1,8 @@
+//! Shadow dual-read helpers.
+//!
+//! Phase 10: production path is SQLite v2 single-source. These helpers remain for
+//! migration/import tests only — they must not drive user-facing read/write flows.
+
 use serde::Serialize;
 
 use ielts_domain::HistoryListItemVm;
