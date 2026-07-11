@@ -1,0 +1,36 @@
+[package]
+name = "ielts-practice-tauri"
+version = "0.1.0"
+description = "IELTS Practice Tauri 2 shell"
+authors = ["IELTS Practice"]
+edition = "2021"
+publish = false
+
+[lib]
+name = "ielts_practice_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+ielts-domain = { path = "../crates/ielts-domain" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-log = "2"
+tauri-plugin-process = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

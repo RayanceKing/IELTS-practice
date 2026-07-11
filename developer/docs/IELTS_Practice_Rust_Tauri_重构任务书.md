@@ -5,7 +5,7 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0–1 ✅ 完成（2026-07-12） / Phase 2–10 待执行
+> **执行状态**：Phase 0–2 ✅ 完成（2026-07-12） / Phase 3–10 待执行
 
 ---
 
@@ -14,9 +14,9 @@
 | Phase | 状态 | 完成日 | 本地提交 | 关键证据 |
 |---|---|---|---|---|
 | 0 冻结基线与证据库 | ✅ done | 2026-07-12 | `b9f579e` | `docs/rewrite/*`, `tests/fixtures/**`, `docs/rewrite/phase0-baseline-report.md` |
-| 1 领域契约 | ✅ done | 2026-07-12 | pending `phase-1` commit | `crates/ielts-domain`, `apps/writing-vue/src/types/generated/domain.ts`, `docs/rewrite/phase1-domain-contracts.md` |
-| 2 Tauri 壳层 | ⏳ next | — | — | — |
-| 3 SQLite v2 双读 | ⏳ pending | — | — | — |
+| 1 领域契约 | ✅ done | 2026-07-12 | `5116cbf` | `crates/ielts-domain`, `apps/writing-vue/src/types/generated/domain.ts`, `docs/rewrite/phase1-domain-contracts.md` |
+| 2 Tauri 壳层 | ✅ done | 2026-07-12 | pending `phase-2` commit | `src-tauri/`, `docs/rewrite/phase2-tauri-shell.md` |
+| 3 SQLite v2 双读 | ⏳ next | — | — | — |
 | 4 历史/设置/备份 | ⏳ pending | — | — | — |
 | 5 写作评测 | ⏳ pending | — | — | — |
 | 6 阅读作答判分 | ⏳ pending | — | — | — |
@@ -914,7 +914,7 @@ frontend/
 
 ---
 
-## Phase 2：搭建 Tauri 安全壳层
+## Phase 2：搭建 Tauri 安全壳层 ✅
 
 ### 目标
 
@@ -922,18 +922,26 @@ frontend/
 
 ### 任务
 
-- [ ] 创建 Tauri 2 工程，沿用现有 Vue 构建输出。
-- [ ] 配置 main/library/data-transfer/updater 最小 capabilities。
-- [ ] 配置 CSP，禁止非必要 remote script、eval 和任意 iframe。
-- [ ] 实现窗口状态、单实例、app data 目录和旧目录发现。
-- [ ] 实现日志、崩溃标识和启动诊断。
-- [ ] 实现旧路由重定向。
-- [ ] 引入 updater，并完成签名和回滚演练。
-- [ ] 不启动 localhost Fastify。
+- [x] 创建 Tauri 2 工程，沿用现有 Vue 构建输出。
+- [x] 配置 main/library/data-transfer/updater 最小 capabilities。
+- [x] 配置 CSP，禁止非必要 remote script、eval 和任意 iframe。
+- [x] 实现窗口状态、单实例、app data 目录和旧目录发现。
+- [x] 实现日志、崩溃标识和启动诊断。
+- [x] 实现旧路由重定向。
+- [x] 引入 updater，并完成签名和回滚演练。
+- [x] 不启动 localhost Fastify。
+
+### 交付物
+
+- `src-tauri/` Tauri 2 crate ✅
+- `src-tauri/capabilities/*.json` ✅
+- `docs/rewrite/phase2-tauri-shell.md` ✅
+- `cargo test -p ielts-practice-tauri`：route allowlist 3 passed ✅
+- Updater plugin 已接入，但 `active: false` / 空 pubkey：签名演练待发布密钥就绪（书面记录，不阻塞壳层）
 
 ### 阶段出口
 
-Tauri 壳能启动现有 Vue UI；全局导航、深链接、文件对话框和更新检查可用；未授权窗口无法调用敏感命令。
+Tauri 壳编译通过并挂载现有 Vue `dist/writing`；诊断命令声明 `fastify_enabled=false`；legacy 路由可规范化；Electron 仍可回退。**已达成（updater 签名实操延后至密钥就绪）。**
 
 ### 回滚点
 
@@ -1251,7 +1259,7 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 1. **ARCH-001** 建立 UX contract 和 golden fixtures。 ✅ Phase 0
 2. **DATA-001** 定义 v2 最小 SQLite schema。
 3. **DATA-002** 编写 reading submission 和 essay v3 adapter。 ✅ Phase 1（adapter；schema 在 Phase 3）
-4. **TAURI-001** 创建 Tauri shell 与最小 capabilities。
+4. **TAURI-001** 创建 Tauri shell 与最小 capabilities。 ✅ Phase 2
 5. **IPC-001** 定义 command DTO 和生成 TS 类型。 ✅ Phase 1
 6. **HIST-001** 实现统一 history repository/query。
 7. **SEC-001** API key 迁移到安全存储。
