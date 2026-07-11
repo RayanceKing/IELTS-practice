@@ -51,6 +51,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::diagnostics::get_app_info,
             commands::diagnostics::get_startup_diagnostics,
+            commands::diagnostics::get_performance_budgets,
+            commands::diagnostics::get_query_plan_baselines,
             commands::paths::get_app_data_paths,
             commands::paths::discover_legacy_data_dirs,
             commands::routes::normalize_shell_route,

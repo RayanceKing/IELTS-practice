@@ -60,3 +60,33 @@ pub fn get_startup_diagnostics(paths: State<'_, AppPaths>) -> StartupDiagnostics
         ],
     }
 }
+
+#[tauri::command]
+pub fn get_performance_budgets() -> ielts_domain::dto::CommandResponse<serde_json::Value> {
+    let b = ielts_db::DEFAULT_BUDGETS;
+    ielts_domain::dto::CommandResponse::success(serde_json::json!({
+        "coldStartInteractiveMs": b.cold_start_interactive_ms,
+        "warmStartInteractiveMs": b.warm_start_interactive_ms,
+        "libraryFirstPaintMs": b.library_first_paint_ms,
+        "answerLocalSaveMs": b.answer_local_save_ms,
+        "historyFirstPageMs": b.history_first_page_ms,
+        "resultOpenMs": b.result_open_ms,
+        "evaluationUiLatencyMs": b.evaluation_ui_latency_ms
+    }))
+}
+
+#[tauri::command]
+pub fn get_query_plan_baselines(
+    db: tauri::State<'_, crate::app::state::AppDb>,
+) -> ielts_domain::dto::CommandResponse<Vec<ielts_db::QueryPlanBaseline>> {
+    match db.with_conn(|conn| ielts_db::collect_query_plan_baselines(conn)) {
+        Ok(v) => ielts_domain::dto::CommandResponse::success(v),
+        Err(e) => ielts_domain::dto::CommandResponse::failure(ielts_domain::ErrorEnvelope {
+            code: "perf.query_plan".into(),
+            message: e.to_string(),
+            retryable: false,
+            context: None,
+            cause_id: None,
+        }),
+    }
+}

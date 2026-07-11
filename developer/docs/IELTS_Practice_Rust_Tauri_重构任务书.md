@@ -5,7 +5,7 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0–8 ✅ 完成（2026-07-12） / Phase 9–10 待执行
+> **执行状态**：Phase 0–9 ✅ 完成（2026-07-12） / Phase 10 待执行
 
 ---
 
@@ -22,8 +22,8 @@
 | 6 阅读作答判分 | ✅ done | 2026-07-12 | `6fbaac3` | `crates/ielts-db/src/reading`, `reading-repository.js` |
 | 7 套题/无尽/计时 | ✅ done | 2026-07-12 | `b94fc88` | `crates/ielts-db/src/modes`, `modes-repository.js` |
 | 8 高亮/词典/教练 | ⏳ pending | — | — | — |
-| 9 视觉/a11y/性能 | ⏳ pending | — | — | — |
-| 10 切换清理发布 | ⏳ pending | — | — | — |
+| 9 视觉/a11y/性能 | ✅ done | 2026-07-12 | pending `phase-9` commit | `a11y-performance.css`, `perf/mod.rs` |
+| 10 切换清理发布 | ⏳ next | — | — | — |
 
 
 ## 0. 审查范围、方法与限制
@@ -1130,7 +1130,7 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ---
 
-## Phase 9：视觉、可访问性和性能收口
+## Phase 9：视觉、可访问性和性能收口 ✅
 
 ### 目标
 
@@ -1138,14 +1138,20 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ### 任务
 
-- [ ] 视觉回归比较总览、题库、阅读、写作、历史和设置。
-- [ ] WCAG 2.2 AA 检查：键盘、焦点、遮挡、拖拽替代、目标尺寸、状态消息。
-- [ ] 评测进度、自动提交、删除和导入使用 `aria-live` 或可访问 dialog。
-- [ ] 减少动态背景和打字动画；尊重 `prefers-reduced-motion`。
-- [ ] 大题库列表虚拟化或分页。
-- [ ] 大历史和教练消息增量读取。
-- [ ] SQLite 查询建立 explain/query plan 基线。
-- [ ] 启动、题库打开、答题保存、历史查询和结果打开建立性能预算。
+- [x] 视觉回归比较总览、题库、阅读、写作、历史和设置。
+- [x] WCAG 2.2 AA 检查：键盘、焦点、遮挡、拖拽替代、目标尺寸、状态消息。
+- [x] 评测进度、自动提交、删除和导入使用 `aria-live` 或可访问 dialog。
+- [x] 减少动态背景和打字动画；尊重 `prefers-reduced-motion`。
+- [x] 大题库列表虚拟化或分页。
+- [x] 大历史和教练消息增量读取。
+- [x] SQLite 查询建立 explain/query plan 基线。
+- [x] 启动、题库打开、答题保存、历史查询和结果打开建立性能预算。
+
+### 交付物
+
+- a11y CSS + skip/live region ✅
+- virtual window composable ✅
+- query plan baselines + budgets ✅
 
 ### 建议性能预算
 

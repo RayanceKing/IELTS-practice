@@ -488,6 +488,14 @@
 </template>
 
 <script setup>
+function announceA11yStatus(message) {
+  if (typeof document === 'undefined') return
+  const el = document.getElementById('a11y-status-live')
+  if (!el) return
+  el.textContent = ''
+  window.setTimeout(() => { el.textContent = String(message || '') }, 10)
+}
+
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { essays as essaysApi } from '@/api/client.js'
