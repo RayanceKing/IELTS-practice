@@ -90,6 +90,20 @@ pub fn run() {
             commands::modes::memorize_finish,
             commands::modes::timer_elapsed_seconds,
             commands::modes::timer_should_auto_submit,
+            commands::enrichment::annotation_upsert,
+            commands::enrichment::annotation_list,
+            commands::enrichment::annotation_delete,
+            commands::enrichment::annotation_revalidate,
+            commands::enrichment::dictionary_lookup,
+            commands::enrichment::dictionary_import,
+            commands::enrichment::vocab_upsert,
+            commands::enrichment::vocab_list,
+            commands::enrichment::vocab_review,
+            commands::enrichment::vocab_delete,
+            commands::enrichment::coach_ensure_thread,
+            commands::enrichment::coach_append_message,
+            commands::enrichment::coach_list_messages,
+            commands::enrichment::coach_record_failure,
         ])
         .setup(|app| {
             let paths = app.state::<app::state::AppPaths>();

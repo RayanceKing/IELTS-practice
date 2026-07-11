@@ -5,7 +5,7 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0–7 ✅ 完成（2026-07-12） / Phase 8–10 待执行
+> **执行状态**：Phase 0–8 ✅ 完成（2026-07-12） / Phase 9–10 待执行
 
 ---
 
@@ -20,7 +20,7 @@
 | 4 历史/设置/备份 | ✅ done | 2026-07-12 | `45f43d7` | `crates/ielts-db` history/settings/backup, `src-tauri` commands, `history-repository.js` |
 | 5 写作评测 | ✅ done | 2026-07-12 | `468a457` | `crates/ielts-db/src/writing`, `src-tauri/commands/writing.rs`, `writing-repository.js` |
 | 6 阅读作答判分 | ✅ done | 2026-07-12 | `6fbaac3` | `crates/ielts-db/src/reading`, `reading-repository.js` |
-| 7 套题/无尽/计时 | ✅ done | 2026-07-12 | pending `phase-7` commit | `crates/ielts-db/src/modes`, `modes-repository.js` |
+| 7 套题/无尽/计时 | ✅ done | 2026-07-12 | `b94fc88` | `crates/ielts-db/src/modes`, `modes-repository.js` |
 | 8 高亮/词典/教练 | ⏳ pending | — | — | — |
 | 9 视觉/a11y/性能 | ⏳ pending | — | — | — |
 | 10 切换清理发布 | ⏳ pending | — | — | — |
@@ -1102,7 +1102,7 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ---
 
-## Phase 8：迁移高亮、笔记、词典、生词和 AI 教练
+## Phase 8：迁移高亮、笔记、词典、生词和 AI 教练 ✅
 
 ### 目标
 
@@ -1110,13 +1110,19 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ### 任务
 
-- [ ] annotation 使用稳定锚点，不只依赖 DOM offset。
-- [ ] 笔记进入 annotations/repository。
-- [ ] 词典作为 Rust 本地索引或受控静态资源加载。
-- [ ] 生词本规范化为 vocabulary items + review state。
-- [ ] 教练 thread/message 增量持久化。
-- [ ] 自动复盘失败不修改基础评分状态。
-- [ ] 逐项删除 legacyBridge 和动态 `<script>`/`<link>` 加载。
+- [x] annotation 使用稳定锚点，不只依赖 DOM offset。
+- [x] 笔记进入 annotations/repository。
+- [x] 词典作为 Rust 本地索引或受控静态资源加载。
+- [x] 生词本规范化为 vocabulary items + review state。
+- [x] 教练 thread/message 增量持久化。
+- [x] 自动复盘失败不修改基础评分状态。
+- [x] 逐项删除 legacyBridge 和动态 `<script>`/`<link>` 加载。
+
+### 交付物
+
+- migration 0005 ✅
+- annotations/dictionary/vocab/coach ✅
+- phase8 tests ✅
 
 ### 阶段出口
 

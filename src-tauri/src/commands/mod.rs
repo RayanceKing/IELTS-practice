@@ -7,3 +7,4 @@ pub mod settings;
 pub mod writing;
 pub mod reading;
 pub mod modes;
+pub mod enrichment;

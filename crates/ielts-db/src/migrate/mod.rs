@@ -35,6 +35,11 @@ fn migrations() -> &'static [Migration] {
                 name: "modes_timer",
                 sql: include_str!("../../migrations/0004_modes_timer.sql"),
             },
+            Migration {
+                version: 5,
+                name: "annotations_vocab_coach",
+                sql: include_str!("../../migrations/0005_annotations_vocab_coach.sql"),
+            },
         ]
     })
 }
