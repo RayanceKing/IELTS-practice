@@ -1,0 +1,940 @@
+{
+  "generatedAt": "2026-07-11T18:27:57.570161+00:00",
+  "status": "fail",
+  "results": [
+    {
+      "name": "server 预编译构建",
+      "status": "fail",
+      "detail": "执行失败: > ielts-practice@0.0.1-beta build:server\n> node scripts/clean-server-dist.cjs && tsc -p server/tsconfig.json"
+    },
+    {
+      "name": "index.html 存在性",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "performance-test.html Doctype",
+      "status": "pass",
+      "detail": "检测到 <!DOCTYPE html>"
+    },
+    {
+      "name": "refresh-test.html Doctype",
+      "status": "pass",
+      "detail": "检测到 <!DOCTYPE html>"
+    },
+    {
+      "name": "regression-test.html Doctype",
+      "status": "pass",
+      "detail": "检测到 <!DOCTYPE html>"
+    },
+    {
+      "name": "storage-vocab-test.html Doctype",
+      "status": "pass",
+      "detail": "检测到 <!DOCTYPE html>"
+    },
+    {
+      "name": "vocab-list-switcher-demo.html Doctype",
+      "status": "pass",
+      "detail": "检测到 <!DOCTYPE html>"
+    },
+    {
+      "name": "vocabListSwitcher.test.html Doctype",
+      "status": "pass",
+      "detail": "检测到 <!DOCTYPE html>"
+    },
+    {
+      "name": "E2E 死脚本边界",
+      "status": "pass",
+      "detail": {
+        "forbidden": [
+          "path_compatibility_playwright.py",
+          "mock_eval_flow.py",
+          "mock_upload_flow.py",
+          "fixtures/index.html",
+          "fixtures/睡着过项目组(9.4)[134篇]/2. 高频次高频文章[83篇]/placeholder.html",
+          "fixtures/睡着过项目组(9.4)[134篇]/3. 所有文章(9.4)[134篇]/placeholder.html"
+        ],
+        "present": []
+      }
+    },
+    {
+      "name": "Electron 调试脚本边界",
+      "status": "pass",
+      "detail": {
+        "forbidden": [
+          "test_main.js",
+          "test-electron-module.js",
+          "test_api_runner.js"
+        ],
+        "present": [],
+        "stalePackageExcludes": []
+      }
+    },
+    {
+      "name": "E2E runner 文件存在性",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "E2E runner: 包含 app-frame iframe",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "E2E runner: 声明 sandbox 权限",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "E2E 依赖 indexSnapshot.js",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "E2E 依赖 bootstrapAppFrame.js",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "E2E 依赖 appE2ETest.js",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "E2E 导入样例数据",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "E2E 导入测试存在性",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "E2E 交互目标配置",
+      "status": "pass",
+      "detail": "已解析交互目标"
+    },
+    {
+      "name": "导航视图覆盖",
+      "status": "pass",
+      "detail": {
+        "dom": [
+          "browse",
+          "more",
+          "overview",
+          "practice",
+          "settings"
+        ],
+        "config": [
+          "browse",
+          "more",
+          "overview",
+          "practice",
+          "settings"
+        ],
+        "domOnly": [],
+        "configOnly": []
+      }
+    },
+    {
+      "name": "设置按钮覆盖",
+      "status": "pass",
+      "detail": {
+        "dom": [
+          "backup-list-btn",
+          "check-updates-btn",
+          "clear-cache-btn",
+          "create-backup-btn",
+          "export-data-btn",
+          "force-refresh-btn",
+          "import-data-btn",
+          "library-config-btn",
+          "load-library-btn",
+          "show-onboarding-btn",
+          "theme-switcher-btn-entry"
+        ],
+        "config": [
+          "backup-list-btn",
+          "check-updates-btn",
+          "clear-cache-btn",
+          "create-backup-btn",
+          "export-data-btn",
+          "force-refresh-btn",
+          "import-data-btn",
+          "library-config-btn",
+          "load-library-btn",
+          "show-onboarding-btn",
+          "theme-switcher-btn-entry"
+        ],
+        "domOnly": [],
+        "configOnly": []
+      }
+    },
+    {
+      "name": "Reading 单篇 E2E 脚本存在性",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "Reading 单篇 E2E: 校验主链路 openExam",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Reading 单篇 E2E: 禁止 fallback 路径",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Reading 单篇 E2E: 禁止 synthetic 路径",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Browse 偏好切换 E2E 脚本存在性",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "Browse 偏好切换 E2E: 校验触发按钮",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Browse 偏好切换 E2E: 校验红点显隐",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Browse 偏好切换 E2E: 校验偏好写回",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Reading 单篇 E2E Node 回退脚本",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "Reading Node 回退: 校验主链路 openExam",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Reading Node 回退: 禁止 fallback 路径",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Reading Node 回退: 禁止 synthetic 路径",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Unified E2E Runner 存在性",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "Unified E2E Runner: 包含 browse_preference_toggle_flow",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Unified E2E Runner: 包含 reading_single_flow",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Unified E2E Runner: 包含 suite_practice_flow",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Unified E2E Runner: 输出统一报告",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "数据层资产 storageDataSource.js",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "数据层资产 baseRepository.js",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "数据层资产 dataRepositoryRegistry.js",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "数据层资产 practiceRepository.js",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "数据层资产 settingsRepository.js",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "数据层资产 backupRepository.js",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "数据层资产 metaRepository.js",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "数据层资产 index.js",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "StorageProviderRegistry 存在性",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "simpleStorageWrapper 适配数据仓库",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "main-entry 严格按需启动策略",
+      "status": "pass",
+      "detail": "严格按需配置存在，未发现旧启动预加载片段"
+    },
+    {
+      "name": "app.js 不等待 browseReady",
+      "status": "pass",
+      "detail": "未检测到 browseReady 阻塞，且包含 appCoreReady 收口事件"
+    },
+    {
+      "name": "lazyLoader 静态脚本去重",
+      "status": "pass",
+      "detail": "已检测到静态脚本去重逻辑"
+    },
+    {
+      "name": "PracticeRecorder 生产 synthetic 保护",
+      "status": "pass",
+      "detail": "已检测到生产环境 synthetic 会话保护逻辑"
+    },
+    {
+      "name": "main.js 存在性",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "resourceCore.js 存在性",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "moreView.js 存在性",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "switchLibraryConfig 禁止 confirm",
+      "status": "pass",
+      "detail": "未发现禁止片段"
+    },
+    {
+      "name": "loadLibrary 全局 shim 防递归",
+      "status": "pass",
+      "detail": "已转发到 loadLibraryInternal，未检测到自递归"
+    },
+    {
+      "name": "loadLibraryInternal 定义存在性",
+      "status": "pass",
+      "detail": "已检测到定义"
+    },
+    {
+      "name": "ResourceCore buildOverridePathMap 定义存在性",
+      "status": "pass",
+      "detail": "已检测到定义"
+    },
+    {
+      "name": "ResourceCore mergeRootWithFallback 定义存在性",
+      "status": "pass",
+      "detail": "已检测到定义"
+    },
+    {
+      "name": "ResourceCore resolveExamBasePath 路径组合逻辑",
+      "status": "pass",
+      "detail": {
+        "checked": [
+          "mergeRootWithFallback",
+          "normalizedRelative && normalizedRelative.startsWith(normalizedRoot)",
+          "combined = normalizedRoot + normalizedRelative"
+        ],
+        "missing": []
+      }
+    },
+    {
+      "name": "更多工具写作入口守卫",
+      "status": "pass",
+      "detail": "更多工具页已绑定写作入口"
+    },
+    {
+      "name": "assets/scripts 运行时边界",
+      "status": "pass",
+      "detail": {
+        "allowed": [
+          "complete-exam-data.js",
+          "listening-exam-data.js"
+        ],
+        "files": [
+          "complete-exam-data.js",
+          "listening-exam-data.js"
+        ],
+        "unexpected": [],
+        "missing": [],
+        "nonJs": []
+      }
+    },
+    {
+      "name": "complete-exam-data.js 根目录元数据",
+      "status": "pass",
+      "detail": "检测到 pathRoot 元数据"
+    },
+    {
+      "name": "listening-exam-data.js 根目录元数据",
+      "status": "pass",
+      "detail": "检测到 pathRoot 元数据"
+    },
+    {
+      "name": "生成阅读 JS 语法门禁",
+      "status": "pass",
+      "detail": {
+        "checked": 452,
+        "failures": [],
+        "failureCount": 0
+      }
+    },
+    {
+      "name": "统一阅读页本地脚本引用门禁",
+      "status": "pass",
+      "detail": {
+        "checked": 5,
+        "missing": [],
+        "missingCount": 0
+      }
+    },
+    {
+      "name": "阅读题目-解析一致性校验",
+      "status": "pass",
+      "detail": {
+        "examCount": 225,
+        "explanationCount": 225,
+        "missingExplanations": 0,
+        "mismatchCount": 0,
+        "mismatches": []
+      }
+    },
+    {
+      "name": "练习页面测试模板存在性",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "练习模板 Doctype",
+      "status": "pass",
+      "detail": "检测到 <!DOCTYPE html>"
+    },
+    {
+      "name": "练习模板: 包含 PRACTICE_COMPLETE 消息",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "练习模板: 包含 practicePageEnhancer 钩子",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "E2E 批量删除测试覆盖",
+      "status": "pass",
+      "detail": "已包含片段"
+    },
+    {
+      "name": "Mixin 方法契约文件",
+      "status": "pass",
+      "detail": "已找到"
+    },
+    {
+      "name": "Mixin 方法契约覆盖",
+      "status": "pass",
+      "detail": {
+        "expectedCount": 93,
+        "actualCount": 208,
+        "missing": [],
+        "extras": [
+          "_abortSuiteSession",
+          "_advanceSuiteToNext",
+          "_aggregateSuiteFieldMap",
+          "_appendRuntimeContextToExamUrl",
+          "_appendSuiteContextToExamUrl",
+          "_bindReviewWindowRef",
+          "_buildExamInitPayload",
+          "_buildExamPlaceholderUrl",
+          "_buildReadingPdfUrl",
+          "_buildReviewContextPayload",
+          "_buildReviewReplayEntriesFromRecord",
+          "_buildReviewSession",
+          "_buildSuiteOpenExamOptions",
+          "_buildSuiteReplayEntry",
+          "_buildSuiteReviewContext",
+          "_buildUnifiedReadingUrl",
+          "_buildVuePracticeReadingRoute",
+          "_cleanupSuiteEntryRecords",
+          "_clearSessionStorage",
+          "_clearSuiteHandshakes",
+          "_cloneReviewData",
+          "_collectReplayQuestionIds",
+          "_deriveReplayExamIdFromSources",
+          "_deriveReplayScoreInfo",
+          "_detectExpectedSuiteCount",
+          "_detectMultiSuiteSource",
+          "_dispatchReviewReplayForExam",
+          "_ensureAbsoluteUrl",
+          "_ensureInlinePracticeHost",
+          "_ensureReviewReplayStore",
+          "_ensureSuiteWindowGuard",
+          "_extractBaseExamId",
+          "_fetchSuiteExamIndex",
+          "_finalizeReplayComparison",
+          "_focusSuiteWindow",
+          "_formatSuiteDateLabel",
+          "_generateMultiSuiteSessionId",
+          "_generateSuiteSessionId",
+          "_getSuiteWindowName",
+          "_getUnifiedReadingManifestEntry",
+          "_guardExamWindowContent",
+          "_handleSimulationNavigate",
+          "_handleSuiteSessionReady",
+          "_hasMeaningfulSuiteAnswer",
+          "_hasPracticeShellRouteApi",
+          "_hydrateReplayCorrectAnswersFromDetails",
+          "_isLegacyReadingLaunchContext",
+          "_isReadingLibraryExam",
+          "_isReplayObject",
+          "_isSuiteFrequencyIncluded",
+          "_isUnifiedReadingExam",
+          "_maybeRestoreSuiteReviewState",
+          "_mirrorSessionToStorage",
+          "_normalizeReplayAnswerMap",
+          "_normalizeReplayComparison",
+          "_normalizeReplayQuestionKey",
+          "_normalizeSuiteResult",
+          "_notifySuiteMessage",
+          "_openInlineExamWindow",
+          "_openNamedSuiteWindow",
+          "_openPdfWindow",
+          "_openVuePracticeReading",
+          "_parseTimeMs",
+          "_reacquireSuiteWindow",
+          "_readSuiteAutoAdvancePreference",
+          "_recordSuiteCloseAttempt",
+          "_registerSuiteSequence",
+          "_releaseSuiteWindowGuard",
+          "_resolveSuiteFlowMode",
+          "_resolveSuiteFrequencyScope",
+          "_resolveSuitePreference",
+          "_resolveSuiteSequenceNumber",
+          "_resolveSuiteSessionId",
+          "_resolveSuiteWindow",
+          "_resolveTrustedDurationSeconds",
+          "_resolveTrustedTimeRange",
+          "_restoreSessionFromStorage",
+          "_safelyCloseWindow",
+          "_savePartialSuiteAsIndividual",
+          "_saveSuitePracticeRecord",
+          "_saveSuitePracticeRecordFallback",
+          "_sendReviewReplayMessages",
+          "_sendSimulationContext",
+          "_sendSuiteReviewState",
+          "_shouldAutoAdvanceAfterSubmit",
+          "_shouldUsePlaceholderPage",
+          "_splitReplayCompositeKey",
+          "_teardownInlinePracticeHost",
+          "_teardownSuiteSession",
+          "_updatePracticeRecordsState",
+          "_upsertSuiteResult",
+          "aggregateAnswerComparisons",
+          "aggregateAnswers",
+          "aggregateScores",
+          "aggregateSpellingErrors",
+          "continueSuitePractice",
+          "ensureExamWindowSession",
+          "ensurePracticeRecorderEvents",
+          "finalizeMultiSuiteRecord",
+          "finalizeSuiteRecord",
+          "getOrCreateMultiSuiteSession",
+          "handleMultiSuitePracticeComplete",
+          "handlePracticeExit",
+          "handleReadingCoachRequest",
+          "handleReviewReplayNavigate",
+          "handleSuitePracticeComplete",
+          "handleSuiteReviewNavigate",
+          "initializeSuiteMode",
+          "instantiatePracticeRecorder",
+          "isMultiSuiteComplete",
+          "openPracticeRecordReplay",
+          "renderOverviewCards",
+          "resolveReadingLaunchDescriptor",
+          "schedulePracticeRecorderUpgrade",
+          "startSuitePractice"
+        ]
+      }
+    },
+    {
+      "name": "AnswerSanitizer 单元测试",
+      "status": "pass",
+      "detail": "✓ extracts preferred fields from objects\n  ✓ removes [object Object] artifacts\n✔ AnswerSanitizer.normalizeValue\n  ✓ drops entries without meaningful answers\n✔ AnswerSanitizer.sanitizeComparisonMap"
+    },
+    {
+      "name": "Reading CORE-10 显式契约测试",
+      "status": "fail",
+      "detail": "执行失败: > ielts-practice@0.0.1-beta build:server\n> node scripts/clean-server-dist.cjs && tsc -p server/tsconfig.json\n\n{\n  \"status\": \"fail\",\n  \"detail\": \"Error: Command failed: C:\\\\Windows\\\\system32\\\\cmd.exe /d /s /c npm run build:server\\n    at genericNodeError (node:internal/errors:998:15)\\n    at wrappedFn (node:internal/errors:543:14)\\n    at checkExecSyncError (node:child_process:926:11)\\n    at execFileSync (node:child_process:962:15)\\n    at ensureServerBundle (file:///F:/workspace/IELTS%20Atlas%20APP/developer/tests/js/serverReadingCore10.test.js:19:3)\\n    at main (file:///F:/workspace/IELTS%20Atlas%20APP/developer/tests/js/serverReadingCore10.test.js:321:3)\\n    at file:///F:/workspace/IELTS%20Atlas%20APP/developer/tests/js/serverReadingCore10.test.js:333:1\\n    at ModuleJob.run (node:internal/modules/esm/module_job:447:25)\\n    at async node:internal/modules/esm/loader:646:26\\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\"\n}"
+    },
+    {
+      "name": "套题模式首篇衔接测试",
+      "status": "pass",
+      "detail": "模拟模式按顺序串联三篇题目并生成单条记录，导航与 sessionStorage 镜像正常"
+    },
+    {
+      "name": "套题模式状态机回归测试",
+      "status": "pass",
+      "detail": "simulation mode regression cases passed"
+    },
+    {
+      "name": "模拟模式 NB 拖拽回灌回归测试",
+      "status": "fail",
+      "detail": "执行失败: {\"status\": \"fail\", \"detail\": \"playwright_python_missing\"}"
+    },
+    {
+      "name": "模拟模式切题回灌回归测试",
+      "status": "fail",
+      "detail": "执行失败: {\"status\": \"fail\", \"detail\": \"playwright_python_missing\"}"
+    },
+    {
+      "name": "写作自由写作/题库模式草稿恢复回归测试",
+      "status": "fail",
+      "detail": "执行失败: {\"status\": \"fail\", \"detail\": \"playwright_python_missing\"}"
+    },
+    {
+      "name": "Vue 阅读练习链路 E2E 回归测试",
+      "status": "fail",
+      "detail": "执行失败: F:\\workspace\\IELTS Atlas APP\\developer\\tests\\e2e\\practice_reading_vue_flow.py:1985: SyntaxWarning: invalid escape sequence '\\s'\n  reviewRowText: document.querySelector('[data-review-question-id=\"q12\"]')?.textContent?.replace(/\\s+/g, ' ').trim() || '',\n{\"status\": \"fail\", \"detail\": \"playwright_python_missing\"}"
+    },
+    {
+      "name": "Vue 阅读套题链路 E2E 回归测试",
+      "status": "fail",
+      "detail": "执行失败: {\"status\": \"fail\", \"detail\": \"playwright_python_missing\"}"
+    },
+    {
+      "name": "写作历史页去竞态与非阻塞错误守卫",
+      "status": "pass",
+      "detail": "历史页已启用请求门闩与页内错误反馈"
+    },
+    {
+      "name": "写作题库页去竞态与非阻塞错误守卫",
+      "status": "pass",
+      "detail": "题库页已启用请求门闩与页内反馈"
+    },
+    {
+      "name": "写作 IPC 参数可克隆化守卫",
+      "status": "fail",
+      "detail": "执行失败: node:internal/modules/cjs/loader:1572\n  throw err;\n  ^\n\nError: Cannot find module 'F:\\workspace\\IELTS Atlas APP\\apps\\writing-vue\\node_modules\\vue'\nRequire stack:\n- F:\\workspace\\IELTS Atlas APP\\developer\\tests\\ci\\writing_ipc_serialize_contract.cjs\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1568:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1122:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1146:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1173:12)\n    at Module._load (node:internal/modules/cjs/loader:1345:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)\n    at Module.require (node:internal/modules/cjs/loader:1689:12)\n    at require (node:internal/modules/helpers:191:16)\n    at Object.<anonymous> (F:\\workspace\\IELTS Atlas APP\\developer\\tests\\ci\\writing_ipc_serialize_contract.cjs:5:26)\n    at Module._compile (node:internal/modules/cjs/loader:1944:14) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [\n    'F:\\\\workspace\\\\IELTS Atlas APP\\\\developer\\\\tests\\\\ci\\\\writing_ipc_serialize_contract.cjs'\n  ]\n}\n\nNode.js v26.4.0"
+    },
+    {
+      "name": "写作请求门闩契约测试",
+      "status": "pass",
+      "detail": {
+        "status": "pass",
+        "tokens": {
+          "firstId": 1,
+          "secondId": 2,
+          "invalidatedId": 3,
+          "thirdId": 4
+        }
+      }
+    },
+    {
+      "name": "写作设置页供应商 Base URL 联动契约测试",
+      "status": "pass",
+      "detail": {
+        "status": "pass",
+        "defaults": {
+          "openai": {
+            "base_url": "https://api.openai.com/v1"
+          },
+          "openrouter": {
+            "base_url": "https://openrouter.ai/api/v1"
+          },
+          "deepseek": {
+            "base_url": "https://api.deepseek.com/v1"
+          }
+        },
+        "checked": [
+          "normalizeProviderUrl",
+          "getProviderDefaultBaseUrl",
+          "isProviderDefaultUrl",
+          "resolveProviderBaseUrlOnChange"
+        ]
+      }
+    },
+    {
+      "name": "写作题库 DAO 兼容契约测试",
+      "status": "fail",
+      "detail": "执行失败: node:internal/modules/cjs/loader:1572\n  throw err;\n  ^\n\nError: Cannot find module 'electron'\nRequire stack:\n- F:\\workspace\\IELTS Atlas APP\\electron\\utils\\logger.js\n- F:\\workspace\\IELTS Atlas APP\\electron\\db\\dao\\topics.dao.js\n- F:\\workspace\\IELTS Atlas APP\\developer\\tests\\ci\\writing_topics_dao_contract.cjs\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1568:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1122:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1146:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1173:12)\n    at Module._load (node:internal/modules/cjs/loader:1345:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)\n    at Module.require (node:internal/modules/cjs/loader:1689:12)\n    at require (node:internal/modules/helpers:191:16)\n    at Object.<anonymous> (F:\\workspace\\IELTS Atlas APP\\electron\\utils\\logger.js:3:17)\n    at Module._compile (node:internal/modules/cjs/loader:1944:14) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [\n    'F:\\\\workspace\\\\IELTS Atlas APP\\\\electron\\\\utils\\\\logger.js',\n    'F:\\\\workspace\\\\IELTS Atlas APP\\\\electron\\\\db\\\\dao\\\\topics.dao.js',\n    'F:\\\\workspace\\\\IELTS Atlas APP\\\\developer\\\\tests\\\\ci\\\\writing_topics_dao_contract.cjs'\n  ]\n}\n\nNode.js v26.4.0"
+    },
+    {
+      "name": "写作历史摘要数据契约测试",
+      "status": "fail",
+      "detail": "执行失败: node:internal/modules/cjs/loader:1572\n  throw err;\n  ^\n\nError: Cannot find module 'electron'\nRequire stack:\n- F:\\workspace\\IELTS Atlas APP\\electron\\utils\\logger.js\n- F:\\workspace\\IELTS Atlas APP\\electron\\db\\dao\\essays.dao.js\n- F:\\workspace\\IELTS Atlas APP\\developer\\tests\\ci\\writing_essay_history_contract.cjs\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1568:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1122:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1146:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1173:12)\n    at Module._load (node:internal/modules/cjs/loader:1345:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)\n    at Module.require (node:internal/modules/cjs/loader:1689:12)\n    at require (node:internal/modules/helpers:191:16)\n    at Object.<anonymous> (F:\\workspace\\IELTS Atlas APP\\electron\\utils\\logger.js:3:17)\n    at Module._compile (node:internal/modules/cjs/loader:1944:14) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [\n    'F:\\\\workspace\\\\IELTS Atlas APP\\\\electron\\\\utils\\\\logger.js',\n    'F:\\\\workspace\\\\IELTS Atlas APP\\\\electron\\\\db\\\\dao\\\\essays.dao.js',\n    'F:\\\\workspace\\\\IELTS Atlas APP\\\\developer\\\\tests\\\\ci\\\\writing_essay_history_contract.cjs'\n  ]\n}\n\nNode.js v26.4.0"
+    },
+    {
+      "name": "写作评测链路契约测试",
+      "status": "fail",
+      "detail": "执行失败: > ielts-practice@0.0.1-beta build:server\n> node scripts/clean-server-dist.cjs && tsc -p server/tsconfig.json"
+    },
+    {
+      "name": "写作温度模式契约测试",
+      "status": "pass",
+      "detail": {
+        "balanced": {
+          "task1": 0.5,
+          "task2": 0.5
+        },
+        "custom": {
+          "task1": 0.35,
+          "task2": 0.65
+        },
+        "creative": {
+          "task1": 0.8,
+          "task2": 0.8
+        }
+      }
+    },
+    {
+      "name": "写作设置页非阻塞反馈守卫",
+      "status": "pass",
+      "detail": "设置页已切换为非阻塞反馈并接入请求门闩"
+    },
+    {
+      "name": "Practice API Facade 契约测试",
+      "status": "fail",
+      "detail": "执行失败: > ielts-practice@0.0.1-beta build:server\n> node scripts/clean-server-dist.cjs && tsc -p server/tsconfig.json"
+    },
+    {
+      "name": "Practice Reading CORE-10 模块行为测试",
+      "status": "pass",
+      "detail": "practiceReadingCore10.test.js passed"
+    },
+    {
+      "name": "Vue Practice Shell 静态契约测试",
+      "status": "pass",
+      "detail": {
+        "status": "pass",
+        "detail": "Vue Practice Shell routes, Electron entrypoint, migration matrix, legacy single-reading redirect, navigation, library view, compose hydration, and practice client contract are present"
+      }
+    },
+    {
+      "name": "阅读本地词典契约测试",
+      "status": "pass",
+      "detail": {
+        "status": "pass",
+        "detail": {
+          "entries": 20260,
+          "variants": 22945,
+          "checkedTerms": [
+            "emperor",
+            "hygienic",
+            "boiled",
+            "far-sighted edicts"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Legacy 单篇阅读 Vue 路由契约测试",
+      "status": "pass",
+      "detail": {
+        "status": "pass",
+        "detail": "Legacy single-reading launch redirects to Vue Practice route while suite/review fallbacks stay on unified HTML"
+      }
+    },
+    {
+      "name": "Legacy 套题入口 Vue 路由契约测试",
+      "status": "pass",
+      "detail": {
+        "status": "pass",
+        "detail": "Legacy suite entry uses Vue Practice reading-suite in product mode and preserves legacy only for explicit regression mode"
+      }
+    },
+    {
+      "name": "套题模式内联注入测试",
+      "status": "pass",
+      "detail": "内联注入在 file:// 环境下也能维持套题标签页"
+    },
+    {
+      "name": "全量题库记录匹配测试",
+      "status": "pass",
+      "detail": "5/5 测试通过"
+    },
+    {
+      "name": "PracticeCore 单元测试",
+      "status": "pass",
+      "detail": "4/4 测试通过"
+    },
+    {
+      "name": "ResourceCore 单元测试",
+      "status": "pass",
+      "detail": "3/3 测试通过"
+    },
+    {
+      "name": "按需入口回归测试",
+      "status": "pass",
+      "detail": "2/2 测试通过"
+    },
+    {
+      "name": "PracticeCore 静态守卫",
+      "status": "pass",
+      "detail": "无多余 practice_records 直写、协议别名复制、路径实现复制、状态实现复制或 legacy bridge 残留"
+    },
+    {
+      "name": "练习记录持久化删除链路测试",
+      "status": "pass",
+      "detail": "deleteRecord / clearPracticeData 已覆盖 canonical store、legacy shadow key 与删除后的强制 UI 刷新链路"
+    },
+    {
+      "name": "PracticeCore app.state 同步测试",
+      "status": "pass",
+      "detail": "PracticeCore replacePracticeRecords 会同步 canonical store、全局状态和 app.state.practice.records"
+    },
+    {
+      "name": "练习页增强器回归测试",
+      "status": "pass",
+      "detail": "practice-page-enhancer 已覆盖回放 marked questions、sendMessage 只读守卫、回放 fallback 单次调度、results monitoring、extractScore 与 suite submit payload 合同"
+    },
+    {
+      "name": "统一阅读页协议回归测试",
+      "status": "pass",
+      "detail": {
+        "status": "pass",
+        "detail": "UnifiedReadingPage 已覆盖阅读教练查询、高亮回放与标记题目数据结构主链路"
+      }
+    },
+    {
+      "name": "阅读二阶段分析服务回归测试",
+      "status": "fail",
+      "detail": "执行失败: > ielts-practice@0.0.1-beta build:server\n> node scripts/clean-server-dist.cjs && tsc -p server/tsconfig.json"
+    },
+    {
+      "name": "Reading migration snapshot integration test",
+      "status": "pass",
+      "detail": "显式跳过：developer/reading-exams 目录已废弃，迁移快照用例不再执行"
+    },
+    {
+      "name": "多套题提交流程集成测试",
+      "status": "pass",
+      "detail": {
+        "passed": 8,
+        "total": 8,
+        "detail": "所有测试通过"
+      }
+    },
+    {
+      "name": "拼写错误收集流程集成测试",
+      "status": "pass",
+      "detail": {
+        "passed": 12,
+        "total": 12,
+        "detail": "所有测试通过"
+      }
+    },
+    {
+      "name": "词表切换流程集成测试",
+      "status": "pass",
+      "detail": {
+        "passed": 12,
+        "total": 12,
+        "detail": "所有测试通过"
+      }
+    },
+    {
+      "name": "Vocab session view flow integration test",
+      "status": "pass",
+      "detail": {
+        "passed": 29,
+        "total": 29,
+        "detail": "All tests passed"
+      }
+    },
+    {
+      "name": "Reading 逐题自动排查（quick）",
+      "status": "fail",
+      "detail": "执行失败: Playwright Python 未安装且无法切换到 .venv，审计无法执行。"
+    },
+    {
+      "name": "PDF 对账与回归审计",
+      "status": "pass",
+      "detail": {
+        "skipped": true,
+        "reason": "checklist.md 已移除，跳过 checklist 相关 PDF/MONA 对账审计"
+      }
+    },
+    {
+      "name": "Reading 数据完整性校验",
+      "status": "pass",
+      "detail": {
+        "scannedFiles": 225,
+        "duplicateEntries": [
+          {
+            "key": "p2::who wrote shakespeare s plays 莎士比亚",
+            "examIds": [
+              "p2-low-147",
+              "p2-medium-058"
+            ]
+          }
+        ],
+        "allowlistedDuplicates": [
+          {
+            "key": "p2::who wrote shakespeare s plays 莎士比亚",
+            "examIds": [
+              "p2-low-147",
+              "p2-medium-058"
+            ]
+          }
+        ],
+        "blockingDuplicates": [],
+        "missingPdfRef": [],
+        "malformedPdfRef": []
+      }
+    },
+    {
+      "name": "Checklist 对账一致性校验",
+      "status": "pass",
+      "detail": {
+        "skipped": true,
+        "reason": "checklist.md 已移除，跳过 checklist 一致性校验",
+        "summaryStatusCount": {},
+        "issueStatusCount": {},
+        "summaryMismatches": [],
+        "claims": {},
+        "claimMismatches": [],
+        "freshnessMismatches": [],
+        "reportFreshness": {}
+      }
+    }
+  ]
+}
