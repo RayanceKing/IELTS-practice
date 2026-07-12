@@ -8,7 +8,7 @@ use uuid::Uuid;
 use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus};
 use ielts_domain::dto::AttemptRecord;
 
-use crate::import::upsert_attempt;
+use crate::attempts::upsert_attempt;
 use crate::sqlite::{DbError, DbResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,7 +47,7 @@ pub fn create_memorize_session(
 
     let now = chrono::Utc::now().to_rfc3339();
     let id = format!("memorize-{}", Uuid::new_v4());
-    crate::import::ensure_asset_stub(
+    crate::attempts::ensure_asset_stub(
         conn,
         &cmd.asset_id,
         Activity::Reading,

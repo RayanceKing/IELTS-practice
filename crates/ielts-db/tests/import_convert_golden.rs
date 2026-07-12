@@ -1,9 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use ielts_domain::adapters::{
-    assert_no_legacy_aliases, evaluation_v3_to_v4, reading_archive_to_attempts,
-};
+use ielts_db::import::{assert_no_legacy_aliases, evaluation_v3_to_v4, reading_archive_to_attempts};
 use ielts_domain::domain::{
     Activity, AttemptMode, AttemptStatus, EvaluationStatus, ScoreScale,
 };

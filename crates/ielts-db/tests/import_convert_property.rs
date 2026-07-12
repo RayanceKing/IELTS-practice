@@ -1,4 +1,4 @@
-use ielts_domain::adapters::evaluation_v3_to_v4;
+use ielts_db::import::evaluation_v3_to_v4;
 use ielts_domain::domain::EvaluationStatus;
 use proptest::prelude::*;
 use serde_json::json;

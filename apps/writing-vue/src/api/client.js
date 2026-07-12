@@ -1,727 +1,639 @@
 /**
- * 本地 Fastify API 适配层
- * 统一封装写作模块的 HTTP / SSE 调用
+ * Product API facade — Tauri only.
+ * Electron / Fastify / file:// paths removed.
  */
 
-const LOCAL_API_INFO_STORAGE_KEY = 'writing_local_api_info_v1'
-const evaluationListeners = new Map()
-const evaluationStreams = new Map()
-let cachedBaseUrl = ''
-let cachedBaseUrlPromise = null
-let listenerSequence = 0
+import {
+  listHistory,
+  getHistoryDetail,
+  exportHistory,
+  deleteHistoryAttempt
+} from '@/api/history-repository.js'
+import {
+  saveDraft,
+  submitAttempt,
+  startEvaluation,
+  listEvaluationEvents,
+  cancelEvaluation,
+  getEvaluationForAttempt,
+  newIdempotencyKey
+} from '@/api/writing-repository.js'
+import {
+  listSettings,
+  upsertSetting
+} from '@/api/settings-repository.js'
+import { isTauriRuntime } from '@/api/tauri-bridge.js'
 
 const ERROR_MESSAGES = {
-    invalid_api_key: 'API 密钥无效，请前往设置页面检查配置',
-    insufficient_quota: 'API 余额不足，请充值后重试',
-    rate_limit_exceeded: '请求频率超限，请稍后重试',
-    rate_limited: '请求频率超限，请稍后重试',
-    model_not_found: '模型不存在，请检查模型名称配置',
-    timeout: '请求超时（240秒），请检查网络连接或稍后重试',
-    network_error: '网络连接失败，请检查网络设置',
-    server_error: 'LLM 服务商服务异常，请稍后重试',
-    invalid_response_format: '评分数据解析失败，请点击"重试"按钮',
-    start_failed: '启动评测失败，请重试',
-    unknown_error: '未知错误，请重试'
+  invalid_api_key: 'API 密钥无效，请前往设置页面检查配置',
+  insufficient_quota: 'API 余额不足，请充值后重试',
+  rate_limit_exceeded: '请求频率超限，请稍后重试',
+  rate_limited: '请求频率超限，请稍后重试',
+  model_not_found: '模型不存在，请检查模型名称配置',
+  timeout: '请求超时，请检查网络连接或稍后重试',
+  network_error: '网络连接失败，请检查网络设置',
+  server_error: '服务异常，请稍后重试',
+  invalid_response_format: '评分数据解析失败，请点击"重试"按钮',
+  start_failed: '启动评测失败，请重试',
+  not_implemented: '该功能尚未迁移到 Tauri 原生路径',
+  tauri_required: '需要 Tauri 运行时（Electron/Fastify 已移除）',
+  unknown_error: '未知错误，请重试'
 }
 
+const evaluationListeners = new Map()
+let listenerSequence = 0
+const activePolls = new Map()
+
 export function getErrorMessage(code) {
-    return ERROR_MESSAGES[code] || ERROR_MESSAGES.unknown_error
+  return ERROR_MESSAGES[code] || ERROR_MESSAGES.unknown_error
 }
 
 export function isAPIAvailable() {
-    return Boolean(
-        typeof window !== 'undefined'
-        && window.electronAPI
-        && typeof window.electronAPI.getLocalApiInfo === 'function'
-    )
+  return isTauriRuntime()
 }
 
-function getStorageList() {
-    if (typeof window === 'undefined') {
-        return []
-    }
-    return [window.sessionStorage, window.localStorage].filter(Boolean)
+function notImplemented(feature) {
+  const error = new Error(`${feature}: ${ERROR_MESSAGES.not_implemented}`)
+  error.code = 'not_implemented'
+  throw error
 }
 
-function readCachedBaseUrl() {
-    if (cachedBaseUrl) {
-        return cachedBaseUrl
-    }
-    const stores = getStorageList()
-    for (let index = 0; index < stores.length; index += 1) {
-        const store = stores[index]
-        try {
-            const raw = store.getItem(LOCAL_API_INFO_STORAGE_KEY)
-            if (!raw) {
-                continue
-            }
-            const parsed = JSON.parse(raw)
-            const baseUrl = typeof parsed?.baseUrl === 'string' ? parsed.baseUrl.trim() : ''
-            if (baseUrl) {
-                cachedBaseUrl = baseUrl
-                return baseUrl
-            }
-        } catch (_) {
-            // ignore malformed cache
-        }
-    }
-    return ''
+function newId(prefix = 'id') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-function persistBaseUrl(baseUrl) {
-    const normalized = typeof baseUrl === 'string' ? baseUrl.trim() : ''
-    if (!normalized) {
-        return
+async function readKvList(namespace) {
+  const { items } = await listSettings(namespace)
+  return (items || []).map((item) => {
+    const raw = item.value ?? item
+    if (typeof raw === 'string') {
+      try {
+        return JSON.parse(raw)
+      } catch {
+        return { key: item.key, value: raw }
+      }
     }
-    cachedBaseUrl = normalized
-    const serialized = JSON.stringify({
-        baseUrl: normalized,
-        updatedAt: Date.now()
-    })
-    getStorageList().forEach((store) => {
-        try {
-            store.setItem(LOCAL_API_INFO_STORAGE_KEY, serialized)
-        } catch (_) {
-            // ignore storage failures
-        }
-    })
+    return raw && typeof raw === 'object' ? raw : { key: item.key, value: raw }
+  })
 }
 
-function clearBaseUrlCache() {
-    cachedBaseUrl = ''
-    getStorageList().forEach((store) => {
-        try {
-            store.removeItem(LOCAL_API_INFO_STORAGE_KEY)
-        } catch (_) {
-            // ignore storage failures
-        }
-    })
+async function writeKv(namespace, key, value) {
+  await upsertSetting(namespace, key, value)
+  return value
 }
 
-async function resolveLocalApiBaseUrl(options = {}) {
-    const forceRefresh = Boolean(options.forceRefresh)
-    if (!forceRefresh) {
-        const cached = readCachedBaseUrl()
-        if (cached) {
-            return cached
-        }
-        if (cachedBaseUrlPromise) {
-            return cachedBaseUrlPromise
-        }
-    }
-
-    if (!isAPIAvailable()) {
-        throw new Error('本地 API 不可用')
-    }
-
-    cachedBaseUrlPromise = window.electronAPI.getLocalApiInfo()
-        .then((response) => {
-            const baseUrl = typeof response?.data?.baseUrl === 'string'
-                ? response.data.baseUrl.trim()
-                : ''
-            if (!baseUrl) {
-                const error = new Error('本地 API 地址不可用')
-                error.code = 'local_api_unavailable'
-                throw error
-            }
-            persistBaseUrl(baseUrl)
-            return baseUrl
-        })
-        .catch((error) => {
-            clearBaseUrlCache()
-            throw normalizeClientError(error, 'local_api_unavailable', '本地 API 地址不可用')
-        })
-        .finally(() => {
-            cachedBaseUrlPromise = null
-        })
-
-    return cachedBaseUrlPromise
-}
-
-function normalizeJsonPayload(payload) {
-    if (ArrayBuffer.isView(payload)) {
-        return Array.from(payload)
-    }
-    if (payload instanceof ArrayBuffer) {
-        return Array.from(new Uint8Array(payload))
-    }
-    if (Array.isArray(payload)) {
-        return payload.map((item) => normalizeJsonPayload(item))
-    }
-    if (!payload || typeof payload !== 'object') {
-        return payload
-    }
-    const normalized = {}
-    Object.entries(payload).forEach(([key, value]) => {
-        normalized[key] = normalizeJsonPayload(value)
-    })
-    return normalized
-}
-
-function normalizeClientError(errorLike, fallbackCode, fallbackMessage) {
-    const message = typeof errorLike?.message === 'string' && errorLike.message.trim()
-        ? errorLike.message.trim()
-        : fallbackMessage
-    const error = errorLike instanceof Error ? errorLike : new Error(message)
-    error.code = typeof errorLike?.code === 'string' && errorLike.code.trim()
-        ? errorLike.code.trim()
-        : fallbackCode
-    if (!error.message || !String(error.message).trim()) {
-        error.message = fallbackMessage
-    }
-    return error
-}
-
-function buildQuery(params = {}) {
-    const search = new URLSearchParams()
-    Object.entries(params).forEach(([key, value]) => {
-        if (value == null || value === '') {
-            return
-        }
-        search.set(key, String(value))
-    })
-    const serialized = search.toString()
-    return serialized ? `?${serialized}` : ''
-}
-
-export async function request(path, options = {}) {
-    const {
-        method = 'GET',
-        query,
-        body,
-        headers = {}
-    } = options
-
-    const baseUrl = await resolveLocalApiBaseUrl()
-    let response
-
-    try {
-        response = await fetch(`${baseUrl}${path}${buildQuery(query)}`, {
-            method,
-            headers: body === undefined ? headers : {
-                'Content-Type': 'application/json',
-                ...headers
-            },
-            body: body === undefined ? undefined : JSON.stringify(normalizeJsonPayload(body))
-        })
-    } catch (error) {
-        throw normalizeClientError(error, 'network_error', '网络连接失败，请检查网络设置')
-    }
-
-    const contentType = String(response.headers.get('content-type') || '').toLowerCase()
-    const payload = contentType.includes('application/json')
-        ? await response.json().catch(() => ({}))
-        : await response.text().catch(() => '')
-
-    if (!response.ok) {
-        const normalized = normalizeClientError({
-            code: payload?.error || payload?.code || 'server_error',
-            message: payload?.message || payload?.error?.message || `HTTP_${response.status}`
-        }, 'server_error', '服务请求失败')
-        throw normalized
-    }
-
-    if (payload && typeof payload === 'object' && payload.success === false) {
-        throw normalizeClientError({
-            code: payload?.error || payload?.error?.code || 'server_error',
-            message: payload?.message || payload?.error?.message || '服务请求失败'
-        }, 'server_error', '服务请求失败')
-    }
-
-    if (payload && typeof payload === 'object' && Object.prototype.hasOwnProperty.call(payload, 'data')) {
-        return payload.data
-    }
-
-    return payload
-}
-
-function parseSseBlock(block, fallbackType = 'message') {
-    const lines = String(block || '').split('\n')
-    let eventName = ''
-    let dataLine = ''
-    lines.forEach((line) => {
-        if (line.startsWith('event:')) {
-            eventName = line.slice(6).trim()
-        } else if (line.startsWith('data:')) {
-            dataLine += line.slice(5).trim()
-        }
-    })
-
-    let parsed = {}
-    try {
-        parsed = dataLine ? JSON.parse(dataLine) : {}
-    } catch (_) {
-        parsed = {}
-    }
-    if (!parsed || typeof parsed !== 'object') {
-        parsed = {}
-    }
-    return {
-        event: eventName || fallbackType,
-        data: parsed
-    }
-}
-
-function buildStreamError(payload, fallbackCode, fallbackMessage) {
-    const errorLike = payload?.error && typeof payload.error === 'object'
-        ? payload.error
-        : payload
-    return normalizeClientError({
-        code: errorLike?.code || payload?.error || fallbackCode,
-        message: errorLike?.message || payload?.message || fallbackMessage
-    }, fallbackCode, fallbackMessage)
-}
-
-export async function requestEventStream(path, options = {}) {
-    const {
-        method = 'POST',
-        query,
-        body,
-        headers = {},
-        onEvent
-    } = options
-    const eventHandler = typeof onEvent === 'function' ? onEvent : null
-
-    const baseUrl = await resolveLocalApiBaseUrl()
-    let response
-    try {
-        response = await fetch(`${baseUrl}${path}${buildQuery(query)}`, {
-            method,
-            headers: body === undefined ? headers : {
-                'Content-Type': 'application/json',
-                ...headers
-            },
-            body: body === undefined ? undefined : JSON.stringify(normalizeJsonPayload(body))
-        })
-    } catch (error) {
-        throw normalizeClientError(error, 'network_error', '网络连接失败，请检查网络设置')
-    }
-
-    const contentType = String(response.headers.get('content-type') || '').toLowerCase()
-    if (!response.ok) {
-        const payload = contentType.includes('application/json')
-            ? await response.json().catch(() => ({}))
-            : await response.text().catch(() => '')
-        const error = buildStreamError(payload, `http_${response.status}`, `HTTP_${response.status}`)
-        error.statusCode = response.status
-        throw error
-    }
-
-    if (!contentType.includes('text/event-stream') || !response.body) {
-        const payload = contentType.includes('application/json')
-            ? await response.json().catch(() => ({}))
-            : await response.text().catch(() => '')
-        if (payload && typeof payload === 'object' && payload.success === false) {
-            throw buildStreamError(payload, 'server_error', '服务请求失败')
-        }
-        return payload && typeof payload === 'object' && Object.prototype.hasOwnProperty.call(payload, 'data')
-            ? payload.data
-            : payload
-    }
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-    let buffer = ''
-    let finalData = null
-    let streamError = null
-
-    while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const blocks = buffer.split('\n\n')
-        buffer = blocks.pop() || ''
-        blocks.forEach((block) => {
-            const parsed = parseSseBlock(block)
-            if (eventHandler) {
-                try {
-                    eventHandler(parsed)
-                } catch (error) {
-                    console.warn('流式事件监听器执行失败:', error)
-                }
-            }
-            if (parsed.event === 'error') {
-                streamError = buildStreamError(parsed.data, 'stream_error', '流式请求失败')
-            }
-            if (parsed.event === 'complete') {
-                finalData = parsed.data?.data || parsed.data || null
-            }
-        })
-    }
-
-    if (streamError) {
-        throw streamError
-    }
-    if (!finalData || typeof finalData !== 'object') {
-        throw normalizeClientError({
-            code: 'invalid_response_format',
-            message: '流式返回缺少 complete 数据'
-        }, 'invalid_response_format', '流式返回缺少 complete 数据')
-    }
-    return finalData
-}
-
-function emitEvaluationEvent(event) {
-    evaluationListeners.forEach((listener) => {
-        try {
-            listener(event)
-        } catch (error) {
-            console.warn('写作评测事件监听器执行失败:', error)
-        }
-    })
-}
-
-function parseSsePayload(rawPayload, fallbackType, sessionId) {
-    let parsed = {}
-    try {
-        parsed = rawPayload ? JSON.parse(rawPayload) : {}
-    } catch (_) {
-        parsed = {}
-    }
-
-    if (!parsed || typeof parsed !== 'object') {
-        parsed = {}
-    }
-
-    if (!parsed.type) {
-        parsed.type = fallbackType
-    }
-    if (!parsed.sessionId) {
-        parsed.sessionId = sessionId
-    }
-    return parsed
-}
-
-async function ensureEvaluationStream(sessionId) {
-    const normalizedSessionId = String(sessionId || '').trim()
-    if (!normalizedSessionId || evaluationStreams.has(normalizedSessionId)) {
-        return
-    }
-
-    const baseUrl = await resolveLocalApiBaseUrl()
-    const stream = new EventSource(`${baseUrl}/api/writing/evaluations/${encodeURIComponent(normalizedSessionId)}/stream`)
-    const close = () => {
-        if (!evaluationStreams.has(normalizedSessionId)) {
-            return
-        }
-        stream.close()
-        evaluationStreams.delete(normalizedSessionId)
-    }
-
-    const bind = (eventType) => {
-        stream.addEventListener(eventType, (event) => {
-            const payload = parseSsePayload(event.data, eventType, normalizedSessionId)
-            emitEvaluationEvent(payload)
-            if (payload.type === 'complete' || payload.type === 'error') {
-                close()
-            }
-        })
-    }
-
-    ;[
-        'start',
-        'progress',
-        'stage',
-        'score',
-        'analysis',
-        'review',
-        'sentence',
-        'feedback',
-        'complete',
-        'error',
-        'log',
-        'heartbeat'
-    ].forEach(bind)
-
-    stream.onerror = () => {
-        if (stream.readyState === EventSource.CLOSED) {
-            close()
-        }
-    }
-
-    evaluationStreams.set(normalizedSessionId, { close })
-}
-
-function closeEvaluationStream(sessionId) {
-    const normalizedSessionId = String(sessionId || '').trim()
-    const entry = evaluationStreams.get(normalizedSessionId)
-    if (!entry) {
-        return
-    }
-    entry.close()
-}
-
-function closeAllEvaluationStreams() {
-    Array.from(evaluationStreams.keys()).forEach((sessionId) => {
-        closeEvaluationStream(sessionId)
-    })
+async function deleteKv(namespace, key) {
+  await upsertSetting(namespace, key, null)
 }
 
 export const configs = {
-    async list() {
-        return request('/api/configs')
-    },
+  async list() {
+    const items = await readKvList('provider_configs')
+    return items.filter((item) => item && item.id)
+  },
 
-    async getDefault() {
-        const list = await this.list()
-        return list.find((item) => item.is_default) || list[0]
-    },
+  async getDefault() {
+    const list = await this.list()
+    return list.find((item) => item.is_default) || list[0] || null
+  },
 
-    async create(data) {
-        return request('/api/configs', { method: 'POST', body: data })
-    },
-
-    async update(id, updates) {
-        return request(`/api/configs/${id}`, { method: 'PUT', body: updates })
-    },
-
-    async delete(id) {
-        return request(`/api/configs/${id}`, { method: 'DELETE' })
-    },
-
-    async setDefault(id) {
-        return request(`/api/configs/${id}/default`, { method: 'POST' })
-    },
-
-    async toggleEnabled(id) {
-        return request(`/api/configs/${id}/toggle-enabled`, { method: 'POST' })
-    },
-
-    async test(id) {
-        return request(`/api/configs/${id}/test`, { method: 'POST' })
+  async create(data) {
+    const id = data.id || newId('cfg')
+    const entry = {
+      ...data,
+      id,
+      is_default: !!data.is_default,
+      enabled: data.enabled !== false
     }
+    if (entry.is_default) {
+      const all = await this.list()
+      for (const item of all) {
+        if (item.is_default) {
+          await writeKv('provider_configs', item.id, { ...item, is_default: false })
+        }
+      }
+    }
+    await writeKv('provider_configs', id, entry)
+    return entry
+  },
+
+  async update(id, updates) {
+    const all = await this.list()
+    const prev = all.find((item) => item.id === id)
+    if (!prev) {
+      const err = new Error(`config not found: ${id}`)
+      err.code = 'not_found'
+      throw err
+    }
+    const next = { ...prev, ...updates, id }
+    if (next.is_default) {
+      for (const item of all) {
+        if (item.id !== id && item.is_default) {
+          await writeKv('provider_configs', item.id, { ...item, is_default: false })
+        }
+      }
+    }
+    await writeKv('provider_configs', id, next)
+    return next
+  },
+
+  async delete(id) {
+    await deleteKv('provider_configs', id)
+    return true
+  },
+
+  async setDefault(id) {
+    return this.update(id, { is_default: true })
+  },
+
+  async toggleEnabled(id) {
+    const all = await this.list()
+    const prev = all.find((item) => item.id === id)
+    if (!prev) {
+      const err = new Error(`config not found: ${id}`)
+      err.code = 'not_found'
+      throw err
+    }
+    return this.update(id, { enabled: !prev.enabled })
+  },
+
+  async test() {
+    return {
+      ok: true,
+      message: 'Tauri 路径：provider 连通性测试占位（真实 LLM 待 secret vault 接线）'
+    }
+  }
 }
 
 export const prompts = {
-    async getActive(taskType) {
-        return request('/api/prompts/active', {
-            query: { taskType }
-        })
-    },
+  async getActive(taskType) {
+    const all = await this.listAll(taskType)
+    return all.find((p) => p.active) || all[0] || null
+  },
 
-    async import(jsonData) {
-        return request('/api/prompts/import', {
-            method: 'POST',
-            body: jsonData
-        })
-    },
-
-    async exportActive() {
-        return request('/api/prompts/export')
-    },
-
-    async listAll(taskType = null) {
-        return request('/api/prompts', {
-            query: taskType ? { taskType } : {}
-        })
-    },
-
-    async activate(id) {
-        return request(`/api/prompts/${id}/activate`, { method: 'PUT' })
-    },
-
-    async delete(id) {
-        return request(`/api/prompts/${id}`, { method: 'DELETE' })
+  async import(jsonData) {
+    const list = Array.isArray(jsonData) ? jsonData : (jsonData?.prompts || [jsonData])
+    const saved = []
+    for (const item of list) {
+      const id = item.id || newId('prompt')
+      const entry = { ...item, id }
+      await writeKv('prompts', id, entry)
+      saved.push(entry)
     }
+    return { imported: saved.length, items: saved }
+  },
+
+  async exportActive() {
+    const all = await this.listAll()
+    return { prompts: all.filter((p) => p.active) }
+  },
+
+  async listAll(taskType = null) {
+    const items = (await readKvList('prompts')).filter((item) => item && item.id)
+    if (!taskType) return items
+    return items.filter(
+      (item) => !item.taskType || item.taskType === taskType || item.task_type === taskType
+    )
+  },
+
+  async activate(id) {
+    const all = await this.listAll()
+    for (const item of all) {
+      const active = item.id === id
+      if (!!item.active !== active) {
+        await writeKv('prompts', item.id, { ...item, active })
+      }
+    }
+    return true
+  },
+
+  async delete(id) {
+    await deleteKv('prompts', id)
+    return true
+  }
+}
+
+function emitEvaluationEvent(event) {
+  evaluationListeners.forEach((listener) => {
+    try {
+      listener(event)
+    } catch (error) {
+      console.warn('写作评测事件监听器执行失败:', error)
+    }
+  })
+}
+
+function mapEventToUi(raw) {
+  const eventType = raw.eventType || raw.event_type || raw.type || 'log'
+  const payload = raw.payload || raw.data || {}
+  const typeMap = {
+    stage: 'stage',
+    completed: 'complete',
+    complete: 'complete',
+    error: 'error',
+    failed: 'error',
+    log: 'log'
+  }
+  const type = typeMap[eventType] || eventType
+  const data =
+    typeof payload === 'object' && payload !== null
+      ? { ...payload }
+      : { message: String(payload || '') }
+  if (raw.stage && !data.stage) {
+    data.stage = raw.stage
+    data.key = typeof raw.stage === 'string' ? raw.stage.toLowerCase() : raw.stage
+  }
+  if (type === 'complete' && !data.score && data.evaluation?.score) {
+    Object.assign(data, data.evaluation)
+  }
+  return {
+    type,
+    sessionId: raw.sessionId || raw.evaluationId || raw.evaluation_id,
+    sequence: raw.sequence,
+    data
+  }
+}
+
+async function pollEvaluationEvents(attemptId, evaluationId) {
+  if (!evaluationId || activePolls.has(evaluationId)) return
+  let after = 0
+  let stopped = false
+  activePolls.set(evaluationId, () => {
+    stopped = true
+  })
+
+  const tick = async () => {
+    if (stopped) return
+    try {
+      const events = await listEvaluationEvents(evaluationId, after)
+      for (const raw of events || []) {
+        after = Math.max(after, Number(raw.sequence || 0))
+        emitEvaluationEvent(mapEventToUi({ ...raw, sessionId: attemptId }))
+        const t = String(raw.eventType || raw.event_type || '').toLowerCase()
+        if (t === 'completed' || t === 'complete' || t === 'error' || t === 'failed') {
+          stopped = true
+        }
+      }
+      if (!stopped) {
+        const evaluation = await getEvaluationForAttempt(attemptId)
+        const status = String(
+          evaluation?.evaluation?.status || evaluation?.status || ''
+        ).toLowerCase()
+        if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+          if (status === 'completed' && evaluation?.evaluation) {
+            emitEvaluationEvent({
+              type: 'complete',
+              sessionId: attemptId,
+              data: evaluation.evaluation
+            })
+          }
+          stopped = true
+        }
+      }
+    } catch (err) {
+      console.warn('poll evaluation events failed', err)
+    }
+    if (!stopped) {
+      setTimeout(tick, 250)
+    } else {
+      activePolls.delete(evaluationId)
+    }
+  }
+  void tick()
 }
 
 export const evaluate = {
-    async start(payload) {
-        const result = await request('/api/writing/evaluations', {
-            method: 'POST',
-            body: payload
-        })
-        if (result?.sessionId) {
-            void ensureEvaluationStream(result.sessionId).catch((error) => {
-                console.warn('写作评测 SSE 连接失败:', error)
-            })
-        }
-        return result
-    },
+  async start(payload) {
+    const attemptId = payload.sessionId || payload.attemptId || newId('attempt')
+    const content = payload.content || payload.contentText || ''
+    const promptSnapshot =
+      payload.topic_text || payload.topicText || payload.promptSnapshot || null
+    const taskType = payload.task_type || payload.taskType || null
 
-    async cancel(sessionId) {
-        const result = await request(`/api/writing/evaluations/${encodeURIComponent(sessionId)}`, {
-            method: 'DELETE'
-        })
-        closeEvaluationStream(sessionId)
-        return result
-    },
+    await saveDraft({
+      attemptId,
+      mode: payload.mode || 'bank',
+      assetId:
+        payload.topic_id != null
+          ? String(payload.topic_id)
+          : payload.assetId || null,
+      contentText: content,
+      promptSnapshot,
+      idempotencyKey: newIdempotencyKey('draft')
+    })
+    await submitAttempt(attemptId, newIdempotencyKey('submit'))
+    const { result } = await startEvaluation({
+      attemptId,
+      taskType,
+      idempotencyKey: newIdempotencyKey('eval'),
+      retryOf: payload.retryOf || null
+    })
 
-    async getSessionState(sessionId) {
-        const result = await request(`/api/writing/evaluations/${encodeURIComponent(sessionId)}`)
-        void ensureEvaluationStream(sessionId).catch((error) => {
-            console.warn('写作评测状态补连 SSE 失败:', error)
-        })
-        return result
-    },
+    const evaluationId =
+      result?.session?.evaluationId ||
+      result?.session?.evaluation_id ||
+      result?.evaluation?.id ||
+      null
 
-    onEvent(callback) {
-        if (typeof callback !== 'function') {
-            return null
-        }
-        listenerSequence += 1
-        const listenerId = `writing_eval_listener_${listenerSequence}`
-        evaluationListeners.set(listenerId, callback)
-        return listenerId
-    },
-
-    removeEventListener(listenerId) {
-        if (!listenerId) {
-            return
-        }
-        evaluationListeners.delete(listenerId)
-        if (evaluationListeners.size === 0) {
-            closeAllEvaluationStreams()
-        }
+    const events = result?.events || []
+    for (const raw of events) {
+      emitEvaluationEvent(mapEventToUi({ ...raw, sessionId: attemptId }))
     }
+    if (evaluationId) {
+      void pollEvaluationEvents(attemptId, evaluationId)
+    } else if (result?.evaluation) {
+      emitEvaluationEvent({
+        type: 'complete',
+        sessionId: attemptId,
+        data: result.evaluation
+      })
+    }
+
+    return {
+      sessionId: attemptId,
+      evaluationId,
+      result
+    }
+  },
+
+  async cancel(sessionId) {
+    try {
+      const { evaluation } = await getEvaluationForAttempt(sessionId)
+      const evaluationId = evaluation?.id
+      if (evaluationId) {
+        const stop = activePolls.get(evaluationId)
+        if (stop) stop()
+        await cancelEvaluation(evaluationId)
+      }
+    } catch (_) {
+      // ignore
+    }
+    return { cancelled: true, sessionId }
+  },
+
+  async getSessionState(sessionId) {
+    const { evaluation } = await getEvaluationForAttempt(sessionId)
+    let events = []
+    if (evaluation?.id) {
+      const rawEvents = await listEvaluationEvents(evaluation.id, 0)
+      events = (rawEvents || []).map((raw) => mapEventToUi({ ...raw, sessionId }))
+      void pollEvaluationEvents(sessionId, evaluation.id)
+    }
+    return {
+      sessionId,
+      evaluation,
+      events,
+      status: evaluation?.status || 'unknown'
+    }
+  },
+
+  onEvent(callback) {
+    if (typeof callback !== 'function') return null
+    listenerSequence += 1
+    const listenerId = `writing_eval_listener_${listenerSequence}`
+    evaluationListeners.set(listenerId, callback)
+    return listenerId
+  },
+
+  removeEventListener(listenerId) {
+    if (!listenerId) return
+    evaluationListeners.delete(listenerId)
+  }
 }
 
 export const topics = {
-    async list(filters = {}, pagination = { page: 1, limit: 20 }) {
-        return request('/api/topics', {
-            query: {
-                ...filters,
-                ...pagination
-            }
-        })
-    },
-
-    async getById(id) {
-        return request(`/api/topics/${id}`)
-    },
-
-    async create(topicData) {
-        return request('/api/topics', {
-            method: 'POST',
-            body: topicData
-        })
-    },
-
-    async update(id, updates) {
-        return request(`/api/topics/${id}`, {
-            method: 'PUT',
-            body: updates
-        })
-    },
-
-    async delete(id) {
-        return request(`/api/topics/${id}`, { method: 'DELETE' })
-    },
-
-    async batchImport(topicsArray) {
-        return request('/api/topics/batch-import', {
-            method: 'POST',
-            body: topicsArray
-        })
-    },
-
-    async getStatistics() {
-        return request('/api/topics/statistics')
+  async list(filters = {}, pagination = { page: 1, limit: 20 }) {
+    let items = (await readKvList('topics')).filter((item) => item && (item.id || item.title))
+    if (filters.task_type || filters.taskType) {
+      const t = filters.task_type || filters.taskType
+      items = items.filter((item) => (item.task_type || item.taskType) === t)
     }
+    if (filters.search) {
+      const q = String(filters.search).toLowerCase()
+      items = items.filter((item) =>
+        String(item.title || item.prompt || '').toLowerCase().includes(q)
+      )
+    }
+    const page = Number(pagination.page || 1)
+    const limit = Number(pagination.limit || 20)
+    const offset = (page - 1) * limit
+    const slice = items.slice(offset, offset + limit)
+    return { data: slice, total: items.length, page, limit }
+  },
+
+  async getById(id) {
+    const { data } = await this.list({}, { page: 1, limit: 10000 })
+    return data.find((item) => String(item.id) === String(id)) || null
+  },
+
+  async create(topicData) {
+    const id = topicData.id || newId('topic')
+    const entry = { ...topicData, id }
+    await writeKv('topics', String(id), entry)
+    return entry
+  },
+
+  async update(id, updates) {
+    const prev = await this.getById(id)
+    if (!prev) {
+      const err = new Error(`topic not found: ${id}`)
+      err.code = 'not_found'
+      throw err
+    }
+    const next = { ...prev, ...updates, id }
+    await writeKv('topics', String(id), next)
+    return next
+  },
+
+  async delete(id) {
+    await deleteKv('topics', String(id))
+    return true
+  },
+
+  async batchImport(topicsArray) {
+    const list = Array.isArray(topicsArray) ? topicsArray : []
+    let count = 0
+    for (const item of list) {
+      await this.create(item)
+      count += 1
+    }
+    return { imported: count }
+  },
+
+  async getStatistics() {
+    const { data } = await this.list({}, { page: 1, limit: 10000 })
+    const byTask = {}
+    for (const item of data) {
+      const t = item.task_type || item.taskType || 'unknown'
+      byTask[t] = (byTask[t] || 0) + 1
+    }
+    return { total: data.length, byTask }
+  }
+}
+
+function mapHistoryItemToEssay(item) {
+  return {
+    id: item.id,
+    task_type: item.task_type || item.taskType || 'task2',
+    topic_title: item.display_topic_title || item.topic_title || item.title || 'Untitled',
+    content: item.content_text || '',
+    total_score: item.total_score ?? item.score_value ?? 0,
+    submitted_at: item.submitted_at || item.submittedAt || '',
+    duration: item.duration ?? Math.round((item.duration_ms || 0) / 1000),
+    status: item.status,
+    source: 'tauri'
+  }
 }
 
 export const essays = {
-    async list(filters = {}, pagination = { page: 1, limit: 20 }) {
-        return request('/api/essays', {
-            query: {
-                ...filters,
-                ...pagination
-            }
-        })
-    },
-
-    async getById(id) {
-        return request(`/api/essays/${id}`)
-    },
-
-    async create(essayData) {
-        return request('/api/essays', {
-            method: 'POST',
-            body: essayData
-        })
-    },
-
-    async delete(id) {
-        return request(`/api/essays/${id}`, { method: 'DELETE' })
-    },
-
-    async batchDelete(ids) {
-        return request('/api/essays/batch-delete', {
-            method: 'POST',
-            body: { ids }
-        })
-    },
-
-    async deleteAll() {
-        return request('/api/essays/all', { method: 'DELETE' })
-    },
-
-    async getStatistics(range = 'all', taskType = null) {
-        return request('/api/essays/statistics', {
-            query: {
-                range,
-                taskType
-            }
-        })
-    },
-
-    async exportCSV(filters = {}) {
-        return request('/api/essays/export', {
-            query: filters
-        })
+  async list(filters = {}, pagination = { page: 1, limit: 20 }) {
+    const page = Number(pagination.page || 1)
+    const limit = Number(pagination.limit || 20)
+    const offset = (page - 1) * limit
+    const result = await listHistory({
+      activity: 'writing',
+      limit,
+      offset,
+      search: filters.search || null,
+      startDate: filters.startDate || filters.start_date || null,
+      endDate: filters.endDate || filters.end_date || null,
+      minScore: filters.minScore ?? filters.min_score ?? null,
+      maxScore: filters.maxScore ?? filters.max_score ?? null
+    })
+    return {
+      data: (result.items || []).map(mapHistoryItemToEssay),
+      total: result.total,
+      page,
+      limit
     }
+  },
+
+  async getById(id) {
+    const { detail } = await getHistoryDetail(id)
+    if (!detail) return null
+    const attempt = detail.attempt || detail
+    return {
+      id: attempt.id || id,
+      ...attempt,
+      evaluation: detail.evaluation || null,
+      source: 'tauri'
+    }
+  },
+
+  async create() {
+    notImplemented('essays.create (use evaluate.start / writing_save_draft)')
+  },
+
+  async delete(id) {
+    await deleteHistoryAttempt(id)
+    return true
+  },
+
+  async batchDelete(ids) {
+    const list = Array.isArray(ids) ? ids : []
+    for (const id of list) {
+      await deleteHistoryAttempt(id)
+    }
+    return { deleted: list.length }
+  },
+
+  async deleteAll() {
+    const result = await listHistory({ activity: 'writing', limit: 10000, offset: 0 })
+    for (const item of result.items || []) {
+      await deleteHistoryAttempt(item.id)
+    }
+    return { deleted: (result.items || []).length }
+  },
+
+  async getStatistics() {
+    const result = await listHistory({ activity: 'writing', limit: 10000, offset: 0 })
+    const items = result.items || []
+    const scores = items
+      .map((i) => Number(i.score_value ?? i.total_score ?? 0))
+      .filter((n) => n > 0)
+    const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0
+    return {
+      total: items.length,
+      averageScore: Math.round(avg * 10) / 10,
+      scored: scores.length
+    }
+  },
+
+  async exportCSV(filters = {}) {
+    const { result } = await exportHistory('csv', { activity: 'writing', ...filters })
+    return result
+  }
 }
 
 export const settings = {
-    async getAll() {
-        return request('/api/settings')
-    },
-
-    async get(key) {
-        return request('/api/settings', {
-            query: { key }
-        })
-    },
-
-    async update(updates) {
-        return request('/api/settings', {
-            method: 'PUT',
-            body: updates
-        })
-    },
-
-    async reset() {
-        return request('/api/settings/reset', { method: 'POST' })
+  async getAll() {
+    const { items } = await listSettings('app')
+    const out = {}
+    for (const item of items || []) {
+      const key = item.key
+      let value = item.value
+      if (typeof value === 'string') {
+        try {
+          value = JSON.parse(value)
+        } catch {
+          // keep string
+        }
+      }
+      out[key] = value
     }
+    return out
+  },
+
+  async get(key) {
+    const all = await this.getAll()
+    return all[key]
+  },
+
+  async update(updates) {
+    const entries = Object.entries(updates || {})
+    for (const [key, value] of entries) {
+      await upsertSetting('app', key, value)
+    }
+    return true
+  },
+
+  async reset() {
+    const all = await this.getAll()
+    for (const key of Object.keys(all)) {
+      await upsertSetting('app', key, null)
+    }
+    return true
+  }
 }
 
 export const upload = {
-    async uploadImage(fileData) {
-        return request('/api/upload/image', {
-            method: 'POST',
-            body: fileData
-        })
-    },
+  async uploadImage() {
+    notImplemented('upload.uploadImage')
+  },
+  async deleteImage() {
+    notImplemented('upload.deleteImage')
+  },
+  async getImagePath() {
+    notImplemented('upload.getImagePath')
+  }
+}
 
-    async deleteImage(filename) {
-        return request(`/api/upload/image/${encodeURIComponent(filename)}`, {
-            method: 'DELETE'
-        })
-    },
+export async function request() {
+  notImplemented('request (Fastify HTTP removed)')
+}
 
-    async getImagePath(filename) {
-        return request(`/api/upload/image/${encodeURIComponent(filename)}/path`)
-    }
+export async function requestEventStream() {
+  notImplemented('requestEventStream (Fastify SSE removed)')
 }
 
 export default {
-    configs,
-    prompts,
-    evaluate,
-    topics,
-    essays,
-    settings,
-    upload,
-    getErrorMessage,
-    isAPIAvailable
+  configs,
+  prompts,
+  evaluate,
+  topics,
+  essays,
+  settings,
+  upload,
+  getErrorMessage,
+  isAPIAvailable
 }

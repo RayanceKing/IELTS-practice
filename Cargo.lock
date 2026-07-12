@@ -1905,6 +1905,7 @@ dependencies = [
  "chrono",
  "hex",
  "ielts-domain",
+ "proptest",
  "rusqlite",
  "serde",
  "serde_json",

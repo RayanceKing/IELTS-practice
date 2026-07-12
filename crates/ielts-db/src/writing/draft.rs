@@ -5,7 +5,7 @@ use rusqlite::{params, Connection};
 use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus};
 use ielts_domain::dto::{AttemptRecord, SaveDraftCommand, SubmitAttemptCommand};
 
-use crate::import::upsert_attempt;
+use crate::attempts::upsert_attempt;
 use crate::sqlite::{DbError, DbResult};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

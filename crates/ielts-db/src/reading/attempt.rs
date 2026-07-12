@@ -8,7 +8,7 @@ use uuid::Uuid;
 use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
 use ielts_domain::dto::{AttemptAnswer, AttemptRecord};
 
-use crate::import::upsert_attempt;
+use crate::attempts::upsert_attempt;
 use crate::reading::assets::{load_answer_key, load_controls, load_kinds};
 use crate::reading::scoring::{score_attempt, AnswerComparison, ScoreSummary};
 use crate::sqlite::{DbError, DbResult};
@@ -83,7 +83,7 @@ pub fn save_reading_draft(conn: &Connection, cmd: &ReadingDraftCommand) -> DbRes
         annotations: vec![],
     };
     // ensure asset stub
-    crate::import::ensure_asset_stub(
+    crate::attempts::ensure_asset_stub(
         conn,
         &cmd.asset_id,
         Activity::Reading,
@@ -149,7 +149,7 @@ pub fn submit_reading_attempt(
         })
         .collect();
 
-    crate::import::ensure_asset_stub(
+    crate::attempts::ensure_asset_stub(
         conn,
         &cmd.asset_id,
         Activity::Reading,

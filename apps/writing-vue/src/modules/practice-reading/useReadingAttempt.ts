@@ -1,7 +1,7 @@
 /**
  * Reading attempt view-model surface (Phase 6).
- * Practice pages consume this instead of assembling submission blobs for Tauri.
- * Electron/Fastify path remains via practiceSessions until Phase 10 cutover.
+ * Practice pages consume this instead of assembling submission blobs.
+ * Tauri-only product path.
  */
 
 import {
@@ -96,7 +96,7 @@ export function useReadingAttempt(options = {}) {
   }
 
   /**
-   * Persist draft answers. No-op on Electron (caller keeps sessionStorage).
+   * Persist draft answers via Tauri SQLite.
    */
   async function persistDraft({
     attemptId,
@@ -106,9 +106,6 @@ export function useReadingAttempt(options = {}) {
     titleSnapshot,
     idempotencyKey
   }) {
-    if (!deps.isTauri()) {
-      return { source: 'electron', attempt: null, skipped: true }
-    }
     const id = attemptId || newAttemptId()
     return deps.saveReadingDraft({
       attemptId: id,
@@ -121,7 +118,6 @@ export function useReadingAttempt(options = {}) {
   }
 
   async function patchAnswer(attemptId, questionId, answer, marked = false) {
-    if (!deps.isTauri()) return false
     return deps.patchReadingAnswer(attemptId, questionId, answer, marked)
   }
 
@@ -140,9 +136,6 @@ export function useReadingAttempt(options = {}) {
     titleSnapshot,
     idempotencyKey
   }) {
-    if (!deps.isTauri()) {
-      return { source: 'electron', submission: null, raw: null, skipped: true }
-    }
     const id = attemptId || newAttemptId()
     const { source, result } = await deps.submitReadingAttempt({
       attemptId: id,

@@ -10,7 +10,7 @@ use ielts_domain::dto::{
     AttemptRecord, BackupManifest, BackupPackage, ImportBackupReport, SecretRef, SettingEntry,
 };
 
-use crate::import::upsert_attempt;
+use crate::attempts::upsert_attempt;
 use crate::settings::{list_secret_refs, list_settings, put_secret_ref, upsert_setting};
 use crate::sqlite::{DbError, DbResult};
 

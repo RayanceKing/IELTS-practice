@@ -72,8 +72,8 @@
           <div>Task 1: <span id="html-exams">{{ topicLibraryStats.task1 }}</span></div>
           <div>Task 2: <span id="pdf-exams">{{ topicLibraryStats.task2 }}</span></div>
           <div>最近更新: <span id="last-update">{{ topicLibraryStats.lastUpdate }}</span></div>
-          <div>Electron版本: <span>{{ electronVersion }}</span></div>
-          <div>Node版本: <span>{{ nodeVersion }}</span></div>
+          <div>Host: <span>{{ electronVersion }}</span></div>
+          <div>Tauri版本: <span>{{ nodeVersion }}</span></div>
           <div>数据目录: <span>{{ userDataPath || '加载中...' }}</span></div>
         </div>
         <div class="settings-credit">
@@ -468,11 +468,11 @@
               <span class="value">Phase 05 - 收口与交付准备</span>
             </div>
             <div class="info-row">
-              <span class="label">Electron版本</span>
+              <span class="label">Host</span>
               <span class="value">{{ electronVersion }}</span>
             </div>
             <div class="info-row">
-              <span class="label">Node版本</span>
+              <span class="label">Tauri版本</span>
               <span class="value">{{ nodeVersion }}</span>
             </div>
             <div class="info-row">
@@ -661,7 +661,7 @@ const tabs = [
     summary: '版本、运行环境、能力',
     kicker: 'About',
     title: '关于写作模块',
-    description: '查看当前版本、Electron 环境和写作模块能力范围。',
+    description: '查看当前版本、Tauri 环境和写作模块能力范围。',
     icon: icons.about
   }
 ]
@@ -796,29 +796,28 @@ const apiRequestGate = createRequestGate()
 const promptRequestGate = createRequestGate()
 const settingsRequestGate = createRequestGate()
 
-// 关于页面数据
-const electronVersion = ref('N/A')
+// 关于页面数据（Tauri host）
+const electronVersion = ref('Tauri')
 const nodeVersion = ref('N/A')
 const userDataPath = ref('')
 
-// 获取版本信息（通过preload安全暴露）
-if (window.electronAPI && window.electronAPI.getVersions) {
-  const versions = window.electronAPI.getVersions()
-  electronVersion.value = versions.electron
-  nodeVersion.value = versions.node
+async function loadTauriAboutInfo() {
+  try {
+    const { invokeCommand } = await import('@/api/tauri-bridge.js')
+    const info = await invokeCommand('get_app_info')
+    electronVersion.value = info?.host || 'tauri'
+    nodeVersion.value = info?.tauriVersion || info?.version || 'N/A'
+    const paths = await invokeCommand('get_app_data_paths')
+    userDataPath.value = paths?.appData || paths?.app_data || ''
+  } catch (error) {
+    electronVersion.value = 'tauri'
+    nodeVersion.value = 'N/A'
+    userDataPath.value = '无法获取（需 Tauri 运行时）'
+  }
 }
 
-// 获取用户数据路径
 async function getUserDataPath() {
-  if (window.electronAPI && window.electronAPI.getUserDataPath) {
-    try {
-      userDataPath.value = await window.electronAPI.getUserDataPath()
-    } catch (error) {
-      userDataPath.value = '无法获取'
-    }
-  } else {
-    userDataPath.value = '仅在 Electron 中可用'
-  }
+  await loadTauriAboutInfo()
 }
 
 function setSectionMessage(section, type, message) {

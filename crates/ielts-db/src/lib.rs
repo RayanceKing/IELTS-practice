@@ -1,38 +1,44 @@
 //! SQLite v2 persistence for the IELTS Practice rewrite.
 //!
-//! Phase 3: migration chain, WAL, legacy importers, shadow-read.
-//! Phase 4: unified history, settings, backup, secret refs.
+//! Product hot path: history, settings, writing, reading, modes, enrichment, attempts.
+//! Cold path only: `import` (optional legacy one-shot migration).
 
+pub mod annotations;
+pub mod attempts;
 pub mod backup;
+pub mod coach;
+pub mod dictionary;
 pub mod history;
 pub mod import;
 pub mod migrate;
 pub mod modes;
-pub mod coach;
 pub mod perf;
-pub mod dictionary;
-pub mod vocab;
-pub mod annotations;
 pub mod reading;
 pub mod secrets;
 pub mod settings;
 pub mod shadow;
-pub mod writing;
 pub mod sqlite;
+pub mod vocab;
+pub mod writing;
 
+pub use annotations::*;
+pub use attempts::{count_attempts, ensure_asset_stub, upsert_attempt};
 pub use backup::*;
+pub use coach::*;
+pub use dictionary::*;
 pub use history::*;
-pub use import::*;
+pub use import::{
+    find_legacy_db_candidates, import_browser_export_file, import_browser_export_value,
+    import_reading_archive_file, import_reading_archive_value, migrate_legacy_sqlite_to_v2,
+    list_history_view_models, scan_legacy_sqlite, LegacyDbScan, LegacyMigrationReport,
+};
 pub use migrate::*;
 pub use modes::*;
-pub use coach::*;
 pub use perf::*;
-pub use dictionary::*;
-pub use vocab::*;
-pub use annotations::*;
 pub use reading::*;
 pub use secrets::*;
 pub use settings::*;
 pub use shadow::*;
-pub use writing::*;
 pub use sqlite::*;
+pub use vocab::*;
+pub use writing::*;

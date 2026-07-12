@@ -5,7 +5,8 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0–10 ✅ 完成（2026-07-12） / 重构任务书执行完毕
+> **执行状态**：Phase 0–10 ✅ 完成（2026-07-12） / 重构任务书执行完毕  
+> **纯原生收口（post-Phase-10）**：A 全删 Electron/Fastify 前端双路径；B domain `adapters` 迁入 `ielts-db::import::convert`（冷路径可选导入）；`attempts` 热路径独立；`release.yml` 改为 Tauri 打包。
 
 ---
 
@@ -1417,4 +1418,15 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 > **把当前分散在 Electron、Fastify、SQLite JSON、sessionStorage、localStorage、legacy scripts 和巨型 Vue 页面中的隐式产品规则，提炼为可持久化、可测试、可恢复、最小字段的领域模型，同时保持用户已经形成的阅读和写作操作习惯。**
 
-**Phase 0–10 架构切换已在本地完成**（提交 `b9f579e`…`3a2e0ec`）。后续工作应聚焦发布密钥、实机性能/视觉验收、真实 AI provider 与题型级 a11y E2E，而不是重新引入双运行时。
+**Phase 0–10 架构切换已在本地完成**（提交 `b9f579e`…`3a2e0ec`）。
+
+### 纯原生收口（post-Phase-10，2026-07-12）
+
+用户选项 2 落地：
+
+1. **A 全删**：`apps/writing-vue` 去掉 Electron/Fastify HTTP/SSE 热路径；`client.js` / `practice-client.js` / `*-repository.js` 仅走 Tauri `invoke`；`@tauri-apps/api` 入依赖；Settings 关于页改读 `get_app_info` / `get_app_data_paths`。
+2. **B 冷导入**：`ielts-domain` 删除 `adapters`；转换器仅在 `crates/ielts-db/src/import/convert/`；`upsert_attempt` 在 `crates/ielts-db/src/attempts/` 热路径；golden/property 测试迁入 `ielts-db`。
+3. **发布**：`.github/workflows/release.yml` 不再构建 Electron，改为 Tauri multi-platform release。
+
+后续工作：真实 LLM provider 接线、reading asset 全文加载命令、topics/configs 正式表结构（当前 settings KV 过渡）、发布签名密钥、实机 E2E。**禁止重新引入双运行时或 file:// 兼容。**
+

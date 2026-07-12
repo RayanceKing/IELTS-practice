@@ -1,6 +1,5 @@
 /**
- * Suite / endless / memorize mode repository (Phase 7).
- * Auto-submit uses the same idempotent submit commands as manual submit.
+ * Suite / endless / memorize mode repository — Tauri only.
  */
 
 import { invokeCommand, isTauriRuntime, unwrapCommandResponse } from '@/api/tauri-bridge.js'
@@ -10,7 +9,6 @@ function newKey(prefix = 'mode') {
 }
 
 export async function createSuite(payload) {
-  if (!isTauriRuntime()) return { source: 'electron', session: null }
   const response = await invokeCommand('suite_create', {
     cmd: {
       flowMode: payload.flowMode || 'simulation',
@@ -33,13 +31,11 @@ export async function createSuite(payload) {
 }
 
 export async function getSuite(suiteId) {
-  if (!isTauriRuntime()) return { source: 'electron', session: null }
   const response = await invokeCommand('suite_get', { suiteId })
   return { source: 'tauri', session: unwrapCommandResponse(response, 'suite_get') }
 }
 
 export async function submitSuitePassage(payload) {
-  if (!isTauriRuntime()) return { source: 'electron', result: null }
   const response = await invokeCommand('suite_submit_passage', {
     cmd: {
       suiteId: payload.suiteId,
@@ -57,13 +53,11 @@ export async function submitSuitePassage(payload) {
 }
 
 export async function cancelSuite(suiteId) {
-  if (!isTauriRuntime()) return { source: 'electron', session: null }
   const response = await invokeCommand('suite_cancel', { suiteId })
   return { source: 'tauri', session: unwrapCommandResponse(response, 'suite_cancel') }
 }
 
 export async function createEndless(payload) {
-  if (!isTauriRuntime()) return { source: 'electron', session: null }
   const response = await invokeCommand('endless_create', {
     cmd: {
       pool: payload.pool || [],
@@ -75,13 +69,11 @@ export async function createEndless(payload) {
 }
 
 export async function getEndless(sessionId) {
-  if (!isTauriRuntime()) return { source: 'electron', session: null }
   const response = await invokeCommand('endless_get', { sessionId })
   return { source: 'tauri', session: unwrapCommandResponse(response, 'endless_get') }
 }
 
 export async function advanceEndless(sessionId, nextAssetId = null) {
-  if (!isTauriRuntime()) return { source: 'electron', session: null }
   const response = await invokeCommand('endless_advance', {
     cmd: { sessionId, nextAssetId }
   })
@@ -89,7 +81,6 @@ export async function advanceEndless(sessionId, nextAssetId = null) {
 }
 
 export async function submitEndless(payload) {
-  if (!isTauriRuntime()) return { source: 'electron', result: null }
   const response = await invokeCommand('endless_submit', {
     cmd: {
       sessionId: payload.sessionId,
@@ -106,7 +97,6 @@ export async function submitEndless(payload) {
 }
 
 export async function createMemorize(payload) {
-  if (!isTauriRuntime()) return { source: 'electron', session: null }
   const response = await invokeCommand('memorize_create', {
     cmd: {
       assetId: payload.assetId,
@@ -119,7 +109,6 @@ export async function createMemorize(payload) {
 }
 
 export async function finishMemorize(attemptId) {
-  if (!isTauriRuntime()) return { source: 'electron', attempt: null }
   const response = await invokeCommand('memorize_finish', { attemptId })
   return { source: 'tauri', attempt: unwrapCommandResponse(response, 'memorize_finish') }
 }

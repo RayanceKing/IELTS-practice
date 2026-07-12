@@ -2,9 +2,9 @@
 
 use serde_json::{Map, Value};
 
-use crate::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
-use crate::dto::{AttemptAnnotationDto, AttemptAnswer, AttemptRecord};
-use crate::error::{DomainError, DomainResult};
+use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
+use ielts_domain::dto::{AttemptAnnotationDto, AttemptAnswer, AttemptRecord};
+use ielts_domain::error::{DomainError, DomainResult};
 
 /// Convert one reading-archive v1 record (or similar inflated submission) into AttemptRecord.
 pub fn reading_submission_to_attempt(raw: &Value) -> DomainResult<AttemptRecord> {

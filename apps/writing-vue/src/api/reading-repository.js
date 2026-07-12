@@ -1,6 +1,5 @@
 /**
- * Reading attempt repository (Phase 6).
- * Vue `useReadingAttempt` should consume this view-model surface, not assemble submission blobs.
+ * Reading attempt repository — Tauri only.
  */
 
 import { invokeCommand, isTauriRuntime, unwrapCommandResponse } from '@/api/tauri-bridge.js'
@@ -10,13 +9,11 @@ function newKey(prefix = 'r') {
 }
 
 export async function listReadingAssets() {
-  if (!isTauriRuntime()) return { source: 'electron', items: [] }
   const response = await invokeCommand('reading_list_assets')
   return { source: 'tauri', items: unwrapCommandResponse(response, 'reading_list_assets') || [] }
 }
 
 export async function saveReadingDraft(payload) {
-  if (!isTauriRuntime()) return { source: 'electron', attempt: null }
   const response = await invokeCommand('reading_save_draft', {
     cmd: {
       attemptId: payload.attemptId,
@@ -31,7 +28,6 @@ export async function saveReadingDraft(payload) {
 }
 
 export async function patchReadingAnswer(attemptId, questionId, answer, marked = false) {
-  if (!isTauriRuntime()) return false
   const response = await invokeCommand('reading_patch_answer', {
     attemptId,
     questionId,
@@ -41,12 +37,7 @@ export async function patchReadingAnswer(attemptId, questionId, answer, marked =
   return !!unwrapCommandResponse(response, 'reading_patch_answer')
 }
 
-/**
- * Idempotent submit: same key returns prior score/attempt without duplicating history.
- * `payload` is the reading asset payload (answerKey + interactionModel).
- */
 export async function submitReadingAttempt(payload) {
-  if (!isTauriRuntime()) return { source: 'electron', result: null }
   const response = await invokeCommand('reading_submit_attempt', {
     cmd: {
       attemptId: payload.attemptId,

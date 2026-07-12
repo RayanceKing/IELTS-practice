@@ -141,7 +141,7 @@ pub fn migrate_legacy_sqlite_to_v2(
     }
 
     crate::sqlite::checkpoint_wal(&v2)?;
-    report.target_attempts = crate::import::repository::count_attempts(&v2)?;
+    report.target_attempts = crate::attempts::count_attempts(&v2)?;
     let _ = &mut v2;
     Ok(report)
 }
@@ -213,7 +213,7 @@ fn import_history_row(conn: &Connection, row: &LegacyHistoryRow) -> DbResult<()>
     };
     let asset_id = row.asset_id.clone().or_else(|| row.exam_id.clone());
     if let Some(asset) = asset_id.as_deref() {
-        crate::import::repository::ensure_asset_stub(conn, asset, activity, &row.title, row.exam_id.as_deref())?;
+        crate::attempts::ensure_asset_stub(conn, asset, activity, &row.title, row.exam_id.as_deref())?;
     }
 
     let attempt = AttemptRecord {
@@ -257,7 +257,7 @@ fn import_history_row(conn: &Connection, row: &LegacyHistoryRow) -> DbResult<()>
         answers: vec![],
         annotations: vec![],
     };
-    crate::import::repository::upsert_attempt(conn, &attempt)
+    crate::attempts::upsert_attempt(conn, &attempt)
 }
 
 fn import_essay_row(conn: &Connection, row: &LegacyEssayRow) -> DbResult<()> {
@@ -271,7 +271,7 @@ fn import_essay_row(conn: &Connection, row: &LegacyEssayRow) -> DbResult<()> {
         .unwrap_or_else(|| format!("Essay {}", row.id));
     let asset_id = row.topic_id.map(|id| format!("topic-{id}"));
     if let Some(asset) = asset_id.as_deref() {
-        crate::import::repository::ensure_asset_stub(
+        crate::attempts::ensure_asset_stub(
             conn,
             asset,
             Activity::Writing,
@@ -306,7 +306,7 @@ fn import_essay_row(conn: &Connection, row: &LegacyEssayRow) -> DbResult<()> {
         answers: vec![],
         annotations: vec![],
     };
-    crate::import::repository::upsert_attempt(conn, &attempt)?;
+    crate::attempts::upsert_attempt(conn, &attempt)?;
 
     // Prefer evaluation_json; fall back to column scores.
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&row.evaluation_json) {

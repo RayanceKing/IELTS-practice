@@ -1,198 +1,275 @@
-import { request, requestEventStream } from './client.js'
+/**
+ * Practice surface — Tauri repositories only (Fastify removed).
+ */
 
-function practicePath(...segments) {
-    const encodedSegments = segments
-        .filter((segment) => segment !== null && segment !== undefined && segment !== '')
-        .map((segment) => encodeURIComponent(String(segment)))
-    return ['/api/practice', ...encodedSegments].join('/')
-}
+import {
+  listReadingAssets,
+  saveReadingDraft,
+  submitReadingAttempt,
+  newKey as readingKey
+} from '@/api/reading-repository.js'
+import {
+  createSuite,
+  getSuite,
+  submitSuitePassage,
+  cancelSuite
+} from '@/api/modes-repository.js'
+import {
+  listHistory,
+  getHistoryDetail,
+  deleteHistoryAttempt,
+  exportHistory
+} from '@/api/history-repository.js'
+import {
+  ensureCoachThread,
+  appendCoachMessage,
+  listCoachMessages,
+  recordCoachFailure
+} from '@/api/enrichment-repository.js'
+import { invokeCommand, unwrapCommandResponse } from '@/api/tauri-bridge.js'
 
-async function listAllPracticePages(listPage, filters = {}, options = {}) {
-    const limit = Math.max(1, Math.min(Number(options.limit || 200), 200))
-    const maxPages = Math.max(1, Number(options.maxPages || 1000))
-    const resolveFilters = typeof options.resolveFilters === 'function'
-        ? options.resolveFilters
-        : () => filters
-    const rows = []
-    let page = 1
-    let total = 0
-    let lastResult = null
-
-    while (page <= maxPages) {
-        const result = await listPage(resolveFilters(page, filters), { page, limit })
-        lastResult = result
-        const pageRows = Array.isArray(result?.data) ? result.data : []
-        rows.push(...pageRows)
-
-        total = Number(result?.total || total || 0)
-        const pageLimit = Math.max(1, Number(result?.limit || limit))
-        if (!pageRows.length || (total > 0 && rows.length >= total) || pageRows.length < pageLimit) {
-            break
-        }
-        page = Math.max(page + 1, Number(result?.page || page) + 1)
-    }
-
-    return {
-        ...(lastResult && typeof lastResult === 'object' ? lastResult : {}),
-        data: rows,
-        total: total || rows.length,
-        page: 1,
-        limit
-    }
+function newKey(prefix = 'p') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 export const practiceAssets = {
-    async list(filters = {}, pagination = { page: 1, limit: 20 }) {
-        return request('/api/practice/assets', {
-            query: {
-                ...filters,
-                ...pagination
-            }
-        })
-    },
-
-    async listAll(filters = {}, options = {}) {
-        const { refresh = false, ...paginationOptions } = options || {}
-        return listAllPracticePages(practiceAssets.list, filters, {
-            ...paginationOptions,
-            resolveFilters: (page) => ({
-                ...filters,
-                refresh: refresh && page === 1 ? 'true' : undefined
-            })
-        })
-    },
-
-    async get(activity, assetId, options = {}) {
-        return request(practicePath('assets', activity, assetId), {
-            query: {
-                refresh: options.refresh ? 'true' : undefined
-            }
-        })
+  async list(filters = {}, pagination = { page: 1, limit: 20 }) {
+    const { items } = await listReadingAssets()
+    let rows = items || []
+    if (filters.activity && filters.activity !== 'reading') {
+      rows = []
     }
+    if (filters.search) {
+      const q = String(filters.search).toLowerCase()
+      rows = rows.filter((item) => String(item.title || item.id || '').toLowerCase().includes(q))
+    }
+    const page = Number(pagination.page || 1)
+    const limit = Number(pagination.limit || 20)
+    const offset = (page - 1) * limit
+    return {
+      data: rows.slice(offset, offset + limit),
+      total: rows.length,
+      page,
+      limit
+    }
+  },
+
+  async listAll(filters = {}, options = {}) {
+    const result = await this.list(filters, { page: 1, limit: 10000 })
+    return result
+  },
+
+  async get(activity, assetId, options = {}) {
+    const { items } = await listReadingAssets()
+    const meta = (items || []).find((item) => String(item.id) === String(assetId)) || null
+    // Full payload load is not yet a dedicated command; return index entry.
+    // Callers that need answerKey must supply payload at submit time or import assets.
+    if (!meta) {
+      const err = new Error(`asset not found: ${assetId}`)
+      err.code = 'not_found'
+      throw err
+    }
+    return {
+      ...meta,
+      activity: activity || 'reading',
+      refresh: !!options.refresh
+    }
+  }
 }
 
 export const practiceSessions = {
-    async create(payload) {
-        return request('/api/practice/sessions', {
-            method: 'POST',
-            body: payload
-        })
-    },
+  async create(payload) {
+    // Map legacy "create session + submit" to reading submit.
+    const attemptId = payload.sessionId || payload.attemptId || newKey('reading')
+    const result = await submitReadingAttempt({
+      attemptId,
+      assetId: payload.assetId || payload.examId || payload.asset?.id,
+      assetPayload: payload.payload || payload.assetPayload || payload.asset,
+      answers: payload.answers || payload.attempt?.answers || {},
+      markedQuestions: payload.markedQuestions || payload.attempt?.markedQuestions || [],
+      durationMs: payload.durationMs ?? payload.attempt?.durationMs ?? null,
+      titleSnapshot: payload.titleSnapshot || payload.title || null,
+      idempotencyKey: payload.idempotencyKey || newKey('submit')
+    })
+    return result.result
+  },
 
-    async getState(activity, sessionId) {
-        return request(practicePath('sessions', activity, sessionId))
-    },
+  async getState(activity, sessionId) {
+    const { detail } = await getHistoryDetail(sessionId)
+    return detail || { id: sessionId, activity, status: 'unknown' }
+  },
 
-    async cancel(activity, sessionId) {
-        return request(practicePath('sessions', activity, sessionId), {
-            method: 'DELETE'
-        })
-    }
+  async cancel(activity, sessionId) {
+    // No open cancel command for single reading; treat as no-op success.
+    return { id: sessionId, activity, status: 'cancelled' }
+  }
 }
 
 export const practiceReadingSuite = {
-    async create(payload = {}) {
-        return request('/api/practice/reading-suite', {
-            method: 'POST',
-            body: payload
-        })
-    },
+  async create(payload = {}) {
+    const { session } = await createSuite(payload)
+    return session
+  },
 
-    async get(sessionId) {
-        return request(practicePath('reading-suite', sessionId))
-    },
+  async get(sessionId) {
+    const { session } = await getSuite(sessionId)
+    return session
+  },
 
-    async submitPassage(sessionId, assetId, payload = {}) {
-        return request(practicePath('reading-suite', sessionId, 'passages', assetId), {
-            method: 'POST',
-            body: payload
-        })
-    }
+  async submitPassage(sessionId, assetId, payload = {}) {
+    const { result } = await submitSuitePassage({
+      suiteId: sessionId,
+      assetId,
+      assetPayload: payload.payload || payload.assetPayload || payload.asset,
+      answers: payload.answers || payload.attempt?.answers || {},
+      markedQuestions: payload.markedQuestions || payload.attempt?.markedQuestions || [],
+      durationMs: payload.durationMs ?? payload.attempt?.durationMs ?? null,
+      titleSnapshot: payload.titleSnapshot || null,
+      timerSnapshot: payload.timerSnapshot || null,
+      idempotencyKey: payload.idempotencyKey || newKey('suite-submit')
+    })
+    return result
+  },
+
+  async cancel(sessionId) {
+    const { session } = await cancelSuite(sessionId)
+    return session
+  }
 }
 
 export const practiceHistory = {
-    async list(filters = {}, pagination = { page: 1, limit: 20 }) {
-        return request('/api/practice/history', {
-            query: {
-                ...filters,
-                ...pagination
-            }
-        })
-    },
-
-    async listAll(filters = {}, options = {}) {
-        return listAllPracticePages(practiceHistory.list, filters, options)
-    },
-
-    async get(activity, recordId) {
-        return request(practicePath('history', activity, recordId))
-    },
-
-    async delete(activity, recordId) {
-        return request(practicePath('history', activity, recordId), {
-            method: 'DELETE'
-        })
-    },
-
-    async clear(filters = {}) {
-        return request('/api/practice/history', {
-            method: 'DELETE',
-            query: filters
-        })
-    },
-
-    async exportArchive(filters = { activity: 'reading' }) {
-        return request('/api/practice/history/archive', {
-            query: filters
-        })
-    },
-
-    async importArchive(activity, payload) {
-        return request(practicePath('history', 'archive', activity), {
-            method: 'POST',
-            body: payload
-        })
+  async list(filters = {}, pagination = { page: 1, limit: 20 }) {
+    const page = Number(pagination.page || 1)
+    const limit = Number(pagination.limit || 20)
+    const offset = (page - 1) * limit
+    const result = await listHistory({
+      activity: filters.activity || null,
+      limit,
+      offset,
+      search: filters.search || null
+    })
+    return {
+      data: result.items || [],
+      total: result.total,
+      page,
+      limit
     }
+  },
+
+  async listAll(filters = {}, options = {}) {
+    return this.list(filters, { page: 1, limit: 10000 })
+  },
+
+  async get(activity, recordId) {
+    const { detail } = await getHistoryDetail(recordId)
+    return detail
+  },
+
+  async delete(activity, recordId) {
+    await deleteHistoryAttempt(recordId)
+    return true
+  },
+
+  async clear(filters = {}) {
+    const result = await listHistory({
+      activity: filters.activity || null,
+      limit: 10000,
+      offset: 0
+    })
+    for (const item of result.items || []) {
+      await deleteHistoryAttempt(item.id)
+    }
+    return { deleted: (result.items || []).length }
+  },
+
+  async exportArchive(filters = { activity: 'reading' }) {
+    const { result } = await exportHistory('json', filters)
+    return result
+  },
+
+  async importArchive(activity, payload) {
+    // Optional cold-path: browser export import via Tauri when command exists.
+    try {
+      const response = await invokeCommand('import_browser_export_value', {
+        value: payload,
+        activity: activity || 'reading'
+      })
+      return unwrapCommandResponse(response, 'import_browser_export_value')
+    } catch (err) {
+      const error = new Error(
+        `importArchive requires optional legacy import command: ${err?.message || err}`
+      )
+      error.code = 'not_implemented'
+      throw error
+    }
+  }
 }
 
 export const practiceCoach = {
-    async query(activity, payload, sessionId = null, options = {}) {
-        const body = {
-            activity,
-            sessionId,
-            payload
-        }
-        try {
-            return await requestEventStream('/api/practice/coach/stream', {
-                method: 'POST',
-                body,
-                onEvent: options.onEvent
-            })
-        } catch (error) {
-            const code = String(error?.code || '').toLowerCase()
-            const statusCode = Number(error?.statusCode || 0)
-            if (code !== 'http_404' && code !== 'http_405' && statusCode !== 404 && statusCode !== 405) {
-                throw error
-            }
-        }
-        return request('/api/practice/coach', {
-            method: 'POST',
-            body
-        })
+  async query(activity, payload, sessionId = null, options = {}) {
+    const threadCmd = {
+      activity: activity || 'reading',
+      attemptId: sessionId || payload?.attemptId || null,
+      assetId: payload?.assetId || null,
+      scope: payload?.scope || 'practice'
     }
+    const { thread } = await ensureCoachThread(threadCmd)
+    const threadId = thread?.id
+    if (!threadId) {
+      const err = new Error('coach thread missing id')
+      err.code = 'coach.error'
+      throw err
+    }
+
+    const userText = payload?.question || payload?.message || payload?.text || ''
+    if (userText) {
+      await appendCoachMessage({
+        threadId,
+        role: 'user',
+        content: userText
+      })
+    }
+
+    // No LLM stream on product path yet — surface explicit thread state.
+    const { items } = await listCoachMessages(threadId, 0, 100)
+    if (typeof options.onEvent === 'function') {
+      try {
+        options.onEvent({
+          event: 'complete',
+          data: {
+            threadId,
+            messages: items,
+            message: 'Coach stream not wired to LLM provider on Tauri path yet'
+          }
+        })
+      } catch (_) {
+        // ignore listener errors
+      }
+    }
+    return {
+      threadId,
+      messages: items,
+      degraded: true,
+      message: 'Coach stream not wired to LLM provider on Tauri path yet'
+    }
+  }
 }
 
 export const practiceMigration = {
-    async getStatus() {
-        return request('/api/practice/migration-status')
+  async getStatus() {
+    return {
+      engine: 'tauri-sqlite-v2',
+      fastify: false,
+      electron: false
     }
+  }
 }
 
 export default {
-    assets: practiceAssets,
-    sessions: practiceSessions,
-    readingSuite: practiceReadingSuite,
-    history: practiceHistory,
-    coach: practiceCoach,
-    migration: practiceMigration
+  assets: practiceAssets,
+  sessions: practiceSessions,
+  readingSuite: practiceReadingSuite,
+  history: practiceHistory,
+  coach: practiceCoach,
+  migration: practiceMigration
 }

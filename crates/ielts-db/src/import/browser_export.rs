@@ -6,7 +6,7 @@ use serde_json::Value;
 use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
 use ielts_domain::dto::AttemptRecord;
 
-use crate::import::repository::{ensure_asset_stub, upsert_attempt};
+use crate::attempts::{ensure_asset_stub, upsert_attempt};
 use crate::sqlite::{DbError, DbResult};
 
 #[derive(Debug, Default)]

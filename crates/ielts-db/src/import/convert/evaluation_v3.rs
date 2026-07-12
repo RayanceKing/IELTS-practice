@@ -2,12 +2,12 @@
 
 use serde_json::Value;
 
-use crate::domain::{EvaluationStage, EvaluationStatus, WritingTaskType};
-use crate::dto::{
+use ielts_domain::domain::{EvaluationStage, EvaluationStatus, WritingTaskType};
+use ielts_domain::dto::{
     EvaluationDegradation, ParagraphFeedback, SentenceFeedback, WritingDiagnosisV4,
     WritingEvaluationV4, WritingFeedbackV4, WritingScoreV4,
 };
-use crate::error::{DomainError, DomainResult, ErrorEnvelope};
+use ielts_domain::error::{DomainError, DomainResult, ErrorEnvelope};
 
 /// Convert a loose v3 evaluation JSON object into WritingEvaluationV4.
 ///
