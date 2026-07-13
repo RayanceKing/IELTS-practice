@@ -185,6 +185,7 @@
         <button id="close-note" type="button" @click="closeFloatingPanels">Close</button>
       </header>
       <textarea ref="notesTextarea" v-model="notesText" aria-label="阅读笔记"></textarea>
+      <p v-if="notesError" class="settings-help settings-help-error" role="alert">{{ notesError }}</p>
     </div>
     <div class="overlay" v-show="settingsPanelOpen || notesPanelOpen" @click="closeFloatingPanels"></div>
 
@@ -270,6 +271,10 @@
       </div>
     </div>
 
+    <p v-if="highlightRestoreWarning" class="settings-help settings-help-error" role="status">
+      {{ highlightRestoreWarning }}
+    </p>
+
     <section
       v-if="!loading && asset && payload"
       class="reading-workspace shell"
@@ -277,13 +282,16 @@
       :style="readingWorkspaceStyle"
       data-practice-reading-page
       @click="handleWorkspaceClick"
+      @keydown="handleWorkspaceKeydown"
       @dragstart="handleDragStart"
       @dragend="handleDragEnd"
       @dragover="handleDragOver"
       @dragleave="handleDragLeave"
       @drop="handleDrop"
     >
+      <p class="sr-only" aria-live="polite">{{ dragInteractionStatus }}</p>
       <ReadingPassagePane
+        ref="readingPassagePane"
         :passage-blocks="payload.passage.blocks"
         :official-passage-notes="officialPassageNotes"
       />
@@ -421,7 +429,6 @@ import {
   readingThemeModeOptions as themeModeOptions,
   useReadingUiPreferences
 } from '@/modules/practice-reading/useReadingUiPreferences'
-import { useReadingEndlessState } from '@/modules/practice-reading/useReadingEndlessState'
 import { useReadingInteractions } from '@/modules/practice-reading/useReadingInteractions'
 import {
   escapeCss,
@@ -432,18 +439,16 @@ import {
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 import { getOpenReadingDraft } from '@/api/reading-repository.js'
 import {
+  saveSuitePassageDraft,
   submitSuitePassage as tauriSubmitSuitePassage,
   submitEndless as tauriSubmitEndless,
-  getEndless as tauriGetEndless
+  getEndless as tauriGetEndless,
+  cancelEndless as tauriCancelEndless,
+  createMemorize as tauriCreateMemorize,
+  finishMemorize as tauriFinishMemorize
 } from '@/api/modes-repository.js'
 
 const ENDLESS_COUNTDOWN_SEC = 5
-const {
-  ensureReady: ensureEndlessStateReady,
-  readEndlessState,
-  writeEndlessState,
-  clearEndlessState
-} = useReadingEndlessState()
 const EXPLANATION_SPLIT_KINDS = new Set([
   'single_choice',
   'multi_choice',
@@ -485,7 +490,6 @@ const {
   loading,
   error,
   loadReadingAsset,
-  loadReadingAssetPool,
   clearReadingAssetError
 } = useReadingAsset()
 const submitting = ref(false)
@@ -513,12 +517,15 @@ const activeQuestionVisit = {
   startedAtMs: 0
 }
 const activeQuestionId = ref('')
+const readingPassagePane = ref(null)
+const highlightRestoreWarning = ref('')
 
 const {
   settingsPanelOpen,
   notesPanelOpen,
   notesTextarea,
   notesText,
+  notesError,
   readingFontSize,
   readingThemeMode,
   suiteAutoAdvance,
@@ -551,13 +558,7 @@ function readRouteQueryValue(key) {
   return Array.isArray(value) ? value[0] : value
 }
 const activeEndlessSessionId = computed(() => {
-  const fromQuery = String(readRouteQueryValue('endlessSessionId') || '').trim()
-  if (fromQuery) return fromQuery
-  try {
-    return String(readEndlessState()?.sessionId || '').trim()
-  } catch (_) {
-    return ''
-  }
+  return String(readRouteQueryValue('endlessSessionId') || '').trim()
 })
 
 function normalizePracticeModeQueryValue(value) {
@@ -594,6 +595,8 @@ const isMemorizeMode = computed(() => {
   const practiceMode = normalizePracticeModeQueryValue(readRouteQueryValue('practiceMode'))
   return (mode === 'memorize' || practiceMode === 'memorize') && !props.sessionId
 })
+const activeMemorizeAttemptId = ref(String(readRouteQueryValue('memorizeAttemptId') || '').trim())
+let memorizeFinishRequested = false
 const headerSummary = computed(() => {
   if (!payload.value) return '从统一 Practice API 加载阅读题目。'
   const category = payload.value.meta?.category || asset.value?.category || 'Reading'
@@ -651,7 +654,9 @@ const {
   setDragDropAnswer,
   clearDragDropAnswer,
   dropOnAnswerSlot,
+  dragInteractionStatus,
   handleWorkspaceClick,
+  handleWorkspaceKeydown,
   handleDragStart,
   handleDragEnd,
   handleDragOver,
@@ -686,7 +691,7 @@ const {
   resolvePracticeTiming,
   startPracticeTimer,
   stopPracticeTimer,
-  toggleTimer,
+  toggleTimer: togglePracticeTimer,
   resetPracticeTimerClock,
   setPracticeTimerElapsedSeconds
 } = useReadingTimer({
@@ -909,7 +914,6 @@ const analysisKindRows = computed(() => {
 })
 
 onMounted(async () => {
-  await ensureEndlessStateReady()
   await initializeReadingPreferences()
   document.addEventListener('selectionchange', handleSelectionChange)
   document.addEventListener('click', handleDocumentClick, true)
@@ -919,11 +923,12 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   flushActiveQuestionVisit()
-  if (!reviewMode.value && !isMemorizeMode.value && !activeSuiteSessionId.value) {
+  stopPracticeTimer()
+  if (!reviewMode.value && !isMemorizeMode.value) {
     void persistTauriDraft()
   }
   clearEndlessTimer()
-  stopPracticeTimer()
+  if (isMemorizeMode.value) void finishActiveMemorizeSession()
   if (draftAutosaveTimer) {
     clearTimeout(draftAutosaveTimer)
     draftAutosaveTimer = null
@@ -1022,21 +1027,27 @@ async function loadAsset() {
     }
     if (replaySessionId) {
       await loadSubmittedSession(replaySessionId)
-    } else if (isTauriRuntime() && !isMemorizeMode.value && !activeSuiteSessionId.value) {
-      // Suite passages use suite-scoped attempt ids; do not hydrate leftover single drafts.
-      await hydrateOpenDraft(normalizedAssetId)
+    } else if (isTauriRuntime() && !isMemorizeMode.value) {
+      await hydrateOpenDraft(normalizedAssetId, activeSuiteSessionId.value || null)
     }
   } catch (loadError) {
     console.error('加载阅读资源失败:', loadError)
   }
   if (asset.value && payload.value) {
+    await ensureMemorizeSession()
     await nextTick()
     syncDomAnswers()
-    if (!highlightSnapshot.value.length && isTauriRuntime()) {
+    if (isTauriRuntime()) {
       const attemptScope = tauriAttemptId || replaySessionId || null
-      const loaded = await loadPersistedHighlights(asset.value.id, attemptScope)
-      if (loaded.length) {
-        highlightSnapshot.value = loaded
+      const passageDocument = String(readingPassagePane.value?.$el?.textContent || '').trim()
+      const loaded = await loadPersistedHighlights(asset.value.id, attemptScope, passageDocument || null)
+      const valid = loaded.filter((entry) => !entry.mismatch)
+      const mismatchCount = loaded.length - valid.length
+      highlightRestoreWarning.value = mismatchCount
+        ? `${mismatchCount} 条高亮因原文变化无法准确恢复，已停止自动定位。`
+        : ''
+      if (valid.length || loaded.length) {
+        highlightSnapshot.value = valid
       }
     }
     restoreHighlightsFromRecords(highlightSnapshot.value)
@@ -1103,10 +1114,20 @@ async function loadSubmittedSession(sessionId) {
   }
 }
 
-async function hydrateOpenDraft(assetId) {
+async function hydrateOpenDraft(assetId, suiteId = null) {
   try {
-    const { attempt } = await getOpenReadingDraft(assetId)
+    const expectedSuiteId = String(suiteId || '').trim()
+    const { attempt } = await getOpenReadingDraft(assetId, expectedSuiteId || null)
     if (!attempt?.id) return
+    const draftSuiteId = String(attempt.suiteId || attempt.suite_id || '').trim()
+    if (draftSuiteId !== expectedSuiteId) {
+      console.warn('忽略不属于当前阅读范围的草稿', {
+        attemptId: attempt.id,
+        expectedSuiteId,
+        draftSuiteId
+      })
+      return
+    }
     tauriAttemptId = String(attempt.id)
     const answers = {}
     const marked = []
@@ -2016,7 +2037,7 @@ let tauriAttemptId = ''
 let draftAutosaveTimer = null
 
 function scheduleDraftAutosave() {
-  if (!isTauriRuntime() || reviewMode.value || isMemorizeMode.value || activeSuiteSessionId.value) {
+  if (!isTauriRuntime() || reviewMode.value || isMemorizeMode.value) {
     return
   }
   if (draftAutosaveTimer) clearTimeout(draftAutosaveTimer)
@@ -2027,8 +2048,24 @@ function scheduleDraftAutosave() {
 }
 
 async function persistTauriDraft() {
-  if (!isTauriRuntime() || !asset.value?.id || reviewMode.value) return
+  if (!isTauriRuntime() || !asset.value?.id || reviewMode.value || isMemorizeMode.value) return
   try {
+    if (activeSuiteSessionId.value) {
+      const { result } = await saveSuitePassageDraft({
+        suiteId: activeSuiteSessionId.value,
+        assetId: asset.value.id,
+        assetRevision: asset.value.schemaVersion ?? null,
+        assetFingerprint: asset.value.fingerprint || null,
+        answers: snapshotAnswerMap(),
+        markedQuestions: markedQuestions.value.slice(),
+        questionTimeline: buildPersistedQuestionTimeline(),
+        titleSnapshot: asset.value.title || asset.value.name || null,
+        timerSnapshot: getPracticeTimerSnapshot()
+      })
+      suiteSession.value = result?.suiteSession || suiteSession.value
+      tauriAttemptId = String(result?.attempt?.id || tauriAttemptId || '')
+      return
+    }
     if (!tauriAttemptId) tauriAttemptId = readingAttempt.newAttemptId()
     await readingAttempt.persistDraft({
       attemptId: tauriAttemptId,
@@ -2042,6 +2079,13 @@ async function persistTauriDraft() {
     })
   } catch (err) {
     console.warn('Tauri reading draft persist failed', err)
+  }
+}
+
+function toggleTimer() {
+  togglePracticeTimer()
+  if (isTauriRuntime() && !isMemorizeMode.value) {
+    void persistTauriDraft()
   }
 }
 
@@ -2246,36 +2290,6 @@ function clearEndlessTimer() {
   endlessCountdown.value = 0
 }
 
-async function getEndlessPool() {
-  const state = readEndlessState()
-  const storedPool = Array.isArray(state.pool)
-    ? state.pool.filter((entry) => entry?.id)
-    : []
-  if (storedPool.length) {
-    return storedPool
-  }
-
-  const result = await loadReadingAssetPool()
-  const pool = Array.isArray(result?.data)
-    ? result.data.filter((entry) => entry?.id).map((entry) => ({
-      id: entry.id,
-      title: entry.title,
-      category: entry.category
-    }))
-    : []
-  if (pool.length) {
-    writeEndlessState({ active: true, pool })
-  }
-  return pool
-}
-
-function pickNextEndlessAsset(pool) {
-  const currentAssetId = String(asset.value?.id || route.params.assetId || '').trim()
-  const candidates = pool.filter((entry) => String(entry.id || '').trim() && String(entry.id) !== currentAssetId)
-  const usablePool = candidates.length ? candidates : pool
-  return usablePool[Math.floor(Math.random() * usablePool.length)] || null
-}
-
 async function scheduleEndlessNext(preferredNextId = null) {
   if (!isEndlessMode.value || activeSuiteSessionId.value) {
     return
@@ -2291,24 +2305,11 @@ async function scheduleEndlessNext(preferredNextId = null) {
       }
     }
     if (!nextId) {
-      // Fallback for legacy preference-only endless sessions (pre-Rust cutover).
-      const pool = await getEndlessPool()
-      const nextAsset = pickNextEndlessAsset(pool)
-      nextId = String(nextAsset?.id || '').trim()
-    }
-    if (!nextId) {
-      stopEndlessMode()
+      await stopEndlessMode()
       submitError.value = '无尽模式：题库已刷完或为空，已退出。'
       return
     }
     endlessNextAssetId.value = nextId
-    writeEndlessState({
-      active: true,
-      sessionId: activeEndlessSessionId.value || readEndlessState()?.sessionId || '',
-      currentAssetId: nextId,
-      lastCompletedAssetId: asset.value?.id || route.params.assetId || '',
-      pool: readEndlessState()?.pool || []
-    })
     clearEndlessTimer()
     endlessCountdown.value = ENDLESS_COUNTDOWN_SEC
     endlessTimer = window.setInterval(() => {
@@ -2398,12 +2399,17 @@ function goToNextEndlessAsset() {
   })
 }
 
-function stopEndlessMode() {
+async function stopEndlessMode() {
   clearEndlessTimer()
   endlessNextAssetId.value = ''
-  try {
-    clearEndlessState()
-  } catch (_) {}
+  const sessionId = activeEndlessSessionId.value
+  if (sessionId && isTauriRuntime()) {
+    try {
+      await tauriCancelEndless(sessionId)
+    } catch (error) {
+      console.warn('cancel endless session failed', error)
+    }
+  }
   router.push({
     name: 'PracticeLibrary'
   })
@@ -2477,8 +2483,9 @@ function handleDividerKeydown(event) {
   }
 }
 
-function handleResetButton() {
+async function handleResetButton() {
   if (isMemorizeMode.value) {
+    await finishActiveMemorizeSession()
     router.push({
       name: 'PracticeReading',
       params: { assetId: asset.value?.id || props.assetId },
@@ -2494,12 +2501,41 @@ function handleResetButton() {
   restoreHighlightsFromRecords(highlightSnapshot.value)
 }
 
-function handlePrimaryButton() {
+async function handlePrimaryButton() {
   if (isMemorizeMode.value) {
+    await finishActiveMemorizeSession()
     router.push(returnRoute.value)
     return
   }
   submitAnswers()
+}
+
+async function ensureMemorizeSession() {
+  if (!isMemorizeMode.value || activeMemorizeAttemptId.value || !asset.value?.id || !isTauriRuntime()) return
+  const { session } = await tauriCreateMemorize({
+    assetId: String(asset.value.id),
+    titleSnapshot: asset.value.title || null
+  })
+  const attemptId = String(session?.attempt?.id || '').trim()
+  if (!attemptId) throw new Error('memorize session missing attempt id')
+  activeMemorizeAttemptId.value = attemptId
+  await router.replace({
+    name: 'PracticeReading',
+    params: { assetId: asset.value.id },
+    query: { ...route.query, mode: 'memorize', practiceMode: 'memorize', memorizeAttemptId: attemptId }
+  })
+}
+
+async function finishActiveMemorizeSession() {
+  const attemptId = activeMemorizeAttemptId.value
+  if (!attemptId || memorizeFinishRequested || !isTauriRuntime()) return
+  memorizeFinishRequested = true
+  try {
+    await tauriFinishMemorize(attemptId)
+  } catch (error) {
+    memorizeFinishRequested = false
+    console.warn('finish memorize session failed', error)
+  }
 }
 
 function applyMemorizeStudyLayer() {
@@ -5305,5 +5341,11 @@ function getQuestionKindLabel(kind) {
   .analysis-body {
     grid-template-columns: 1fr;
   }
+}
+
+.drag-option-selected {
+  outline: 3px solid var(--color-primary, #2563eb) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgb(37 99 235 / 18%);
 }
 </style>

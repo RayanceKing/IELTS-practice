@@ -52,6 +52,15 @@ export const readingSuiteApi = {
 }
 
 export const readingCoachApi = {
+  async listMessages(sessionId: string | null, assetId: string | null = null) {
+    const listMessages = practiceCoach.listMessages as (
+      activity: string,
+      attemptId: string | null,
+      payload: Record<string, unknown>
+    ) => Promise<unknown>
+    return listMessages(READING_ACTIVITY, sessionId, { assetId })
+  },
+
   async query(payload: Record<string, unknown>, sessionId: string | null, options: CoachOptions = {}) {
     const queryCoach = practiceCoach.query as (
       activity: string,

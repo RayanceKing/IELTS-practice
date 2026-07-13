@@ -5,6 +5,7 @@ import {
   normalizeQuestionId,
   resolveAnswerAliases
 } from './readingQuestionIds'
+import { createDragSelectionController } from './readingDragSelectionCore.js'
 
 export type ReadingAnswerValue = string | string[]
 
@@ -69,6 +70,16 @@ function resolveSource<T>(source: MaybeRefOrGetter<T> | undefined): T | undefine
 
 export function useReadingInteractions(options: ReadingInteractionsOptions) {
   const currentDragPayload = ref<DragPayload | null>(null)
+  const selectedDragOption = ref<DragPayload | null>(null)
+  const dragInteractionStatus = ref('')
+  const selectionController = createDragSelectionController({
+    isReview: () => reviewMode(),
+    onStatus: (message: string) => { dragInteractionStatus.value = message },
+    onChange: (payload: DragPayload | null) => {
+      selectedDragOption.value = payload
+      syncDragSelectionDomState()
+    }
+  })
 
   function payload() {
     return resolveSource(options.payloadSource) || null
@@ -183,6 +194,8 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
       return
     }
     options.assignAnswer(questionId, '', { syncNative: true, track: true })
+    syncDropzoneControl(questionId, '')
+    dragInteractionStatus.value = `已清除第 ${getDisplayLabel(questionId)} 题答案。`
   }
 
   function dropOnAnswerSlot(questionId: string, event: DragEvent) {
@@ -202,13 +215,54 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
   function handleWorkspaceClick(event: MouseEvent) {
     const target = event.target as Element | null
     const clearTarget = target?.closest?.('[data-dropzone-clear]') as HTMLElement | null
-    if (!clearTarget) {
+    if (clearTarget) {
+      const questionId = normalizeQuestionId(clearTarget.dataset?.sourceQuestionId)
+      if (questionId) clearDragDropAnswer(questionId)
       return
     }
-    const questionId = normalizeQuestionId(clearTarget.dataset?.sourceQuestionId)
-    if (questionId) {
-      clearDragDropAnswer(questionId)
+    if (reviewMode()) return
+    const dropzone = getNativeDropzoneElement(target)
+    if (dropzone) {
+      placeSelectedDragOption(resolveDropzoneQuestionId(dropzone))
+      return
     }
+    const source = getDragOptionElement(target)
+    const dragPayload = buildDragPayloadFromElement(source)
+    if (dragPayload) selectionController.select(dragPayload)
+  }
+
+  function handleWorkspaceKeydown(event: KeyboardEvent) {
+    const target = event.target as HTMLElement | null
+    if (!target) return
+    if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName)) return
+    const handled = selectionController.activateKey(event.key, () => {
+      const dropzone = getNativeDropzoneElement(target)
+      if (dropzone) {
+        placeSelectedDragOption(resolveDropzoneQuestionId(dropzone))
+        return
+      }
+      const source = getDragOptionElement(target)
+      const dragPayload = buildDragPayloadFromElement(source)
+      if (dragPayload) selectionController.select(dragPayload)
+    })
+    if (handled) event.preventDefault()
+  }
+
+  function placeSelectedDragOption(questionId: string) {
+    if (!questionId || !isDragDropControl(questionId)) return false
+    return selectionController.place(questionId, (_target: string, selected: DragPayload) => {
+      const usedBy = findQuestionUsingDragOption(questionId, selected.value)
+      if (usedBy) {
+        dragInteractionStatus.value = `该选项已用于第 ${getDisplayLabel(usedBy)} 题。`
+        return false
+      }
+      setDragDropAnswer(questionId, selected.value, {
+        sourceQuestionId: selected.sourceQuestionId,
+        syncNative: true
+      })
+      syncDropzoneControl(questionId)
+      return true
+    })
   }
 
   function handleDragStart(event: DragEvent) {
@@ -377,6 +431,13 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
     ) as HTMLElement | null
   }
 
+  function getDragOptionElement(target: EventTarget | null | undefined): HTMLElement | null {
+    const element = target as Element | null
+    return element?.closest?.(
+      '[data-drag-value], [data-answer-value], .drag-item, .draggable-word, .card'
+    ) as HTMLElement | null
+  }
+
   function resolveDropzoneQuestionId(dropzone: HTMLElement | null | undefined): string {
     if (!dropzone) {
       return ''
@@ -498,6 +559,45 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
     ).forEach((dropzone) => {
       applyDropzoneThemeStyle(dropzone as HTMLElement)
     })
+    syncDragSelectionDomState()
+  }
+
+  function syncDragSelectionDomState() {
+    if (typeof document === 'undefined') return
+    const selected = selectionController.getSelected()
+    document.querySelectorAll(
+      '[data-drag-value], [data-answer-value], .drag-item, .draggable-word, .card'
+    ).forEach((node) => {
+      const element = node as HTMLElement
+      if (element.dataset.dropzoneClear === 'true') return
+      const payload = buildDragPayloadFromElement(element)
+      const active = Boolean(
+        selected && payload
+        && selected.value === payload.value
+        && selected.sourceQuestionId === payload.sourceQuestionId
+      )
+      if (!['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(element.tagName)) {
+        element.tabIndex = reviewMode() ? -1 : 0
+        element.setAttribute('role', 'button')
+      }
+      element.setAttribute('aria-pressed', active ? 'true' : 'false')
+      element.setAttribute('aria-disabled', reviewMode() ? 'true' : 'false')
+      element.classList.toggle('drag-option-selected', active)
+    })
+    document.querySelectorAll(
+      '.paragraph-dropzone, .match-dropzone, .drop-target-summary'
+    ).forEach((node) => {
+      const dropzone = node as HTMLElement
+      const questionId = resolveDropzoneQuestionId(dropzone)
+      if (!questionId || !isDragDropControl(questionId)) return
+      dropzone.tabIndex = reviewMode() ? -1 : 0
+      dropzone.setAttribute('role', 'button')
+      dropzone.setAttribute('aria-disabled', reviewMode() ? 'true' : 'false')
+      dropzone.setAttribute(
+        'aria-label',
+        `第 ${getDisplayLabel(questionId)} 题目标，当前${getSelectedOptionLabel(questionId)}`
+      )
+    })
   }
 
   function syncDropzoneControl(questionId: string, explicitValue: ReadingAnswerValue = options.getRawAnswer(questionId)) {
@@ -516,6 +616,9 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
       dropzone.classList.toggle('dropzone-filled', Boolean(value))
       dropzone.classList.toggle('dropzone-empty', !value)
       dropzone.setAttribute('aria-disabled', reviewMode() ? 'true' : 'false')
+      dropzone.tabIndex = reviewMode() ? -1 : 0
+      dropzone.setAttribute('role', 'button')
+      dropzone.setAttribute('aria-label', `第 ${getDisplayLabel(questionId)} 题目标，当前${label || '未作答'}`)
       applyDropzoneThemeStyle(dropzone)
 
       const holder = ensureDropzoneHolder(dropzone)
@@ -561,6 +664,8 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
 
   return {
     currentDragPayload,
+    selectedDragOption,
+    dragInteractionStatus,
     getInteraction,
     getDisplayLabel,
     isChoiceControl,
@@ -578,6 +683,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
     clearDragDropAnswer,
     dropOnAnswerSlot,
     handleWorkspaceClick,
+    handleWorkspaceKeydown,
     handleDragStart,
     handleDragEnd,
     handleDragOver,

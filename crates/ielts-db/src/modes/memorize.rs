@@ -2,24 +2,22 @@
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use uuid::Uuid;
 
 use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus};
 use ielts_domain::dto::AttemptRecord;
 
 use crate::attempts::upsert_attempt;
+use crate::reading::assets::{load_answer_key, load_practice_asset_payload};
 use crate::sqlite::{DbError, DbResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct CreateMemorizeCommand {
     pub asset_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_snapshot: Option<String>,
-    /// Full payload optional; answer key may be used client-side for reveal.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub payload: Option<Value>,
     #[serde(default)]
     pub idempotency_key: Option<String>,
 }
@@ -47,13 +45,13 @@ pub fn create_memorize_session(
 
     let now = chrono::Utc::now().to_rfc3339();
     let id = format!("memorize-{}", Uuid::new_v4());
-    crate::attempts::ensure_asset_stub(
-        conn,
-        &cmd.asset_id,
-        Activity::Reading,
-        cmd.title_snapshot.as_deref().unwrap_or(&cmd.asset_id),
-        Some(&cmd.asset_id),
-    )?;
+    let loaded = load_practice_asset_payload(conn, &cmd.asset_id)?;
+    if loaded.asset.pdf_only || load_answer_key(&loaded.payload).is_empty() {
+        return Err(DbError::Validation(format!(
+            "memorize asset is not answerable: {}",
+            cmd.asset_id
+        )));
+    }
 
     let attempt = AttemptRecord {
         schema_version: AttemptRecord::SCHEMA_VERSION,
@@ -71,7 +69,11 @@ pub fn create_memorize_session(
         score_scale: None,
         correct_count: None,
         question_count: None,
-        title_snapshot: cmd.title_snapshot.clone(),
+        title_snapshot: Some(
+            cmd.title_snapshot
+                .clone()
+                .unwrap_or_else(|| loaded.asset.title.clone()),
+        ),
         prompt_snapshot: None,
         content_text: None,
         answers: vec![],

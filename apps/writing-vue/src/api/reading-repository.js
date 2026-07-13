@@ -60,9 +60,10 @@ export async function saveReadingDraft(payload) {
   return { source: 'tauri', attempt: unwrapCommandResponse(response, 'reading_save_draft') }
 }
 
-export async function getOpenReadingDraft(assetId) {
+export async function getOpenReadingDraft(assetId, suiteId = null) {
   const response = await invokeCommand('reading_get_open_draft', {
-    assetId: String(assetId || '').trim()
+    assetId: String(assetId || '').trim(),
+    suiteId: String(suiteId || '').trim() || null
   })
   return {
     source: 'tauri',

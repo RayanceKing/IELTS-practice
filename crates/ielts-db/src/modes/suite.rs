@@ -6,11 +6,15 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use ielts_domain::domain::{AttemptMode, SuiteFlowMode, SuiteStatus};
+use ielts_domain::dto::AttemptRecord;
 
 use crate::modes::timer::{TimerMode, TimerState};
-use crate::reading::assets::{list_assets, AssetIndexEntry};
+use crate::reading::assets::{
+    list_assets, load_answer_key, load_practice_asset_payload, AssetIndexEntry,
+};
 use crate::reading::attempt::{
-    submit_reading_attempt, ReadingQuestionProgress, ReadingSubmitCommand, ReadingSubmitResult,
+    save_reading_draft_in_transaction, submit_reading_attempt_in_transaction, ReadingDraftCommand,
+    ReadingQuestionProgress, ReadingSubmitCommand, ReadingSubmitResult,
 };
 use crate::sqlite::{DbError, DbResult};
 use ielts_domain::domain::Activity;
@@ -142,6 +146,36 @@ pub struct SubmitSuitePassageCommand {
 pub struct SubmitSuitePassageResult {
     pub suite_session: ReadingSuiteSession,
     pub submission: ReadingSubmitResult,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct SaveSuitePassageDraftCommand {
+    pub suite_id: String,
+    pub asset_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_revision: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_fingerprint: Option<String>,
+    #[serde(default)]
+    pub answers: Value,
+    #[serde(default)]
+    pub marked_questions: Vec<String>,
+    #[serde(default)]
+    pub question_timeline: Vec<ReadingQuestionProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_snapshot: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer_snapshot: Option<TimerState>,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveSuitePassageDraftResult {
+    pub suite_session: ReadingSuiteSession,
+    pub attempt: AttemptRecord,
 }
 
 fn normalize_flow(raw: Option<&str>) -> SuiteFlowMode {
@@ -301,15 +335,16 @@ pub fn create_suite_session(
                 "custom suite requires an explicit P1/P2/P3 sequence".into(),
             ));
         }
-        let assets = list_assets(conn, Some(Activity::Reading))?;
-        pick_suite_sequence(&assets, freq, cmd.seed.as_deref())?
+        let assets = list_answerable_reading_assets(conn)?;
+        let picker_seed = cmd.seed.as_deref().unwrap_or(session_id.as_str());
+        pick_suite_sequence(&assets, freq, Some(picker_seed))?
     } else {
         if cmd.sequence.len() != 3 {
             return Err(DbError::Validation(
                 "suite sequence must contain exactly 3 passages (P1/P2/P3)".into(),
             ));
         }
-        cmd.sequence.clone()
+        validate_suite_sequence(conn, &cmd.sequence)?
     };
 
     let sequence: Vec<SuitePassageEntry> = seeds
@@ -365,6 +400,66 @@ pub fn create_suite_session(
     Ok(session)
 }
 
+pub(crate) fn list_answerable_reading_assets(conn: &Connection) -> DbResult<Vec<AssetIndexEntry>> {
+    let mut answerable = Vec::new();
+    for asset in list_assets(conn, Some(Activity::Reading))? {
+        let Ok(loaded) = load_practice_asset_payload(conn, &asset.id) else {
+            continue;
+        };
+        if loaded.asset.pdf_only || load_answer_key(&loaded.payload).is_empty() {
+            continue;
+        }
+        answerable.push(asset);
+    }
+    Ok(answerable)
+}
+
+fn validate_suite_sequence(
+    conn: &Connection,
+    requested: &[SuiteAssetSeed],
+) -> DbResult<Vec<SuiteAssetSeed>> {
+    if requested.len() != 3 {
+        return Err(DbError::Validation(
+            "suite sequence must contain exactly 3 passages (P1/P2/P3)".into(),
+        ));
+    }
+    let answerable = list_answerable_reading_assets(conn)?;
+    let mut seen = std::collections::HashSet::new();
+    let mut canonical = Vec::with_capacity(3);
+    for (index, seed) in requested.iter().enumerate() {
+        if !seen.insert(seed.asset_id.as_str()) {
+            return Err(DbError::Validation(
+                "suite sequence cannot contain duplicate assets".into(),
+            ));
+        }
+        let asset = answerable
+            .iter()
+            .find(|asset| asset.id == seed.asset_id)
+            .ok_or_else(|| {
+                DbError::Validation(format!(
+                    "suite asset is missing or not answerable: {}",
+                    seed.asset_id
+                ))
+            })?;
+        let expected = format!("P{}", index + 1);
+        let actual = normalize_category(asset.category.as_deref());
+        if actual != expected {
+            return Err(DbError::Validation(format!(
+                "suite passage {} must be {}, got {}",
+                index + 1,
+                expected,
+                actual
+            )));
+        }
+        canonical.push(SuiteAssetSeed {
+            asset_id: asset.id.clone(),
+            title: Some(asset.title.clone()),
+            category: Some(expected),
+        });
+    }
+    Ok(canonical)
+}
+
 /// Pure suite picker: one asset each for P1/P2/P3 under the frequency scope.
 pub fn pick_suite_sequence(
     assets: &[AssetIndexEntry],
@@ -378,13 +473,6 @@ pub fn pick_suite_sequence(
             .filter(|a| normalize_category(a.category.as_deref()) == category)
             .filter(|a| frequency_matches(scope, a))
             .collect();
-        if candidates.is_empty() {
-            // Fall back to category-only if frequency is too tight.
-            candidates = assets
-                .iter()
-                .filter(|a| normalize_category(a.category.as_deref()) == category)
-                .collect();
-        }
         if candidates.is_empty() {
             return Err(DbError::Validation(format!(
                 "no reading assets available for {category} under frequency scope"
@@ -402,7 +490,7 @@ pub fn pick_suite_sequence(
     Ok(picks)
 }
 
-fn normalize_category(raw: Option<&str>) -> String {
+pub(crate) fn normalize_category(raw: Option<&str>) -> String {
     let value = raw.unwrap_or("").trim().to_ascii_uppercase();
     if value.contains("P1") {
         "P1".into()
@@ -448,7 +536,7 @@ fn normalize_asset_frequency(asset: &AssetIndexEntry) -> &'static str {
     }
 }
 
-fn frequency_matches(scope: FrequencyScope, asset: &AssetIndexEntry) -> bool {
+pub(crate) fn frequency_matches(scope: FrequencyScope, asset: &AssetIndexEntry) -> bool {
     let freq = normalize_asset_frequency(asset);
     match scope {
         FrequencyScope::All | FrequencyScope::Custom => true,
@@ -524,7 +612,80 @@ pub fn get_suite_session(conn: &Connection, suite_id: &str) -> DbResult<ReadingS
     load_suite(conn, suite_id)
 }
 
+pub fn save_suite_passage_draft(
+    conn: &Connection,
+    cmd: &SaveSuitePassageDraftCommand,
+) -> DbResult<SaveSuitePassageDraftResult> {
+    if cmd.idempotency_key.trim().is_empty() {
+        return Err(DbError::Validation("idempotency_key required".into()));
+    }
+    let tx = conn.unchecked_transaction()?;
+    let mut session = load_suite(&tx, &cmd.suite_id)?;
+    if session.status != SuiteStatus::Active {
+        return Err(DbError::Validation("suite is not active".into()));
+    }
+    let passage_index = session
+        .sequence
+        .iter()
+        .position(|entry| entry.asset_id == cmd.asset_id)
+        .ok_or_else(|| DbError::Validation(format!("asset not in suite: {}", cmd.asset_id)))?;
+    if session.sequence[passage_index].status == PassageStatus::Submitted {
+        return Err(DbError::Validation("passage already submitted".into()));
+    }
+    if session.flow_mode != SuiteFlowMode::Classic && passage_index as u32 != session.current_index
+    {
+        return Err(DbError::Validation(
+            "save the active suite passage before moving on".into(),
+        ));
+    }
+    let attempt_id = format!("reading-{}-p{}", session.session_id, passage_index + 1);
+    let mut attempt = save_reading_draft_in_transaction(
+        &tx,
+        &ReadingDraftCommand {
+            attempt_id: attempt_id.clone(),
+            asset_id: cmd.asset_id.clone(),
+            answers: cmd.answers.clone(),
+            marked_questions: cmd.marked_questions.clone(),
+            question_timeline: cmd.question_timeline.clone(),
+            asset_revision: cmd.asset_revision,
+            asset_fingerprint: cmd.asset_fingerprint.clone(),
+            title_snapshot: cmd.title_snapshot.clone(),
+            idempotency_key: format!("suite-draft-{}", cmd.idempotency_key),
+        },
+    )?;
+    tx.execute(
+        "UPDATE attempts SET mode = 'suite', suite_id = ?1 WHERE id = ?2",
+        params![session.session_id, attempt_id],
+    )?;
+    attempt.mode = AttemptMode::Suite;
+    attempt.suite_id = Some(session.session_id.clone());
+    session.timer = session.timer.merge_snapshot(cmd.timer_snapshot.as_ref());
+    {
+        let passage = &mut session.sequence[passage_index];
+        passage.status = PassageStatus::Active;
+        passage.attempt_id = Some(attempt_id.clone());
+        passage.session_id = Some(attempt_id);
+    }
+    session.updated_at = chrono::Utc::now().to_rfc3339();
+    persist_suite(&tx, &session)?;
+    tx.commit()?;
+    Ok(SaveSuitePassageDraftResult {
+        suite_session: session,
+        attempt,
+    })
+}
+
 pub fn submit_suite_passage(
+    conn: &Connection,
+    cmd: &SubmitSuitePassageCommand,
+) -> DbResult<SubmitSuitePassageResult> {
+    let tx = conn.unchecked_transaction()?;
+    let result = submit_suite_passage_in_transaction(&tx, cmd)?;
+    tx.commit()?;
+    Ok(result)
+}
+
+fn submit_suite_passage_in_transaction(
     conn: &Connection,
     cmd: &SubmitSuitePassageCommand,
 ) -> DbResult<SubmitSuitePassageResult> {
@@ -572,7 +733,7 @@ pub fn submit_suite_passage(
     }
 
     let attempt_id = format!("reading-{}-p{}", session.session_id, passage_index + 1);
-    let submit = submit_reading_attempt(
+    let mut submit = submit_reading_attempt_in_transaction(
         conn,
         &ReadingSubmitCommand {
             attempt_id: attempt_id.clone(),
@@ -590,16 +751,11 @@ pub fn submit_suite_passage(
 
     // Tag attempt as suite mode
     conn.execute(
-        "UPDATE attempts SET mode = ?1, suite_id = ?2 WHERE id = ?3",
-        params![
-            match AttemptMode::Suite {
-                AttemptMode::Suite => "suite",
-                _ => "suite",
-            },
-            session.session_id,
-            attempt_id
-        ],
+        "UPDATE attempts SET mode = 'suite', suite_id = ?1 WHERE id = ?2",
+        params![session.session_id, attempt_id],
     )?;
+    submit.attempt.mode = AttemptMode::Suite;
+    submit.attempt.suite_id = Some(session.session_id.clone());
 
     session.timer = session.timer.merge_snapshot(cmd.timer_snapshot.as_ref());
 

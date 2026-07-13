@@ -86,6 +86,16 @@ pub struct ReadingSubmitResult {
 }
 
 pub fn save_reading_draft(conn: &Connection, cmd: &ReadingDraftCommand) -> DbResult<AttemptRecord> {
+    let tx = conn.unchecked_transaction()?;
+    let attempt = save_reading_draft_in_transaction(&tx, cmd)?;
+    tx.commit()?;
+    Ok(attempt)
+}
+
+pub(crate) fn save_reading_draft_in_transaction(
+    conn: &Connection,
+    cmd: &ReadingDraftCommand,
+) -> DbResult<AttemptRecord> {
     if cmd.idempotency_key.trim().is_empty() {
         return Err(DbError::Validation("idempotency_key required".into()));
     }
@@ -123,9 +133,8 @@ pub fn save_reading_draft(conn: &Connection, cmd: &ReadingDraftCommand) -> DbRes
         answers,
         annotations: vec![],
     };
-    let tx = conn.unchecked_transaction()?;
-    upsert_attempt(&tx, &attempt)?;
-    tx.execute(
+    upsert_attempt(conn, &attempt)?;
+    conn.execute(
         "INSERT INTO attempt_idempotency (scope, idempotency_key, attempt_id, evaluation_id, response_json, created_at)
          VALUES ('reading.draft', ?1, ?2, NULL, NULL, ?3)
          ON CONFLICT(scope, idempotency_key) DO UPDATE SET attempt_id = excluded.attempt_id, created_at = excluded.created_at",
@@ -133,15 +142,27 @@ pub fn save_reading_draft(conn: &Connection, cmd: &ReadingDraftCommand) -> DbRes
     )?;
     // Remove the obsolete settings mirror. Marks and timeline now live only in
     // attempt_answers, including marked-but-unanswered questions.
-    tx.execute(
+    conn.execute(
         "DELETE FROM settings WHERE namespace = 'reading_draft' AND key = ?1",
         params![cmd.attempt_id],
     )?;
-    tx.commit()?;
     Ok(attempt)
 }
 
 pub fn submit_reading_attempt(
+    conn: &Connection,
+    cmd: &ReadingSubmitCommand,
+) -> DbResult<ReadingSubmitResult> {
+    let tx = conn.unchecked_transaction()?;
+    let result = submit_reading_attempt_in_transaction(&tx, cmd)?;
+    tx.commit()?;
+    Ok(result)
+}
+
+/// Submit inside a caller-owned transaction. Mode state machines use this so
+/// the scored attempt, session advance and mode idempotency record commit or
+/// roll back as one fact.
+pub(crate) fn submit_reading_attempt_in_transaction(
     conn: &Connection,
     cmd: &ReadingSubmitCommand,
 ) -> DbResult<ReadingSubmitResult> {
@@ -223,9 +244,7 @@ pub fn submit_reading_attempt(
         annotations: vec![],
     };
 
-    // Transaction: score + status together
-    let tx = conn.unchecked_transaction()?;
-    upsert_attempt(&tx, &attempt)?;
+    upsert_attempt(conn, &attempt)?;
     let result = ReadingSubmitResult {
         attempt: attempt.clone(),
         score: summary,
@@ -234,17 +253,15 @@ pub fn submit_reading_attempt(
     };
     let response_json =
         serde_json::to_string(&result).map_err(|e| DbError::Message(e.to_string()))?;
-    tx.execute(
+    conn.execute(
         "INSERT INTO attempt_idempotency (scope, idempotency_key, attempt_id, evaluation_id, response_json, created_at)
          VALUES ('reading.submit', ?1, ?2, NULL, ?3, ?4)",
         params![cmd.idempotency_key, cmd.attempt_id, response_json, now],
     )?;
-    tx.execute(
+    conn.execute(
         "DELETE FROM settings WHERE namespace = 'reading_draft' AND key = ?1",
         params![cmd.attempt_id],
     )?;
-    tx.commit()?;
-
     Ok(result)
 }
 
@@ -253,10 +270,22 @@ pub fn get_open_reading_draft(
     conn: &Connection,
     asset_id: &str,
 ) -> DbResult<Option<AttemptRecord>> {
+    get_open_reading_draft_for_scope(conn, asset_id, None)
+}
+
+/// Latest open draft for an asset within one practice scope.
+/// `None` means a standalone single-passage attempt; a suite id selects only
+/// that suite's draft and can never fall through to another session.
+pub fn get_open_reading_draft_for_scope(
+    conn: &Connection,
+    asset_id: &str,
+    suite_id: Option<&str>,
+) -> DbResult<Option<AttemptRecord>> {
     let asset_id = asset_id.trim();
     if asset_id.is_empty() {
         return Err(DbError::Validation("asset_id required".into()));
     }
+    let suite_id = suite_id.map(str::trim).filter(|value| !value.is_empty());
     // Open drafts include both `draft` and `active`: patch_reading_answer may promote
     // an in-progress attempt to active, and callers must still resume it.
     let attempt_id: Option<String> = conn
@@ -264,9 +293,11 @@ pub fn get_open_reading_draft(
             "SELECT id FROM attempts
              WHERE activity = 'reading' AND asset_id = ?1
                AND lower(status) IN ('draft', 'active')
+               AND ((?2 IS NULL AND mode = 'single' AND suite_id IS NULL)
+                 OR (?2 IS NOT NULL AND mode = 'suite' AND suite_id = ?2))
              ORDER BY started_at DESC
              LIMIT 1",
-            params![asset_id],
+            params![asset_id, suite_id],
             |row| row.get(0),
         )
         .optional()?;

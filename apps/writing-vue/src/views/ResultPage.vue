@@ -35,14 +35,19 @@
            <div v-if="sentences.length > 0">
              <template v-for="(sentence, index) in sentences" :key="index">
                
-               <span class="sentence-container"
+               <component
+                     :is="sentence.errors?.length > 0 ? 'button' : 'span'"
+                     class="sentence-container"
                      :class="{'has-error': sentence.errors?.length > 0}"
+                     :type="sentence.errors?.length > 0 ? 'button' : undefined"
+                     :aria-expanded="sentence.errors?.length > 0 ? String(expandedSentences.has(index)) : undefined"
+                     :aria-controls="sentence.errors?.length > 0 ? `sentence-errors-${index}` : undefined"
                      @click="sentence.errors?.length > 0 ? toggleExpand(index) : null"
                >
                  <span v-html="highlightErrors(sentence)"></span>
-               </span>
+               </component>
 
-               <component :is="'div'" v-if="sentence.errors?.length > 0 && expandedSentences.has(index)" class="error-details glass-card shadow-elevated mb-3 mt-1">
+               <div :id="`sentence-errors-${index}`" v-if="sentence.errors?.length > 0 && expandedSentences.has(index)" class="error-details glass-card shadow-elevated mb-3 mt-1">
                  <div v-for="(err, errIdx) in sentence.errors" :key="errIdx" class="error-item border-base-light pb-2 mb-2 last-no-border">
                     <div class="error-type mb-1" :class="'text-' + err.type.replace('_', '-')">
                       <svg class="icon-inline icon-inline--xs mr-1" viewBox="0 0 24 24" aria-hidden="true">
@@ -66,7 +71,7 @@
                     <span class="label text-secondary font-normal text-xs mb-1 block">Revised Sentence:</span>
                     {{ sentence.corrected }}
                  </div>
-               </component>
+               </div>
                
              </template>
            </div>
@@ -534,6 +539,12 @@ function writeNew() {
 .sentence-container {
   display: inline;
   margin-right: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
   transition: all 0.2s;
 }
 
@@ -544,6 +555,11 @@ function writeNew() {
 
 .has-error:hover {
   background: rgba(181, 51, 51, 0.05); /* very light error red */
+}
+
+.has-error:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 3px;
 }
 
 .error-details {

@@ -7,9 +7,9 @@ use tauri::State;
 
 use crate::app::state::AppDb;
 use ielts_db::{
-    get_open_reading_draft, list_assets, load_practice_asset_payload, patch_reading_answer,
-    save_reading_draft, submit_reading_attempt, AssetIndexEntry, ReadingDraftCommand,
-    ReadingSubmitCommand, ReadingSubmitResult,
+    get_open_reading_draft_for_scope, list_assets, load_practice_asset_payload,
+    patch_reading_answer, save_reading_draft, submit_reading_attempt, AssetIndexEntry,
+    ReadingDraftCommand, ReadingSubmitCommand, ReadingSubmitResult,
 };
 
 fn map_err(err: ielts_db::DbError) -> ErrorEnvelope {
@@ -56,8 +56,11 @@ pub fn reading_save_draft(
 pub fn reading_get_open_draft(
     db: State<'_, AppDb>,
     asset_id: String,
+    suite_id: Option<String>,
 ) -> CommandResponse<Option<ielts_domain::dto::AttemptRecord>> {
-    match db.with_conn(|conn| get_open_reading_draft(conn, &asset_id)) {
+    match db
+        .with_conn(|conn| get_open_reading_draft_for_scope(conn, &asset_id, suite_id.as_deref()))
+    {
         Ok(a) => CommandResponse::success(a),
         Err(e) => CommandResponse::failure(map_err(e)),
     }

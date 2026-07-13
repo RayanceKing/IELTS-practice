@@ -282,12 +282,29 @@ export const practiceHistory = {
 }
 
 export const practiceCoach = {
+  async listMessages(activity, sessionId = null, payload = {}) {
+    const { thread } = await ensureCoachThread({
+      activity: activity || 'reading',
+      attemptId: sessionId || payload?.attemptId || null,
+      assetId: payload?.assetId || null,
+      kind: payload?.kind || 'practice'
+    })
+    const threadId = thread?.id
+    if (!threadId) {
+      const error = new Error('coach thread missing id')
+      error.code = 'coach.error'
+      throw error
+    }
+    const { items } = await listCoachMessages(threadId, 0, 100)
+    return { threadId, messages: items }
+  },
+
   async query(activity, payload, sessionId = null, options = {}) {
     const threadCmd = {
       activity: activity || 'reading',
       attemptId: sessionId || payload?.attemptId || null,
       assetId: payload?.assetId || null,
-      scope: payload?.scope || 'practice'
+      kind: payload?.kind || 'practice'
     }
     const { thread } = await ensureCoachThread(threadCmd)
     const threadId = thread?.id
@@ -297,7 +314,7 @@ export const practiceCoach = {
       throw err
     }
 
-    const userText = payload?.question || payload?.message || payload?.text || ''
+    const userText = payload?.content || ''
     if (!String(userText).trim()) {
       const error = new Error('阅读教练问题不能为空')
       error.code = 'coach.empty_question'
@@ -317,9 +334,18 @@ export const practiceCoach = {
           threadId,
           content: String(userText).trim(),
           questionContext: {
-            ...payload,
             activity: activity || 'reading',
-            sessionId: sessionId || null
+            sessionId: sessionId || null,
+            assetId: payload?.assetId || payload?.examId || null,
+            mode: payload?.mode || 'single',
+            locale: payload?.locale || 'zh',
+            surface: payload?.surface || 'chat_widget',
+            action: payload?.action || 'chat',
+            promptKind: payload?.promptKind || 'freeform',
+            selectedText: payload?.selectedText || '',
+            selectedContext: payload?.selectedContext || null,
+            focusQuestionNumbers: payload?.focusQuestionNumbers || [],
+            attemptContext: payload?.attemptContext || null
           }
         }
       })

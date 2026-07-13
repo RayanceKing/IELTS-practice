@@ -5,8 +5,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use ielts_domain::domain::AttemptMode;
+
+use crate::modes::suite::{
+    frequency_matches, list_answerable_reading_assets, normalize_category, FrequencyScope,
+};
 use crate::reading::attempt::{
-    submit_reading_attempt, ReadingQuestionProgress, ReadingSubmitCommand, ReadingSubmitResult,
+    submit_reading_attempt_in_transaction, ReadingQuestionProgress, ReadingSubmitCommand,
+    ReadingSubmitResult,
 };
 use crate::sqlite::{DbError, DbResult};
 
@@ -53,21 +59,21 @@ pub struct EndlessSession {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct CreateEndlessCommand {
-    pub pool: Vec<String>,
     #[serde(default)]
     pub pool_policy: Option<EndlessPoolPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
     #[serde(default)]
     pub idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct AdvanceEndlessCommand {
     pub session_id: String,
-    /// Optional forced next asset; otherwise first remaining in pool.
-    #[serde(default)]
-    pub next_asset_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,9 +128,6 @@ pub fn create_endless_session(
     conn: &Connection,
     cmd: &CreateEndlessCommand,
 ) -> DbResult<EndlessSession> {
-    if cmd.pool.is_empty() {
-        return Err(DbError::Validation("endless pool required".into()));
-    }
     if let Some(key) = cmd.idempotency_key.as_deref() {
         if !key.trim().is_empty() {
             if let Some(prev) = load_idempotent(conn, key)? {
@@ -139,12 +142,13 @@ pub fn create_endless_session(
         frequency_scope: Some("all".into()),
         exclude_completed: true,
     });
-    let first = cmd.pool.first().cloned();
+    let pool = build_endless_pool(conn, &policy, cmd.seed.as_deref().unwrap_or(id.as_str()))?;
+    let first = pool.first().cloned();
     let session = EndlessSession {
         id: id.clone(),
         status: EndlessStatus::Active,
         pool_policy: policy,
-        pool: cmd.pool.clone(),
+        pool,
         current_asset_id: first,
         current_attempt_id: None,
         completed_asset_ids: vec![],
@@ -183,10 +187,7 @@ pub fn advance_endless(conn: &Connection, cmd: &AdvanceEndlessCommand) -> DbResu
         return Err(DbError::Validation("endless session not active".into()));
     }
     let remaining = remaining_pool(&session);
-    let next = cmd
-        .next_asset_id
-        .clone()
-        .or_else(|| remaining.first().cloned());
+    let next = remaining.first().cloned();
     match next {
         Some(asset_id) => {
             session.current_asset_id = Some(asset_id);
@@ -206,7 +207,74 @@ pub fn advance_endless(conn: &Connection, cmd: &AdvanceEndlessCommand) -> DbResu
     }
 }
 
+pub fn cancel_endless(conn: &Connection, session_id: &str) -> DbResult<EndlessSession> {
+    let mut session = load(conn, session_id)?;
+    if session.status == EndlessStatus::Active {
+        session.status = EndlessStatus::Cancelled;
+        session.current_asset_id = None;
+        session.current_attempt_id = None;
+        session.updated_at = chrono::Utc::now().to_rfc3339();
+        persist(conn, &session)?;
+    }
+    Ok(session)
+}
+
+fn build_endless_pool(
+    conn: &Connection,
+    policy: &EndlessPoolPolicy,
+    seed: &str,
+) -> DbResult<Vec<String>> {
+    let scope = match policy
+        .frequency_scope
+        .as_deref()
+        .unwrap_or("all")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "high" => FrequencyScope::High,
+        "high_medium" | "high-medium" | "highmedium" => FrequencyScope::HighMedium,
+        "all" | "" => FrequencyScope::All,
+        other => {
+            return Err(DbError::Validation(format!(
+                "unsupported endless frequency scope: {other}"
+            )))
+        }
+    };
+    let categories = policy
+        .categories
+        .iter()
+        .map(|value| normalize_category(Some(value)))
+        .filter(|value| matches!(value.as_str(), "P1" | "P2" | "P3"))
+        .collect::<std::collections::HashSet<_>>();
+    let mut assets = list_answerable_reading_assets(conn)?
+        .into_iter()
+        .filter(|asset| {
+            categories.is_empty()
+                || categories.contains(&normalize_category(asset.category.as_deref()))
+        })
+        .filter(|asset| frequency_matches(scope, asset))
+        .collect::<Vec<_>>();
+    assets.sort_by_key(|asset| stable_key_hash(&format!("{seed}:{}", asset.id)));
+    if assets.is_empty() {
+        return Err(DbError::Validation(
+            "no answerable reading assets match the endless pool policy".into(),
+        ));
+    }
+    Ok(assets.into_iter().map(|asset| asset.id).collect())
+}
+
 pub fn submit_endless_passage(
+    conn: &Connection,
+    cmd: &SubmitEndlessCommand,
+) -> DbResult<SubmitEndlessResult> {
+    let tx = conn.unchecked_transaction()?;
+    let result = submit_endless_passage_in_transaction(&tx, cmd)?;
+    tx.commit()?;
+    Ok(result)
+}
+
+fn submit_endless_passage_in_transaction(
     conn: &Connection,
     cmd: &SubmitEndlessCommand,
 ) -> DbResult<SubmitEndlessResult> {
@@ -242,7 +310,7 @@ pub fn submit_endless_passage(
         session.id,
         stable_key_hash(&cmd.idempotency_key)
     );
-    let submission = submit_reading_attempt(
+    let mut submission = submit_reading_attempt_in_transaction(
         conn,
         &ReadingSubmitCommand {
             attempt_id: attempt_id.clone(),
@@ -263,6 +331,8 @@ pub fn submit_endless_passage(
         "UPDATE attempts SET mode = 'endless', suite_id = ?1 WHERE id = ?2",
         params![session.id, persisted_attempt_id],
     )?;
+    submission.attempt.mode = AttemptMode::Endless;
+    submission.attempt.suite_id = Some(session.id.clone());
 
     if !session
         .completed_asset_ids

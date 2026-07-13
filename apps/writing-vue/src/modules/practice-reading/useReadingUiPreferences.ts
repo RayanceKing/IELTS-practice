@@ -1,5 +1,6 @@
 import { computed, nextTick, ref, watch, type Ref } from 'vue'
 import { useTauriPreferences } from '@/composables/useTauriPreferences.js'
+import { upsertAnnotation, listAnnotations, deleteAnnotation } from '@/api/enrichment-repository.js'
 
 const NOTES_STORAGE_PREFIX = 'practice_reading_notes_'
 const SUITE_AUTO_ADVANCE_STORAGE_KEY = 'suite_auto_advance_after_submit'
@@ -55,10 +56,14 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
   const notesPanelOpen = ref(false)
   const notesTextarea = ref<HTMLTextAreaElement | null>(null)
   const notesText = ref('')
+  const notesError = ref('')
   const readingFontSize = ref<ReadingFontSize>('normal')
   const readingThemeMode = ref<ReadingThemeMode>('light')
   const suiteAutoAdvance = ref(true)
   let suppressNotesPersist = false
+  let notesLoadSequence = 0
+  let notesPersistTimer: ReturnType<typeof setTimeout> | null = null
+  let noteAnnotationId: string | null = null
 
   const readingPageClassList = computed(() => ({
     [`font-${readingFontSize.value}`]: true,
@@ -135,29 +140,99 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
   }
 
   function loadReadingNotes() {
+    const loadSequence = ++notesLoadSequence
     suppressNotesPersist = true
+    notesError.value = ''
     const assetId = options.assetSource()?.id
     if (!assetId) {
       notesText.value = ''
+      noteAnnotationId = null
       suppressNotesPersist = false
       return
     }
     const key = notesKey(String(assetId))
     const stored = migrateLocalIfMissing(key)
     notesText.value = stored || ''
-    suppressNotesPersist = false
+    void (async () => {
+      try {
+        const existing = await listAnnotations(String(assetId), null)
+        if (loadSequence !== notesLoadSequence) return
+        const notes = (existing.items || []).filter((item: any) => (
+          item.kind === 'note' && !item.attemptId
+        ))
+        const current = notes.at(-1) || null
+        const currentText = String(current?.noteText || '').trim()
+        const legacyText = String(stored || '').trim()
+        const mergedText = currentText && legacyText && currentText !== legacyText
+          ? `${currentText}\n\n${legacyText}`
+          : (currentText || legacyText)
+        noteAnnotationId = current?.id ? String(current.id) : null
+        if (mergedText && mergedText !== currentText) {
+          const result = await upsertAnnotation({
+            id: noteAnnotationId,
+            assetId: String(assetId),
+            attemptId: null,
+            scope: 'note',
+            kind: 'note',
+            noteText: mergedText,
+            anchor: { text: 'reading-note', occurrence: 0 }
+          })
+          noteAnnotationId = result.annotation?.id || noteAnnotationId
+        }
+        if (loadSequence !== notesLoadSequence) return
+        notesText.value = mergedText
+        preferences.set(key, '')
+      } catch (error) {
+        if (loadSequence !== notesLoadSequence) return
+        notesError.value = '阅读笔记加载失败，旧笔记尚未删除。'
+        console.warn('load reading notes failed', error)
+      } finally {
+        if (loadSequence === notesLoadSequence) suppressNotesPersist = false
+      }
+    })()
   }
 
   function clearReadingNotesDraft() {
+    notesLoadSequence += 1
+    if (notesPersistTimer) clearTimeout(notesPersistTimer)
     suppressNotesPersist = true
     notesText.value = ''
+    notesError.value = ''
+    noteAnnotationId = null
     suppressNotesPersist = false
   }
 
-  watch(notesText, () => {
+  watch(notesText, (value) => {
     if (suppressNotesPersist) return
     const assetId = options.assetSource()?.id
-    if (assetId) preferences.set(notesKey(String(assetId)), notesText.value || '')
+    if (!assetId) return
+    if (notesPersistTimer) clearTimeout(notesPersistTimer)
+    notesPersistTimer = setTimeout(() => {
+      void (async () => {
+        try {
+          notesError.value = ''
+          const normalized = String(value || '').trim()
+          if (!normalized) {
+            if (noteAnnotationId) await deleteAnnotation(noteAnnotationId)
+            noteAnnotationId = null
+            return
+          }
+          const result = await upsertAnnotation({
+            id: noteAnnotationId,
+            assetId: String(assetId),
+            attemptId: null,
+            scope: 'note',
+            kind: 'note',
+            noteText: value,
+            anchor: { text: 'reading-note', occurrence: 0 }
+          })
+          noteAnnotationId = result.annotation?.id || noteAnnotationId
+        } catch (error) {
+          notesError.value = '阅读笔记保存失败，请保留页面并重试。'
+          console.warn('persist reading note failed', error)
+        }
+      })()
+    }, 300)
   })
 
   return {
@@ -165,6 +240,7 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
     notesPanelOpen,
     notesTextarea: notesTextarea as Ref<HTMLTextAreaElement | null>,
     notesText,
+    notesError,
     readingFontSize,
     readingThemeMode,
     suiteAutoAdvance,

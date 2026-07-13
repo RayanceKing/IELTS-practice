@@ -328,16 +328,11 @@ import { useReadingLibrary } from '@/modules/practice-reading/useReadingLibrary'
 import { useReadingSuite } from '@/modules/practice-reading/useReadingSuite'
 import { historyPercentage, sortReadingHistory } from '@/modules/practice-reading/historyStats'
 import { useTauriPreferences } from '@/composables/useTauriPreferences.js'
-import { useReadingEndlessState } from '@/modules/practice-reading/useReadingEndlessState'
-import { createEndless } from '@/api/modes-repository.js'
+import { createEndless, createMemorize } from '@/api/modes-repository.js'
 
 const router = useRouter()
 const route = useRoute()
 const preferences = useTauriPreferences()
-const {
-  ensureReady: ensureEndlessStateReady,
-  writeEndlessState
-} = useReadingEndlessState()
 const { loadReadingAssets } = useReadingLibrary()
 const {
   loadReadingHistory,
@@ -674,7 +669,6 @@ const customSuiteReady = computed(() => customSuiteCategories.every((category) =
 
 onMounted(async () => {
   await preferences.hydrate()
-  await ensureEndlessStateReady()
   browseRememberPosition.value = readBrowseRememberPosition()
   readingBackups.value = readReadingBackups()
   const suitePreference = resolveSuitePreference()
@@ -1036,20 +1030,12 @@ function startRandomPractice(category = 'all') {
 }
 
 async function startEndlessMode() {
-  const pool = readingAssets.value.filter((asset) => (
-    asset?.id
-    && asset.activity === 'reading'
-    && hasReadingPracticePayload(asset)
-  ))
-  if (!pool.length) {
+  if (!htmlAssetCount.value) {
     showLocalMessage('无尽模式：题库为空，请先加载题库')
     return
   }
-  // Shuffle so Rust session first asset is not always index-0 of library order.
-  const shuffled = pool.slice().sort(() => Math.random() - 0.5)
   try {
     const { session } = await createEndless({
-      pool: shuffled.map((asset) => String(asset.id)),
       poolPolicy: {
         categories: [],
         frequencyScope: 'all',
@@ -1057,25 +1043,11 @@ async function startEndlessMode() {
       }
     })
     const sessionId = String(session?.id || '').trim()
-    const assetId = String(session?.currentAssetId || shuffled[0]?.id || '').trim()
+    const assetId = String(session?.currentAssetId || '').trim()
     if (!sessionId || !assetId) {
       throw new Error('endless session create failed')
     }
-    const title = shuffled.find((a) => String(a.id) === assetId)?.title || assetId
-    // Keep preference blob as cache only; durable owner is Rust endless session.
-    void ensureEndlessStateReady().then(() => {
-      writeEndlessState({
-        active: true,
-        startedAt: new Date().toISOString(),
-        sessionId,
-        currentAssetId: assetId,
-        pool: shuffled.map((asset) => ({
-          id: asset.id,
-          title: asset.title,
-          category: asset.category
-        }))
-      })
-    })
+    const title = readingAssets.value.find((asset) => String(asset.id) === assetId)?.title || assetId
     showLocalMessage(`无尽模式已启动，正在打开：${title}`)
     router.push({
       name: 'PracticeReading',
@@ -1111,21 +1083,33 @@ function openVocabTool(event) {
   showLocalMessage('独立单词背诵已从桌面产品移除；阅读页划词与生词记录不受影响。')
 }
 
-function openReadingMemorize() {
+async function openReadingMemorize() {
   const asset = filteredReadingAssets.value.find((entry) => entry?.id && hasReadingPracticePayload(entry))
     || readingAssets.value.find((entry) => entry?.id && hasReadingPracticePayload(entry))
   if (!asset) {
     showLocalMessage('阅读背题：没有可用于背题的阅读题，请先加载题库。')
     return
   }
-  router.push({
-    name: 'PracticeReading',
-    params: { assetId: asset.id },
-    query: {
-      mode: 'memorize',
-      practiceMode: 'memorize'
-    }
-  })
+  try {
+    const { session } = await createMemorize({
+      assetId: String(asset.id),
+      titleSnapshot: asset.title || null
+    })
+    const attemptId = String(session?.attempt?.id || '').trim()
+    if (!attemptId) throw new Error('memorize session missing attempt id')
+    router.push({
+      name: 'PracticeReading',
+      params: { assetId: asset.id },
+      query: {
+        mode: 'memorize',
+        practiceMode: 'memorize',
+        memorizeAttemptId: attemptId
+      }
+    })
+  } catch (error) {
+    console.error('创建背题会话失败:', error)
+    showLocalMessage(error?.message ? `阅读背题启动失败：${error.message}` : '阅读背题启动失败')
+  }
 }
 
 function showAchievementsTool(event) {

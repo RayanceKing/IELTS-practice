@@ -9,6 +9,7 @@ on PATH (or set TAURI_DRIVER/TAURI_NATIVE_DRIVER).
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -20,6 +21,81 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 REPORT = ROOT / "developer/tests/e2e/reports/suite-practice-flow-report.json"
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def git_value(*args: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=10, check=False
+        )
+        value = result.stdout.strip()
+        return value or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def latest_shipping_source_mtime() -> float:
+    roots = (
+        ROOT / "apps/writing-vue/src",
+        ROOT / "src-tauri/src",
+        ROOT / "crates/ielts-domain/src",
+        ROOT / "crates/ielts-db/src",
+        ROOT / "dist/writing",
+    )
+    candidates = [
+        ROOT / "src-tauri/tauri.conf.json",
+        ROOT / "src-tauri/Cargo.toml",
+        ROOT / "apps/writing-vue/package.json",
+    ]
+    for root in roots:
+        if root.is_dir():
+            candidates.extend(path for path in root.rglob("*") if path.is_file())
+    return max((path.stat().st_mtime for path in candidates if path.is_file()), default=0.0)
+
+
+def ensure_current_binary(app: Path, explicit: bool) -> tuple[Path, bool, str | None]:
+    if explicit:
+        return app, False, None
+    stale = not app.is_file() or app.stat().st_mtime < latest_shipping_source_mtime()
+    if not stale:
+        return app, False, None
+    completed = subprocess.run(
+        ["cargo", "build", "--release", "-p", "ielts-practice-tauri"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+        check=False,
+    )
+    detail = "\n".join(part.strip() for part in (completed.stdout, completed.stderr) if part.strip())
+    if completed.returncode != 0:
+        raise RuntimeError(f"current packaged binary build failed: {detail[-4000:]}")
+    return ROOT / "target/release/ielts-practice-tauri.exe", True, detail[-1000:] or None
+
+
+def binary_metadata(app: Path, tauri: str | None, native: str | None, build_performed: bool) -> dict:
+    status = git_value("status", "--porcelain")
+    return {
+        "gitCommit": git_value("rev-parse", "HEAD"),
+        "gitDirty": bool(status),
+        "binaryPath": str(app.resolve()) if app.is_file() else str(app),
+        "binarySha256": sha256_file(app) if app.is_file() else None,
+        "binarySize": app.stat().st_size if app.is_file() else None,
+        "binaryModifiedAt": datetime.fromtimestamp(app.stat().st_mtime, timezone.utc).isoformat() if app.is_file() else None,
+        "buildPerformed": build_performed,
+        "tauriDriverVersion": executable_version(tauri),
+        "nativeDriverVersion": executable_version(native),
+    }
 
 
 def resolve_executable(env_name: str, names: tuple[str, ...], extra: tuple[Path, ...] = ()) -> str | None:
@@ -47,6 +123,8 @@ def executable_version(path: str | None) -> str | None:
         return None
     try:
         result = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=5, check=False)
+        if result.returncode != 0:
+            return None
         value = (result.stdout or result.stderr).strip()
         return value or None
     except (OSError, subprocess.SubprocessError):
@@ -54,11 +132,12 @@ def executable_version(path: str | None) -> str | None:
 
 
 def blocked(reason: str, missing: list[str]) -> int:
-    report = {"schemaVersion": 1, "generatedAt": datetime.now(timezone.utc).isoformat(),
+    report = {"schemaVersion": 2, "generatedAt": datetime.now(timezone.utc).isoformat(),
               "status": "blocked", "exitCode": 2, "target": "packaged-tauri-2",
               "reason": reason, "missingDependencies": missing,
               "checks": {"launch": "blocked", "vueRoutes": "blocked", "readingIpc": "blocked",
-                         "bundledResources": "blocked", "sqliteRestart": "blocked"}}
+                         "bundledResources": "blocked", "readingSubmitBoundary": "blocked",
+                         "sqliteRestart": "blocked"}}
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -124,6 +203,12 @@ def main() -> int:
          Path(os.environ.get("PROGRAMFILES(X86)", "C:/Program Files (x86)")) / "Microsoft/Edge/Application/msedgedriver.exe",
          Path(os.environ.get("PROGRAMFILES", "C:/Program Files")) / "Microsoft/Edge/Application/msedgedriver.exe"),
     )
+    build_performed = False
+    build_detail = None
+    try:
+        app, build_performed, build_detail = ensure_current_binary(app, bool(explicit_app))
+    except Exception as exc:
+        return blocked("current packaged executable could not be built", [str(exc)])
     missing = []
     if not app.is_file(): missing.append(f"packaged executable: {app} (set TAURI_APP_BINARY)")
     if not tauri: missing.append("tauri-driver (install cargo-tauri-driver or set TAURI_DRIVER)")
@@ -137,6 +222,9 @@ def main() -> int:
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     driver = Driver(os.environ.get("TAURI_WEBDRIVER_URL", "http://127.0.0.1:4444"))
     checks = {}
+    metadata = binary_metadata(app, tauri, native, build_performed)
+    if build_detail:
+        metadata["buildDetail"] = build_detail
     try:
         for _ in range(30):
             try: driver.call("GET", "/status"); break
@@ -156,9 +244,24 @@ def main() -> int:
         if not asset_id:
             raise RuntimeError(f"reading_list_assets returned an entry without an id: {assets[0]}")
         payload = driver.script("return window.__TAURI_INTERNALS__.invoke('reading_get_asset_payload', {assetId: arguments[0]})", [asset_id])
-        if not isinstance(payload, dict) or not payload.get("ok") or not payload.get("data"):
+        payload_data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict) or not payload.get("ok") or not isinstance(payload_data, dict):
             raise RuntimeError(f"reading_get_asset_payload failed for {asset_id}: {payload}")
+        if not isinstance(payload_data.get("asset"), dict) or "payload" not in payload_data:
+            raise RuntimeError(f"reading payload is not canonical {{asset,payload}}: {payload_data}")
+        if isinstance(payload_data.get("payload"), dict) and "asset" in payload_data["payload"] and "payload" in payload_data["payload"]:
+            raise RuntimeError("reading payload is double wrapped")
         checks["bundledResources"] = "passed"
+        negative = driver.script("""
+            return window.__TAURI_INTERNALS__.invoke('reading_submit_attempt', {cmd: {
+              attemptId: 'e2e-negative-submit', assetId: arguments[0], answers: {},
+              markedQuestions: [], questionTimeline: [], idempotencyKey: 'e2e-negative-key',
+              payload: {answerKey: {q1: 'forged'}}
+            }}).then(value => ({resolved: true, value})).catch(error => ({resolved: false, error: String(error)}));
+        """, [asset_id])
+        if isinstance(negative, dict) and negative.get("resolved") and (negative.get("value") or {}).get("ok"):
+            raise RuntimeError("reading_submit_attempt accepted forbidden client payload/answerKey")
+        checks["readingSubmitBoundary"] = "passed"
         marker = f"e2e-{int(time.time())}"
         saved = driver.script("return window.__TAURI_INTERNALS__.invoke('upsert_setting', {cmd:{namespace:'e2e', key:'restartMarker', value:arguments[0]}})", [marker])
         if not isinstance(saved, dict) or not saved.get("ok"): raise RuntimeError(f"upsert_setting failed: {saved}")
@@ -169,13 +272,13 @@ def main() -> int:
         values = (restored or {}).get("data", []) if isinstance(restored, dict) else []
         checks["sqliteRestart"] = "passed" if any(x.get("key") == "restartMarker" and x.get("value") == marker for x in values) else "failed"
         status = "passed" if all(v == "passed" for v in checks.values()) else "failed"
-        report = {"schemaVersion": 1, "generatedAt": datetime.now(timezone.utc).isoformat(),
+        report = {"schemaVersion": 2, "generatedAt": datetime.now(timezone.utc).isoformat(),
                   "status": status, "exitCode": 0 if status == "passed" else 1,
-                  "target": "packaged-tauri-2", "checks": checks}
+                  "target": "packaged-tauri-2", "metadata": metadata, "checks": checks}
     except Exception as exc:
-        report = {"schemaVersion": 1, "generatedAt": datetime.now(timezone.utc).isoformat(),
+        report = {"schemaVersion": 2, "generatedAt": datetime.now(timezone.utc).isoformat(),
                   "status": "failed", "exitCode": 1, "target": "packaged-tauri-2",
-                  "checks": checks, "error": str(exc)}
+                  "metadata": metadata, "checks": checks, "error": str(exc)}
     finally:
         driver.close(); proc.terminate()
     REPORT.parent.mkdir(parents=True, exist_ok=True)

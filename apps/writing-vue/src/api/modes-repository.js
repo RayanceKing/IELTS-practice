@@ -62,8 +62,8 @@ export async function cancelSuite(suiteId) {
 export async function createEndless(payload) {
   const response = await invokeCommand('endless_create', {
     cmd: {
-      pool: payload.pool || [],
       poolPolicy: payload.poolPolicy || null,
+      seed: payload.seed || null,
       idempotencyKey: payload.idempotencyKey || newKey('endless-create')
     }
   })
@@ -75,11 +75,34 @@ export async function getEndless(sessionId) {
   return { source: 'tauri', session: unwrapCommandResponse(response, 'endless_get') }
 }
 
-export async function advanceEndless(sessionId, nextAssetId = null) {
+export async function advanceEndless(sessionId) {
   const response = await invokeCommand('endless_advance', {
-    cmd: { sessionId, nextAssetId }
+    cmd: { sessionId }
   })
   return { source: 'tauri', session: unwrapCommandResponse(response, 'endless_advance') }
+}
+
+export async function saveSuitePassageDraft(payload) {
+  const response = await invokeCommand('suite_save_passage_draft', {
+    cmd: {
+      suiteId: payload.suiteId,
+      assetId: payload.assetId,
+      assetRevision: payload.assetRevision ?? null,
+      assetFingerprint: payload.assetFingerprint || null,
+      answers: payload.answers || {},
+      markedQuestions: payload.markedQuestions || [],
+      questionTimeline: payload.questionTimeline || [],
+      titleSnapshot: payload.titleSnapshot || null,
+      timerSnapshot: payload.timerSnapshot || null,
+      idempotencyKey: payload.idempotencyKey || `suite-draft-${payload.suiteId}-${payload.assetId}`
+    }
+  })
+  return { source: 'tauri', result: unwrapCommandResponse(response, 'suite_save_passage_draft') }
+}
+
+export async function cancelEndless(sessionId) {
+  const response = await invokeCommand('endless_cancel', { sessionId })
+  return { source: 'tauri', session: unwrapCommandResponse(response, 'endless_cancel') }
 }
 
 export async function submitEndless(payload) {
@@ -105,7 +128,6 @@ export async function createMemorize(payload) {
     cmd: {
       assetId: payload.assetId,
       titleSnapshot: payload.titleSnapshot || null,
-      payload: payload.payload || null,
       idempotencyKey: payload.idempotencyKey || newKey('memorize')
     }
   })
@@ -121,9 +143,11 @@ export const modesRepository = {
   createSuite,
   getSuite,
   submitSuitePassage,
+  saveSuitePassageDraft,
   cancelSuite,
   createEndless,
   getEndless,
+  cancelEndless,
   advanceEndless,
   submitEndless,
   createMemorize,

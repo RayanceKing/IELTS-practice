@@ -31,6 +31,9 @@
         id="reading-coach-status"
         class="reading-coach-panel__status"
         :class="{ 'is-error': Boolean(coachError), 'is-loading': coachLoading }"
+        role="status"
+        :aria-live="coachError ? 'assertive' : 'polite'"
+        aria-atomic="true"
         data-reading-coach-stream-status
       >
         {{ coachStatusText }}
@@ -43,6 +46,9 @@
       <div
         id="reading-coach-messages"
         class="reading-coach-panel__messages"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
         data-reading-coach-transcript
       >
         <div v-if="!coachTranscript.length" class="reading-coach-msg assistant">

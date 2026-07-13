@@ -1,5 +1,6 @@
 import { reactive, ref } from 'vue'
-import { upsertAnnotation, listAnnotations, deleteAnnotation, lookupDictionary, upsertVocab } from '@/api/enrichment-repository.js'
+import { upsertAnnotation, listAnnotations, revalidateAnnotations, deleteAnnotation, lookupDictionary, upsertVocab } from '@/api/enrichment-repository.js'
+import type { AnnotationRecord } from '@/api/enrichment-repository.js'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 
 export interface HighlightRecord {
@@ -35,6 +36,7 @@ export interface NormalizedHighlight {
   after: string
   occurrence: number
   createdAt: string
+  mismatch?: string | null
 }
 
 export interface DictionaryEntry {
@@ -123,31 +125,16 @@ export function useReadingHighlights() {
 
   async function loadPersistedHighlights(
     assetId: string | null | undefined,
-    attemptId: string | null = null
+    attemptId: string | null = null,
+    document: string | null = null
   ) {
     if (!isTauriRuntime() || !assetId) return [] as NormalizedHighlight[]
     try {
-      const { items } = await listAnnotations(assetId, attemptId) as {
-        items?: Array<{
-          id?: string
-          scope?: string
-          kind?: string
-          questionId?: string | null
-          noteText?: string | null
-          createdAt?: string
-          mismatch?: unknown
-          anchor?: {
-            text?: string
-            startOffset?: number | null
-            endOffset?: number | null
-            before?: string | null
-            after?: string | null
-            occurrence?: number | null
-          }
-        }>
-      }
+      const { items } = document
+        ? await revalidateAnnotations(assetId, 'passage', document)
+        : await listAnnotations(assetId, attemptId)
       return normalizeHighlightSnapshot(
-        (items || []).map((item) => ({
+        (items || []).filter((item) => item.kind === 'highlight').map((item: AnnotationRecord) => ({
           scope: item.scope,
           text: item.anchor?.text,
           kind: item.kind,
@@ -209,7 +196,7 @@ export function useReadingHighlights() {
       return []
     }
     return value
-      .map((entry) => {
+      .map((entry): NormalizedHighlight | null => {
         if (!entry || typeof entry !== 'object') return null
         const record = entry as HighlightRecord
         const text = normalizeComparableText(record.text || record.excerpt)
@@ -228,7 +215,8 @@ export function useReadingHighlights() {
           before: normalizeComparableText(record.before),
           after: normalizeComparableText(record.after),
           occurrence: Number.isFinite(Number(record.occurrence)) ? Math.max(0, Number(record.occurrence)) : 0,
-          createdAt: record.createdAt || new Date().toISOString()
+          createdAt: record.createdAt || new Date().toISOString(),
+          mismatch: record.mismatch ? String(record.mismatch) : null
         }
       })
       .filter((entry): entry is NormalizedHighlight => Boolean(entry))
