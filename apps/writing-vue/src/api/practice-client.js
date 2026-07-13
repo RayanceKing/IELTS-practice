@@ -68,12 +68,13 @@ export const practiceAssets = {
       err.code = 'not_found'
       throw err
     }
-    const payload = await getReadingAssetPayload(normalizedAssetId)
+    const loaded = await getReadingAssetPayload(normalizedAssetId)
     return {
       ...meta,
+      ...(loaded.asset || {}),
       activity: activity || 'reading',
       refresh: !!options.refresh,
-      payload
+      payload: loaded.payload
     }
   }
 }
@@ -85,9 +86,11 @@ export const practiceSessions = {
     const result = await submitReadingAttempt({
       attemptId,
       assetId: payload.assetId || payload.examId || payload.asset?.id,
-      assetPayload: payload.payload || payload.assetPayload || payload.asset,
+      assetRevision: payload.assetRevision ?? payload.asset?.schemaVersion ?? null,
+      assetFingerprint: payload.assetFingerprint || payload.asset?.fingerprint || null,
       answers: payload.answers || payload.attempt?.answers || {},
       markedQuestions: payload.markedQuestions || payload.attempt?.markedQuestions || [],
+      questionTimeline: payload.questionTimeline || payload.attempt?.questionTimelineLite || [],
       durationMs: payload.durationMs ?? payload.attempt?.durationMs ?? null,
       titleSnapshot: payload.titleSnapshot || payload.title || null,
       idempotencyKey: payload.idempotencyKey || newKey('submit')
@@ -131,9 +134,11 @@ export const practiceReadingSuite = {
     const { result } = await submitSuitePassage({
       suiteId: sessionId,
       assetId,
-      assetPayload: payload.payload || payload.assetPayload || payload.asset,
+      assetRevision: payload.assetRevision ?? payload.asset?.schemaVersion ?? null,
+      assetFingerprint: payload.assetFingerprint || payload.asset?.fingerprint || null,
       answers: payload.answers || payload.attempt?.answers || {},
       markedQuestions: payload.markedQuestions || payload.attempt?.markedQuestions || [],
+      questionTimeline: payload.questionTimeline || payload.attempt?.questionTimelineLite || [],
       durationMs: payload.durationMs ?? payload.attempt?.durationMs ?? null,
       titleSnapshot: payload.titleSnapshot || null,
       timerSnapshot: payload.timerSnapshot || null,

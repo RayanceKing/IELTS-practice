@@ -15,6 +15,10 @@ use ts_rs::TS;
 )]
 pub struct WritingEvaluationV4 {
     pub schema_version: u32,
+    /// Stable persisted evaluation identity. Empty only for legacy payloads
+    /// before they are attached to a v4 persistence row.
+    #[serde(default)]
+    pub id: String,
     pub status: EvaluationStatus,
     pub stage: EvaluationStage,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::reading::attempt::{submit_reading_attempt, ReadingSubmitCommand, ReadingSubmitResult};
+use crate::reading::attempt::{
+    submit_reading_attempt, ReadingQuestionProgress, ReadingSubmitCommand, ReadingSubmitResult,
+};
 use crate::sqlite::{DbError, DbResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,14 +72,20 @@ pub struct AdvanceEndlessCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct SubmitEndlessCommand {
     pub session_id: String,
     pub asset_id: String,
-    pub payload: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_revision: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_fingerprint: Option<String>,
     #[serde(default)]
     pub answers: Value,
     #[serde(default)]
     pub marked_questions: Vec<String>,
+    #[serde(default)]
+    pub question_timeline: Vec<ReadingQuestionProgress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -205,7 +213,15 @@ pub fn submit_endless_passage(
     if cmd.idempotency_key.trim().is_empty() {
         return Err(DbError::Validation("idempotency_key required".into()));
     }
-    if let Some(prev) = load_submit_idempotent(conn, &cmd.idempotency_key)? {
+    if let Some(mut prev) = load_submit_idempotent(conn, &cmd.idempotency_key)? {
+        if prev.session.id != cmd.session_id
+            || prev.submission.attempt.asset_id.as_deref() != Some(cmd.asset_id.as_str())
+        {
+            return Err(DbError::Validation(
+                "idempotency key belongs to another endless submission".into(),
+            ));
+        }
+        prev.submission.idempotent_replay = true;
         return Ok(prev);
     }
     let mut session = load(conn, &cmd.session_id)?;
@@ -219,28 +235,33 @@ pub fn submit_endless_passage(
         }
     }
 
+    // Stable across retries so a crash after the inner reading submit cannot
+    // strand the mode transition behind a different generated attempt id.
     let attempt_id = format!(
-        "reading-{}-{}",
+        "reading-{}-{:016x}",
         session.id,
-        Uuid::new_v4().to_string().split('-').next().unwrap_or("x")
+        stable_key_hash(&cmd.idempotency_key)
     );
     let submission = submit_reading_attempt(
         conn,
         &ReadingSubmitCommand {
             attempt_id: attempt_id.clone(),
             asset_id: cmd.asset_id.clone(),
-            payload: cmd.payload.clone(),
+            asset_revision: cmd.asset_revision,
+            asset_fingerprint: cmd.asset_fingerprint.clone(),
             answers: cmd.answers.clone(),
             marked_questions: cmd.marked_questions.clone(),
+            question_timeline: cmd.question_timeline.clone(),
             duration_ms: cmd.duration_ms,
             title_snapshot: cmd.title_snapshot.clone(),
             idempotency_key: format!("endless-{}", cmd.idempotency_key),
         },
     )?;
 
+    let persisted_attempt_id = submission.attempt.id.clone();
     conn.execute(
         "UPDATE attempts SET mode = 'endless', suite_id = ?1 WHERE id = ?2",
-        params![session.id, attempt_id],
+        params![session.id, persisted_attempt_id],
     )?;
 
     if !session
@@ -250,7 +271,7 @@ pub fn submit_endless_passage(
     {
         session.completed_asset_ids.push(cmd.asset_id.clone());
     }
-    session.current_attempt_id = Some(attempt_id);
+    session.current_attempt_id = Some(persisted_attempt_id);
     let remaining = remaining_pool(&session);
     let next_asset_id = remaining.first().cloned();
     session.current_asset_id = next_asset_id.clone();
@@ -267,6 +288,15 @@ pub fn submit_endless_passage(
     };
     store_submit_idempotent(conn, &cmd.idempotency_key, &result)?;
     Ok(result)
+}
+
+fn stable_key_hash(value: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn persist(conn: &Connection, session: &EndlessSession) -> DbResult<()> {

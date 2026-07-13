@@ -324,6 +324,74 @@ fn crash_during_unlocked_provider_call_recovers_without_losing_input() {
 }
 
 #[test]
+fn prepare_returns_a_durable_handle_before_provider_io() {
+    let (_dir, conn) = open_db();
+    let essay = "A durable handle must exist before the network request. ".repeat(25);
+    save_writing_draft(&conn, &draft_cmd("a-handle", &essay, "d-handle")).unwrap();
+
+    let prepared = prepare_evaluation(
+        &conn,
+        &StartEvaluationCommand {
+            attempt_id: "a-handle".into(),
+            idempotency_key: "eval-handle".into(),
+            task_type: Some("task2".into()),
+            retry_of: None,
+        },
+        "openai-compatible",
+        "test-model",
+    )
+    .unwrap();
+
+    assert_eq!(prepared.handle.attempt_id, "a-handle");
+    assert_eq!(prepared.handle.session_id, prepared.session_id);
+    assert_eq!(prepared.handle.evaluation_id, prepared.evaluation_id);
+    assert_eq!(prepared.handle.sequence, 1);
+    let snapshot = load_evaluation_for_attempt(&conn, "a-handle")
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.id, prepared.evaluation_id);
+    assert_eq!(snapshot.status, EvaluationStatus::Queued);
+    let events = list_events(&conn, &prepared.evaluation_id, 0).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "stage");
+}
+
+#[test]
+fn cancel_is_immediately_persisted_and_idempotent_start_cannot_overwrite_it() {
+    let (_dir, conn) = open_db();
+    let essay = "Cancellation must not wait for an HTTP timeout. ".repeat(25);
+    save_writing_draft(&conn, &draft_cmd("a-cancel-now", &essay, "d-cancel-now")).unwrap();
+    let command = StartEvaluationCommand {
+        attempt_id: "a-cancel-now".into(),
+        idempotency_key: "eval-cancel-now".into(),
+        task_type: Some("task2".into()),
+        retry_of: None,
+    };
+    let prepared = prepare_evaluation(&conn, &command, "openai-compatible", "test-model").unwrap();
+
+    assert!(request_cancel(&conn, &prepared.evaluation_id).unwrap());
+    assert!(!request_cancel(&conn, &prepared.evaluation_id).unwrap());
+    let snapshot = load_evaluation_for_attempt(&conn, "a-cancel-now")
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.status, EvaluationStatus::Interrupted);
+    assert!(list_events(&conn, &prepared.evaluation_id, 0)
+        .unwrap()
+        .iter()
+        .any(|event| event.event_type == "cancelled"));
+
+    let result = start_evaluation(&conn, &command, &DeterministicProvider).unwrap();
+    assert_eq!(result.evaluation.status, EvaluationStatus::Interrupted);
+    assert_eq!(
+        get_writing_draft(&conn, "a-cancel-now")
+            .unwrap()
+            .unwrap()
+            .content_text,
+        essay
+    );
+}
+
+#[test]
 fn events_have_monotonic_sequence() {
     let (_dir, conn) = open_db();
     let essay = "Sequence events for channel consumers. ".repeat(40);

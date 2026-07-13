@@ -18,7 +18,7 @@ use ielts_domain::ErrorEnvelope;
 use crate::sqlite::{DbError, DbResult};
 use crate::writing::draft::get_writing_draft;
 use crate::writing::eval_resolve::{
-    resolve_writing_eval_policy, DEFAULT_SYSTEM_PROMPT, ResolvedWritingEvalPolicy,
+    resolve_writing_eval_policy, ResolvedWritingEvalPolicy, DEFAULT_SYSTEM_PROMPT,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +76,20 @@ pub struct EvaluationRunResult {
     pub events: Vec<EvaluationEvent>,
 }
 
+/// Durable handle returned before provider I/O begins.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvaluationHandle {
+    pub attempt_id: String,
+    pub session_id: String,
+    pub evaluation_id: String,
+    pub status: EvaluationStatus,
+    pub stage: EvaluationStage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_of: Option<String>,
+    pub sequence: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct PreparedEvaluation {
     pub evaluation_id: String,
@@ -89,6 +103,7 @@ pub struct PreparedEvaluation {
     pub temperature: f32,
     pub prompt_id: Option<String>,
     pub prompt_version: String,
+    pub handle: EvaluationHandle,
     pub existing: Option<EvaluationRunResult>,
 }
 
@@ -259,7 +274,11 @@ pub fn prepare_evaluation(
     if let Ok(Some(eval_id)) = existing_eval {
         if let Some(session) = load_session_by_evaluation(conn, &eval_id)? {
             let evaluation = load_evaluation_result(conn, &eval_id)?.unwrap_or_else(|| {
-                empty_eval(EvaluationStatus::Running, EvaluationStage::Preparing)
+                empty_eval(
+                    eval_id.clone(),
+                    EvaluationStatus::Running,
+                    EvaluationStage::Preparing,
+                )
             });
             let events = list_events(conn, &eval_id, 0)?;
             return Ok(PreparedEvaluation {
@@ -272,6 +291,7 @@ pub fn prepare_evaluation(
                 temperature: 0.2,
                 prompt_id: None,
                 prompt_version: "prompt-v1".into(),
+                handle: handle_from_session(&session),
                 existing: Some(EvaluationRunResult {
                     session,
                     evaluation,
@@ -293,6 +313,14 @@ pub fn prepare_evaluation(
     let evaluation_id = Uuid::new_v4().to_string();
     let session_id = Uuid::new_v4().to_string();
     let revision = 1u32;
+    let mut initial_evaluation = empty_eval(
+        evaluation_id.clone(),
+        EvaluationStatus::Queued,
+        EvaluationStage::Preparing,
+    );
+    initial_evaluation.task_type = task_type;
+    let initial_result_json = serde_json::to_string(&initial_evaluation)
+        .map_err(|error| DbError::Message(error.to_string()))?;
 
     // Create evaluation row first, then session — transactionally related.
     let tx = conn.unchecked_transaction()?;
@@ -301,7 +329,7 @@ pub fn prepare_evaluation(
         "INSERT INTO writing_evaluations (
             id, attempt_id, status, stage, provider_id, model, rubric_version, prompt_version,
             result_json, degradation_json, error_json, started_at, completed_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, NULL, ?9, NULL, ?9)",
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, NULL, ?10, NULL, ?10)",
         params![
             evaluation_id,
             cmd.attempt_id,
@@ -311,6 +339,7 @@ pub fn prepare_evaluation(
             model,
             "rubric-v1",
             policy.prompt_version.as_str(),
+            initial_result_json,
             now,
         ],
     )?;
@@ -343,6 +372,23 @@ pub fn prepare_evaluation(
         ],
     )?;
 
+    tx.execute(
+        "UPDATE evaluation_sessions SET sequence = 1 WHERE id = ?1",
+        params![session_id],
+    )?;
+    tx.execute(
+        "INSERT INTO evaluation_events (
+            evaluation_id, sequence, revision, event_type, stage, payload_json, created_at
+         ) VALUES (?1, 1, ?2, 'stage', ?3, ?4, ?5)",
+        params![
+            evaluation_id,
+            revision as i64,
+            stage_str(EvaluationStage::Preparing),
+            json!({ "stage": "preparing", "status": "queued" }).to_string(),
+            now,
+        ],
+    )?;
+
     // Mark attempt reviewing
     tx.execute(
         "UPDATE attempts SET status = ?1, updated_at = ?2 WHERE id = ?3",
@@ -368,8 +414,8 @@ pub fn prepare_evaluation(
     tx.commit()?;
 
     Ok(PreparedEvaluation {
-        evaluation_id,
-        session_id,
+        evaluation_id: evaluation_id.clone(),
+        session_id: session_id.clone(),
         essay: draft.content_text,
         prompt: draft.prompt_snapshot,
         task_type,
@@ -377,6 +423,15 @@ pub fn prepare_evaluation(
         temperature: policy.temperature,
         prompt_id: policy.prompt_id,
         prompt_version: policy.prompt_version,
+        handle: EvaluationHandle {
+            attempt_id: cmd.attempt_id.clone(),
+            session_id: session_id.clone(),
+            evaluation_id: evaluation_id.clone(),
+            status: EvaluationStatus::Queued,
+            stage: EvaluationStage::Preparing,
+            retry_of: cmd.retry_of.clone(),
+            sequence: 1,
+        },
         existing: None,
     })
 }
@@ -388,6 +443,24 @@ pub fn finish_evaluation(
     feedback: Option<WritingFeedbackV4>,
     review_error: Option<ProviderError>,
 ) -> DbResult<EvaluationRunResult> {
+    if let Some(session) = load_session(conn, &prepared.session_id)? {
+        if session.cancel_requested && session.completed_at.is_some() {
+            let evaluation =
+                load_evaluation_result(conn, &prepared.evaluation_id)?.unwrap_or_else(|| {
+                    empty_eval(
+                        prepared.evaluation_id.clone(),
+                        EvaluationStatus::Interrupted,
+                        EvaluationStage::Preparing,
+                    )
+                });
+            let events = list_events(conn, &prepared.evaluation_id, 0)?;
+            return Ok(EvaluationRunResult {
+                session,
+                evaluation,
+                events,
+            });
+        }
+    }
     let provider = PreparedProvider {
         score,
         feedback,
@@ -456,7 +529,11 @@ fn run_state_machine(
     if is_cancel_requested(conn, session_id)? {
         return finalize_cancelled(conn, evaluation_id, session_id, events);
     }
-    let mut evaluation = empty_eval(EvaluationStatus::Running, EvaluationStage::Preparing);
+    let mut evaluation = empty_eval(
+        evaluation_id.to_string(),
+        EvaluationStatus::Running,
+        EvaluationStage::Preparing,
+    );
     evaluation.task_type = task_type;
     persist_stage(
         conn,
@@ -536,7 +613,7 @@ fn run_state_machine(
         revision,
         "score",
         Some(EvaluationStage::Scoring),
-        json!({ "score": score }),
+        serde_json::to_value(&score).unwrap_or(Value::Null),
     )?);
 
     // Reviewing
@@ -614,7 +691,7 @@ fn run_state_machine(
         revision,
         "review",
         Some(EvaluationStage::Reviewing),
-        json!({ "hasFeedback": true }),
+        serde_json::to_value(evaluation.feedback.as_ref()).unwrap_or(Value::Null),
     )?);
 
     // Finalizing
@@ -707,7 +784,7 @@ fn finalize_completed(
         0,
         "completed",
         Some(EvaluationStage::Finalizing),
-        json!({ "status": status_str(evaluation.status) }),
+        json!({ "status": status_str(evaluation.status), "evaluation": &evaluation }),
     )?);
 
     let session = load_session(conn, session_id)?.expect("session");
@@ -749,7 +826,11 @@ fn finalize_failed(
         0,
         "failed",
         Some(evaluation.stage),
-        json!({ "message": err.message }),
+        json!({
+            "code": "provider.failed",
+            "message": err.message,
+            "retryable": err.retryable,
+        }),
     )?);
     let session = load_session(conn, session_id)?.expect("session");
     Ok(EvaluationRunResult {
@@ -765,7 +846,11 @@ fn finalize_cancelled(
     session_id: &str,
     events: Vec<EvaluationEvent>,
 ) -> DbResult<EvaluationRunResult> {
-    let evaluation = empty_eval(EvaluationStatus::Interrupted, EvaluationStage::Preparing);
+    let evaluation = empty_eval(
+        evaluation_id.to_string(),
+        EvaluationStatus::Interrupted,
+        EvaluationStage::Preparing,
+    );
     finalize_cancelled_with_partial(conn, evaluation_id, session_id, evaluation, events)
 }
 
@@ -805,11 +890,60 @@ fn finalize_cancelled_with_partial(
 }
 
 pub fn request_cancel(conn: &Connection, evaluation_id: &str) -> DbResult<bool> {
-    let n = conn.execute(
-        "UPDATE evaluation_sessions SET cancel_requested = 1, updated_at = ?1 WHERE evaluation_id = ?2 AND completed_at IS NULL",
-        params![chrono::Utc::now().to_rfc3339(), evaluation_id],
+    let Some(session) = load_session_by_evaluation(conn, evaluation_id)? else {
+        return Ok(false);
+    };
+    if session.completed_at.is_some() {
+        return Ok(false);
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut evaluation = load_evaluation_result(conn, evaluation_id)?.unwrap_or_else(|| {
+        empty_eval(
+            evaluation_id.to_string(),
+            EvaluationStatus::Interrupted,
+            session.stage,
+        )
+    });
+    evaluation.status = EvaluationStatus::Interrupted;
+    let result_json =
+        serde_json::to_string(&evaluation).map_err(|error| DbError::Message(error.to_string()))?;
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "UPDATE evaluation_sessions
+         SET status = ?1, cancel_requested = 1, completed_at = ?2, updated_at = ?2
+         WHERE id = ?3",
+        params![status_str(EvaluationStatus::Interrupted), now, session.id],
     )?;
-    Ok(n > 0)
+    tx.execute(
+        "UPDATE writing_evaluations
+         SET status = ?1, result_json = ?2, completed_at = ?3, updated_at = ?3
+         WHERE id = ?4",
+        params![
+            status_str(EvaluationStatus::Interrupted),
+            result_json,
+            now,
+            evaluation_id,
+        ],
+    )?;
+    tx.execute(
+        "UPDATE attempts SET status = ?1, updated_at = ?2 WHERE id = ?3",
+        params![
+            status_attempt(AttemptStatus::Interrupted),
+            now,
+            session.attempt_id,
+        ],
+    )?;
+    append_event(
+        &tx,
+        evaluation_id,
+        session.revision,
+        "cancelled",
+        Some(session.stage),
+        json!({ "evaluationId": evaluation_id, "keptInputs": true }),
+    )?;
+    tx.commit()?;
+    Ok(true)
 }
 
 pub fn list_events(
@@ -847,18 +981,19 @@ pub fn load_evaluation_for_attempt(
     conn: &Connection,
     attempt_id: &str,
 ) -> DbResult<Option<WritingEvaluationV4>> {
-    let result: Result<String, _> = conn.query_row(
-        "SELECT result_json FROM writing_evaluations WHERE attempt_id = ?1 ORDER BY updated_at DESC LIMIT 1",
+    let result: Result<(String, Option<String>), _> = conn.query_row(
+        "SELECT id, result_json FROM writing_evaluations WHERE attempt_id = ?1 ORDER BY updated_at DESC LIMIT 1",
         params![attempt_id],
-        |r| r.get(0),
+        |r| Ok((r.get(0)?, r.get(1)?)),
     );
     match result {
-        Ok(json) => {
-            if json.is_empty() {
+        Ok((id, json)) => {
+            let Some(json) = json.filter(|value| !value.is_empty()) else {
                 return Ok(None);
-            }
-            let v: WritingEvaluationV4 = serde_json::from_str(&json)
+            };
+            let mut v: WritingEvaluationV4 = serde_json::from_str(&json)
                 .map_err(|e| DbError::Message(format!("eval parse: {e}")))?;
+            v.id = id;
             Ok(Some(v))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -1045,7 +1180,9 @@ fn load_evaluation_result(
     )?;
     match json {
         Some(j) if !j.is_empty() => {
-            let v = serde_json::from_str(&j).map_err(|e| DbError::Message(e.to_string()))?;
+            let mut v: WritingEvaluationV4 =
+                serde_json::from_str(&j).map_err(|e| DbError::Message(e.to_string()))?;
+            v.id = evaluation_id.to_string();
             Ok(Some(v))
         }
         _ => Ok(None),
@@ -1065,9 +1202,10 @@ fn resolve_root_evaluation(conn: &Connection, retry_of: &str) -> DbResult<Option
     }
 }
 
-fn empty_eval(status: EvaluationStatus, stage: EvaluationStage) -> WritingEvaluationV4 {
+fn empty_eval(id: String, status: EvaluationStatus, stage: EvaluationStage) -> WritingEvaluationV4 {
     WritingEvaluationV4 {
         schema_version: WritingEvaluationV4::SCHEMA_VERSION,
+        id,
         status,
         stage,
         task_type: None,
@@ -1076,6 +1214,18 @@ fn empty_eval(status: EvaluationStatus, stage: EvaluationStage) -> WritingEvalua
         feedback: None,
         degradation: None,
         error: None,
+    }
+}
+
+fn handle_from_session(session: &EvaluationSession) -> EvaluationHandle {
+    EvaluationHandle {
+        attempt_id: session.attempt_id.clone(),
+        session_id: session.id.clone(),
+        evaluation_id: session.evaluation_id.clone(),
+        status: session.status,
+        stage: session.stage,
+        retry_of: session.retry_of.clone(),
+        sequence: session.sequence,
     }
 }
 

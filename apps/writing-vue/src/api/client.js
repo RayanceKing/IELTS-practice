@@ -281,8 +281,8 @@ function emitEvaluationEvent(event) {
 }
 
 function mapEventToUi(raw) {
-  const eventType = raw.eventType || raw.event_type || raw.type || 'log'
-  const payload = raw.payload || raw.data || {}
+  const eventType = raw.eventType || 'log'
+  const payload = raw.payload || {}
   const typeMap = {
     stage: 'stage',
     completed: 'complete',
@@ -300,12 +300,10 @@ function mapEventToUi(raw) {
     data.stage = raw.stage
     data.key = typeof raw.stage === 'string' ? raw.stage.toLowerCase() : raw.stage
   }
-  if (type === 'complete' && !data.score && data.evaluation?.score) {
-    Object.assign(data, data.evaluation)
-  }
   return {
     type,
-    sessionId: raw.sessionId || raw.evaluationId || raw.evaluation_id,
+    sessionId: raw.sessionId,
+    evaluationId: raw.evaluationId,
     sequence: raw.sequence,
     data
   }
@@ -326,8 +324,8 @@ async function pollEvaluationEvents(attemptId, evaluationId) {
       for (const raw of events || []) {
         after = Math.max(after, Number(raw.sequence || 0))
         emitEvaluationEvent(mapEventToUi({ ...raw, sessionId: attemptId }))
-        const t = String(raw.eventType || raw.event_type || '').toLowerCase()
-        if (t === 'completed' || t === 'complete' || t === 'error' || t === 'failed') {
+        const t = String(raw.eventType || '').toLowerCase()
+        if (['completed', 'failed', 'cancelled'].includes(t)) {
           stopped = true
         }
       }
@@ -336,8 +334,8 @@ async function pollEvaluationEvents(attemptId, evaluationId) {
         const status = String(
           evaluation?.evaluation?.status || evaluation?.status || ''
         ).toLowerCase()
-        if (status === 'completed' || status === 'failed' || status === 'cancelled') {
-          if (status === 'completed' && evaluation?.evaluation) {
+        if (['completed', 'degraded', 'failed', 'interrupted'].includes(status)) {
+          if (['completed', 'degraded'].includes(status) && evaluation?.evaluation) {
             emitEvaluationEvent({
               type: 'complete',
               sessionId: attemptId,
@@ -382,37 +380,23 @@ export const evaluate = {
       idempotencyKey: newIdempotencyKey('draft')
     })
     await submitAttempt(attemptId, newIdempotencyKey('submit'))
-    const { result } = await startEvaluation({
+    const { handle } = await startEvaluation({
       attemptId,
       taskType,
       idempotencyKey: newIdempotencyKey('eval'),
-      retryOf: payload.retryOf || null
+      retryOf: payload.retryOf || null,
+      onEvent: (event) => emitEvaluationEvent(mapEventToUi({ ...event, sessionId: attemptId }))
     })
 
-    const evaluationId =
-      result?.session?.evaluationId ||
-      result?.session?.evaluation_id ||
-      result?.evaluation?.id ||
-      null
-
-    const events = result?.events || []
-    for (const raw of events) {
-      emitEvaluationEvent(mapEventToUi({ ...raw, sessionId: attemptId }))
-    }
+    const evaluationId = handle?.evaluationId || null
     if (evaluationId) {
       void pollEvaluationEvents(attemptId, evaluationId)
-    } else if (result?.evaluation) {
-      emitEvaluationEvent({
-        type: 'complete',
-        sessionId: attemptId,
-        data: result.evaluation
-      })
     }
 
     return {
       sessionId: attemptId,
       evaluationId,
-      result
+      handle
     }
   },
 
@@ -442,6 +426,7 @@ export const evaluate = {
     return {
       sessionId,
       evaluation,
+      evaluationId: evaluation?.id || null,
       events,
       status: evaluation?.status || 'unknown'
     }

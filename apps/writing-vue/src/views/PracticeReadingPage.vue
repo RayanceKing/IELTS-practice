@@ -1113,8 +1113,16 @@ async function hydrateOpenDraft(assetId) {
     for (const entry of attempt.answers || []) {
       const questionId = String(entry.questionId || entry.question_id || '').trim()
       if (!questionId) continue
-      answers[questionId] = entry.answer
+      if (entry.answer != null) answers[questionId] = entry.answer
       if (entry.marked) marked.push(questionId)
+      answerTimeline[questionId] = {
+        firstAnsweredAt: entry.answeredAt || entry.answered_at || null,
+        lastAnsweredAt: entry.answeredAt || entry.answered_at || null,
+        changeCount: Math.max(0, Number(entry.changeCount ?? entry.change_count) || 0),
+        visitCount: Math.max(0, Number(entry.visitCount ?? entry.visit_count) || 0),
+        elapsedMs: Math.max(0, Number(entry.elapsedMs ?? entry.elapsed_ms) || 0),
+        lastFingerprint: getAnswerFingerprint(entry.answer)
+      }
     }
     Object.entries(answers).forEach(([questionId, value]) => {
       assignAnswer(questionId, value)
@@ -1257,6 +1265,21 @@ function resetAnswers() {
   startPracticeTimer()
   syncDomAnswers()
   snapshotMessage.value = '已清空本页作答。'
+}
+
+function isMarkedQuestion(questionId) {
+  const normalized = normalizeQuestionId(questionId)
+  return Boolean(normalized && markedQuestions.value.includes(normalized))
+}
+
+function toggleMarkedQuestion(questionId) {
+  if (readOnlyMode.value) return
+  const normalized = normalizeQuestionId(questionId)
+  if (!normalized) return
+  markedQuestions.value = isMarkedQuestion(normalized)
+    ? markedQuestions.value.filter((entry) => entry !== normalized)
+    : [...markedQuestions.value, normalized]
+  scheduleDraftAutosave()
 }
 
 async function recycleSubmittedAttempt() {
@@ -2010,8 +2033,11 @@ async function persistTauriDraft() {
     await readingAttempt.persistDraft({
       attemptId: tauriAttemptId,
       assetId: asset.value.id,
+      assetRevision: asset.value.schemaVersion ?? null,
+      assetFingerprint: asset.value.fingerprint || null,
       answers: snapshotAnswerMap(),
       markedQuestions: markedQuestions.value.slice(),
+      questionTimeline: buildPersistedQuestionTimeline(),
       titleSnapshot: asset.value.title || asset.value.name || null
     })
   } catch (err) {
@@ -2053,9 +2079,11 @@ async function submitAnswers() {
       const suiteResult = await tauriSubmitSuitePassage({
         suiteId: activeSuiteSessionId.value,
         assetId: asset.value.id,
-        assetPayload: payload.value,
+        assetRevision: asset.value.schemaVersion ?? null,
+        assetFingerprint: asset.value.fingerprint || null,
         answers: attempt.answers,
         markedQuestions: attempt.markedQuestions,
+        questionTimeline: buildPersistedQuestionTimeline(attempt.questionTimelineLite),
         durationMs: Math.round((durationSec || 0) * 1000),
         titleSnapshot: asset.value.title || asset.value.name || null,
         timerSnapshot: attempt.timerSnapshot || null
@@ -2099,9 +2127,11 @@ async function submitAnswers() {
       const endlessResult = await tauriSubmitEndless({
         sessionId: activeEndlessSessionId.value,
         assetId: asset.value.id,
-        assetPayload: payload.value,
+        assetRevision: asset.value.schemaVersion ?? null,
+        assetFingerprint: asset.value.fingerprint || null,
         answers: attempt.answers,
         markedQuestions: attempt.markedQuestions,
+        questionTimeline: buildPersistedQuestionTimeline(attempt.questionTimelineLite),
         durationMs: Math.round((durationSec || 0) * 1000),
         titleSnapshot: asset.value.title || asset.value.name || null
       })
@@ -2149,9 +2179,11 @@ async function submitAnswers() {
       const tauriResult = await readingAttempt.submit({
         attemptId: tauriAttemptId,
         assetId: asset.value.id,
-        assetPayload: payload.value,
+        assetRevision: asset.value.schemaVersion ?? null,
+        assetFingerprint: asset.value.fingerprint || null,
         answers: attempt.answers,
         markedQuestions: attempt.markedQuestions,
+        questionTimeline: buildPersistedQuestionTimeline(attempt.questionTimelineLite),
         durationMs: Math.round((durationSec || 0) * 1000),
         titleSnapshot: asset.value.title || asset.value.name || null
       })
@@ -2845,6 +2877,16 @@ function buildQuestionTimelineLite() {
       durationMs: elapsedMs
     }
   })
+}
+
+function buildPersistedQuestionTimeline(timeline = buildQuestionTimelineLite()) {
+  return timeline.map((entry) => ({
+    questionId: entry.questionId,
+    changeCount: entry.changeCount,
+    visitCount: entry.visitCount,
+    elapsedMs: entry.elapsedMs,
+    answeredAt: entry.lastAnsweredAt || entry.firstAnsweredAt || null
+  }))
 }
 
 function normalizeOfficialQuestionExplanationSection(section, index) {

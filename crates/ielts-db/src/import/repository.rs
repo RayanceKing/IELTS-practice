@@ -18,8 +18,10 @@ pub fn upsert_writing_evaluation(
 ) -> DbResult<()> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
+    let mut stored_evaluation = evaluation.clone();
+    stored_evaluation.id = id.clone();
     let result_json =
-        serde_json::to_string(evaluation).map_err(|e| DbError::Import(e.to_string()))?;
+        serde_json::to_string(&stored_evaluation).map_err(|e| DbError::Import(e.to_string()))?;
     let degradation_json = evaluation
         .degradation
         .as_ref()

@@ -5,10 +5,10 @@ use tempfile::tempdir;
 
 use ielts_db::{
     advance_endless, create_endless_session, create_memorize_session, create_suite_session,
-    finish_memorize_session, get_suite_session, list_history, migrate, open_connection,
-    remaining_pool, submit_endless_passage, submit_reading_attempt, submit_suite_passage,
-    AdvanceEndlessCommand, CreateEndlessCommand, CreateMemorizeCommand, CreateSuiteCommand,
-    DbOpenOptions, PassageStatus, ReadingSubmitCommand, SubmitEndlessCommand,
+    finish_memorize_session, get_suite_session, import_asset_payload_file, list_history, migrate,
+    open_connection, remaining_pool, submit_endless_passage, submit_reading_attempt,
+    submit_suite_passage, AdvanceEndlessCommand, CreateEndlessCommand, CreateMemorizeCommand,
+    CreateSuiteCommand, DbOpenOptions, PassageStatus, ReadingSubmitCommand, SubmitEndlessCommand,
     SubmitSuitePassageCommand, SuiteAssetSeed, TimerMode, TimerState,
 };
 use ielts_domain::domain::{Activity, SuiteFlowMode, SuiteStatus};
@@ -28,6 +28,14 @@ fn payload(exam_id: &str) -> serde_json::Value {
         "interactionModel": {},
         "questionGroups": []
     })
+}
+
+fn seed_assets(conn: &rusqlite::Connection, dir: &tempfile::TempDir, ids: &[&str]) {
+    for id in ids {
+        let path = dir.path().join(format!("{id}.json"));
+        std::fs::write(&path, serde_json::to_vec(&payload(id)).unwrap()).unwrap();
+        import_asset_payload_file(conn, &path).unwrap();
+    }
 }
 
 fn suite_sequence() -> Vec<SuiteAssetSeed> {
@@ -64,7 +72,8 @@ fn timer_pause_and_countdown_policy() {
 
 #[test]
 fn suite_create_submit_and_recover() {
-    let (_dir, conn) = open_db();
+    let (dir, conn) = open_db();
+    seed_assets(&conn, &dir, &["p1", "p2", "p3"]);
     let session = create_suite_session(
         &conn,
         &CreateSuiteCommand {
@@ -100,9 +109,11 @@ fn suite_create_submit_and_recover() {
         &SubmitSuitePassageCommand {
             suite_id: session.session_id.clone(),
             asset_id: "p1".into(),
-            payload: payload("p1"),
+            asset_revision: None,
+            asset_fingerprint: None,
             answers: json!({ "q1": "TRUE", "q2": "A" }),
             marked_questions: vec![],
+            question_timeline: vec![],
             duration_ms: Some(30_000),
             title_snapshot: Some("P1".into()),
             timer_snapshot: None,
@@ -118,9 +129,11 @@ fn suite_create_submit_and_recover() {
         &SubmitSuitePassageCommand {
             suite_id: session.session_id.clone(),
             asset_id: "p3".into(),
-            payload: payload("p3"),
+            asset_revision: None,
+            asset_fingerprint: None,
             answers: json!({ "q1": "TRUE", "q2": "A" }),
             marked_questions: vec![],
+            question_timeline: vec![],
             duration_ms: None,
             title_snapshot: None,
             timer_snapshot: None,
@@ -138,9 +151,11 @@ fn suite_create_submit_and_recover() {
         &SubmitSuitePassageCommand {
             suite_id: session.session_id.clone(),
             asset_id: "p2".into(),
-            payload: payload("p2"),
+            asset_revision: None,
+            asset_fingerprint: None,
             answers: json!({ "q1": "TRUE", "q2": "A" }),
             marked_questions: vec![],
+            question_timeline: vec![],
             duration_ms: Some(10_000),
             title_snapshot: None,
             timer_snapshot: None,
@@ -153,9 +168,11 @@ fn suite_create_submit_and_recover() {
         &SubmitSuitePassageCommand {
             suite_id: session.session_id.clone(),
             asset_id: "p3".into(),
-            payload: payload("p3"),
+            asset_revision: None,
+            asset_fingerprint: None,
             answers: json!({ "q1": "TRUE", "q2": "A" }),
             marked_questions: vec![],
+            question_timeline: vec![],
             duration_ms: Some(10_000),
             title_snapshot: None,
             timer_snapshot: None,
@@ -172,9 +189,11 @@ fn suite_create_submit_and_recover() {
         &SubmitSuitePassageCommand {
             suite_id: session.session_id.clone(),
             asset_id: "p3".into(),
-            payload: payload("p3"),
+            asset_revision: None,
+            asset_fingerprint: None,
             answers: json!({ "q1": "FALSE" }),
             marked_questions: vec![],
+            question_timeline: vec![],
             duration_ms: Some(1),
             title_snapshot: None,
             timer_snapshot: None,
@@ -186,11 +205,13 @@ fn suite_create_submit_and_recover() {
         again.submission.score.accuracy,
         r3.submission.score.accuracy
     );
+    assert!(again.submission.idempotent_replay);
 }
 
 #[test]
 fn endless_pool_and_advance() {
-    let (_dir, conn) = open_db();
+    let (dir, conn) = open_db();
+    seed_assets(&conn, &dir, &["a", "b", "c"]);
     let session = create_endless_session(
         &conn,
         &CreateEndlessCommand {
@@ -207,9 +228,11 @@ fn endless_pool_and_advance() {
         &SubmitEndlessCommand {
             session_id: session.id.clone(),
             asset_id: "a".into(),
-            payload: payload("a"),
+            asset_revision: None,
+            asset_fingerprint: None,
             answers: json!({ "q1": "TRUE", "q2": "A" }),
             marked_questions: vec![],
+            question_timeline: vec![],
             duration_ms: Some(5_000),
             title_snapshot: None,
             idempotency_key: "e-sub-1".into(),
@@ -218,6 +241,66 @@ fn endless_pool_and_advance() {
     .unwrap();
     assert_eq!(r.next_asset_id.as_deref(), Some("b"));
     assert_eq!(remaining_pool(&r.session).len(), 2);
+
+    let replay = submit_endless_passage(
+        &conn,
+        &SubmitEndlessCommand {
+            session_id: session.id.clone(),
+            asset_id: "a".into(),
+            asset_revision: None,
+            asset_fingerprint: None,
+            answers: json!({ "q1": "FALSE" }),
+            marked_questions: vec![],
+            question_timeline: vec![],
+            duration_ms: Some(1),
+            title_snapshot: None,
+            idempotency_key: "e-sub-1".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        replay.submission.score.accuracy,
+        r.submission.score.accuracy
+    );
+    assert!(replay.submission.idempotent_replay);
+    assert_eq!(
+        replay.session.current_attempt_id,
+        r.session.current_attempt_id
+    );
+    conn.execute(
+        "DELETE FROM mode_idempotency WHERE scope = 'endless.submit' AND idempotency_key = 'e-sub-1'",
+        [],
+    )
+    .unwrap();
+    let recovered = submit_endless_passage(
+        &conn,
+        &SubmitEndlessCommand {
+            session_id: session.id.clone(),
+            asset_id: "a".into(),
+            asset_revision: None,
+            asset_fingerprint: None,
+            answers: json!({ "q1": "FALSE" }),
+            marked_questions: vec![],
+            question_timeline: vec![],
+            duration_ms: Some(1),
+            title_snapshot: None,
+            idempotency_key: "e-sub-1".into(),
+        },
+    )
+    .unwrap();
+    assert!(recovered.submission.idempotent_replay);
+    assert_eq!(
+        recovered.session.current_attempt_id,
+        r.session.current_attempt_id
+    );
+    let persisted_attempts: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM attempts WHERE suite_id = ?1",
+            [&session.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(persisted_attempts, 1);
 
     let advanced = advance_endless(
         &conn,
@@ -232,7 +315,8 @@ fn endless_pool_and_advance() {
 
 #[test]
 fn memorize_excluded_from_history() {
-    let (_dir, conn) = open_db();
+    let (dir, conn) = open_db();
+    seed_assets(&conn, &dir, &["normal-asset"]);
     let mem = create_memorize_session(
         &conn,
         &CreateMemorizeCommand {
@@ -251,9 +335,11 @@ fn memorize_excluded_from_history() {
         &ReadingSubmitCommand {
             attempt_id: "normal-1".into(),
             asset_id: "normal-asset".into(),
-            payload: payload("normal-asset"),
+            asset_revision: None,
+            asset_fingerprint: None,
             answers: json!({ "q1": "TRUE", "q2": "A" }),
             marked_questions: vec![],
+            question_timeline: vec![],
             duration_ms: Some(1000),
             title_snapshot: Some("N".into()),
             idempotency_key: "n1".into(),

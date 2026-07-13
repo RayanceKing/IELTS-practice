@@ -4,9 +4,9 @@ use serde_json::json;
 use tempfile::tempdir;
 
 use ielts_db::{
-    append_coach_message, attempt_score_snapshot, ensure_coach_thread, import_dictionary,
-    list_annotations, list_coach_messages, list_vocab, lookup_term, migrate, open_connection,
-    record_coach_failure, resolve_anchor, revalidate_annotations, review_vocab,
+    append_coach_message, attempt_score_snapshot, ensure_coach_thread, import_asset_payload_file,
+    import_dictionary, list_annotations, list_coach_messages, list_vocab, lookup_term, migrate,
+    open_connection, record_coach_failure, resolve_anchor, revalidate_annotations, review_vocab,
     submit_reading_attempt, upsert_annotation, upsert_vocab, AppendCoachMessageCommand,
     DbOpenOptions, DictionaryEntry, EnsureCoachThreadCommand, ImportDictionaryCommand,
     ReadingSubmitCommand, RecordCoachFailureCommand, ReviewVocabCommand, TextAnchor,
@@ -117,21 +117,27 @@ fn dictionary_and_vocab_review() {
 
 #[test]
 fn coach_incremental_messages_failure_preserves_score() {
-    let (_dir, conn) = open_db();
+    let (dir, conn) = open_db();
+    let asset_payload = json!({
+        "examId": "asset-c",
+        "answerKey": { "q1": "TRUE" },
+        "interactionModel": {},
+        "questionGroups": []
+    });
+    let path = dir.path().join("asset-c.json");
+    std::fs::write(&path, serde_json::to_vec(&asset_payload).unwrap()).unwrap();
+    import_asset_payload_file(&conn, &path).unwrap();
     // scored attempt first
     let sub = submit_reading_attempt(
         &conn,
         &ReadingSubmitCommand {
             attempt_id: "att-coach-1".into(),
             asset_id: "asset-c".into(),
-            payload: json!({
-                "examId": "asset-c",
-                "answerKey": { "q1": "TRUE" },
-                "interactionModel": {},
-                "questionGroups": []
-            }),
+            asset_revision: None,
+            asset_fingerprint: None,
             answers: json!({ "q1": "TRUE" }),
             marked_questions: vec![],
+            question_timeline: vec![],
             duration_ms: Some(1000),
             title_snapshot: Some("T".into()),
             idempotency_key: "c-sub".into(),

@@ -9,7 +9,9 @@ use ielts_domain::domain::{AttemptMode, SuiteFlowMode, SuiteStatus};
 
 use crate::modes::timer::{TimerMode, TimerState};
 use crate::reading::assets::{list_assets, AssetIndexEntry};
-use crate::reading::attempt::{submit_reading_attempt, ReadingSubmitCommand, ReadingSubmitResult};
+use crate::reading::attempt::{
+    submit_reading_attempt, ReadingQuestionProgress, ReadingSubmitCommand, ReadingSubmitResult,
+};
 use crate::sqlite::{DbError, DbResult};
 use ielts_domain::domain::Activity;
 
@@ -112,14 +114,20 @@ pub struct SuiteAssetSeed {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct SubmitSuitePassageCommand {
     pub suite_id: String,
     pub asset_id: String,
-    pub payload: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_revision: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_fingerprint: Option<String>,
     #[serde(default)]
     pub answers: Value,
     #[serde(default)]
     pub marked_questions: Vec<String>,
+    #[serde(default)]
+    pub question_timeline: Vec<ReadingQuestionProgress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -382,10 +390,7 @@ pub fn pick_suite_sequence(
                 "no reading assets available for {category} under frequency scope"
             )));
         }
-        candidates.sort_by(|a, b| {
-            a.id.cmp(&b.id)
-                .then_with(|| a.title.cmp(&b.title))
-        });
+        candidates.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.title.cmp(&b.title)));
         let index = stable_pick_index(seed, category, candidates.len());
         let chosen = candidates[index];
         picks.push(SuiteAssetSeed {
@@ -424,7 +429,10 @@ fn normalize_asset_frequency(asset: &AssetIndexEntry) -> &'static str {
     .collect::<Vec<_>>()
     .join(" ")
     .to_ascii_lowercase();
-    if blob.contains("medium") || blob.contains("次高频") || blob.contains("中频") || blob.contains("-medium")
+    if blob.contains("medium")
+        || blob.contains("次高频")
+        || blob.contains("中频")
+        || blob.contains("-medium")
     {
         "medium"
     } else if blob.contains("high")
@@ -523,7 +531,15 @@ pub fn submit_suite_passage(
     if cmd.idempotency_key.trim().is_empty() {
         return Err(DbError::Validation("idempotency_key required".into()));
     }
-    if let Some(prev) = load_idempotent_submit(conn, &cmd.idempotency_key)? {
+    if let Some(mut prev) = load_idempotent_submit(conn, &cmd.idempotency_key)? {
+        if prev.suite_session.session_id != cmd.suite_id
+            || prev.submission.attempt.asset_id.as_deref() != Some(cmd.asset_id.as_str())
+        {
+            return Err(DbError::Validation(
+                "idempotency key belongs to another suite submission".into(),
+            ));
+        }
+        prev.submission.idempotent_replay = true;
         return Ok(prev);
     }
 
@@ -561,9 +577,11 @@ pub fn submit_suite_passage(
         &ReadingSubmitCommand {
             attempt_id: attempt_id.clone(),
             asset_id: cmd.asset_id.clone(),
-            payload: cmd.payload.clone(),
+            asset_revision: cmd.asset_revision,
+            asset_fingerprint: cmd.asset_fingerprint.clone(),
             answers: cmd.answers.clone(),
             marked_questions: cmd.marked_questions.clone(),
+            question_timeline: cmd.question_timeline.clone(),
             duration_ms: cmd.duration_ms,
             title_snapshot: cmd.title_snapshot.clone(),
             idempotency_key: format!("suite-pass-{}", cmd.idempotency_key),

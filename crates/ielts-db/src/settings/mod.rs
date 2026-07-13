@@ -129,9 +129,10 @@ pub fn list_ai_configs(conn: &Connection) -> DbResult<Vec<AiConfigDto>> {
         let mut config: AiConfigDto = serde_json::from_value(entry.value)
             .map_err(|e| DbError::Validation(format!("AI config json: {e}")))?;
         config.is_default = default_id.as_deref() == Some(config.id.as_str());
-        config.has_secret = refs
-            .iter()
-            .any(|item| item.name == ai_secret_name(&config.id));
+        config.has_secret = refs.iter().any(|item| {
+            item.name == ai_secret_name(&config.id)
+                || item.name == legacy_ai_secret_name(&config.id)
+        });
         configs.push(config);
     }
     configs.sort_by(|a, b| a.config_name.cmp(&b.config_name).then(a.id.cmp(&b.id)));
@@ -159,6 +160,16 @@ pub fn delete_ai_config(conn: &Connection, id: &str) -> DbResult<bool> {
 pub fn set_default_ai_config(conn: &Connection, config: Option<&AiConfigDto>) -> DbResult<()> {
     match config {
         Some(config) => {
+            let refs = list_secret_refs(conn)?;
+            let legacy_name = legacy_ai_secret_name(&config.id);
+            let canonical_name = ai_secret_name(&config.id);
+            let secret_name = if refs.iter().any(|item| item.name == legacy_name)
+                && !refs.iter().any(|item| item.name == canonical_name)
+            {
+                legacy_name
+            } else {
+                canonical_name
+            };
             upsert_setting(
                 conn,
                 NS_AI,
@@ -168,11 +179,10 @@ pub fn set_default_ai_config(conn: &Connection, config: Option<&AiConfigDto>) ->
             write_ai_runtime_value(conn, "provider", &Value::String("openai-compatible".into()))?;
             write_ai_runtime_value(conn, "baseUrl", &Value::String(config.base_url.clone()))?;
             write_ai_runtime_value(conn, "model", &Value::String(config.default_model.clone()))?;
-            write_ai_runtime_value(
-                conn,
-                "secretName",
-                &Value::String(ai_secret_name(&config.id)),
-            )?;
+            if get_setting(conn, NS_AI, "timeoutSeconds")?.is_none() {
+                write_ai_runtime_value(conn, "timeoutSeconds", &Value::from(45))?;
+            }
+            write_ai_runtime_value(conn, "secretName", &Value::String(secret_name))?;
         }
         None => {
             delete_setting(conn, NS_AI, AI_DEFAULT_ID)?;
@@ -187,6 +197,11 @@ pub fn set_default_ai_config(conn: &Connection, config: Option<&AiConfigDto>) ->
 }
 
 pub fn ai_secret_name(id: &str) -> String {
+    format!("ai.config.{id}.api_key")
+}
+
+/// Compatibility for configs created before secret names became explicit.
+pub fn legacy_ai_secret_name(id: &str) -> String {
     format!("ai.config.{id}")
 }
 
@@ -312,7 +327,10 @@ fn key_looks_like_secret(key: &str) -> bool {
 }
 
 fn looks_like_secret_payload(namespace: &str, key: &str, value: &Value) -> bool {
-    if key_looks_like_secret(key) || key_looks_like_secret(namespace) {
+    if key_looks_like_secret(key) {
+        return contains_secret_material(value);
+    }
+    if key_looks_like_secret(namespace) && contains_secret_material(value) {
         return true;
     }
     if let Some(s) = value.as_str() {
@@ -322,9 +340,40 @@ fn looks_like_secret_payload(namespace: &str, key: &str, value: &Value) -> bool 
         }
     }
     if let Some(obj) = value.as_object() {
-        return obj.keys().any(|k| key_looks_like_secret(k));
+        return obj.iter().any(|(field, field_value)| {
+            if key_looks_like_secret(field) {
+                contains_secret_material(field_value)
+            } else {
+                looks_like_nested_secret_payload(field_value)
+            }
+        });
     }
     false
+}
+
+fn looks_like_nested_secret_payload(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => object.iter().any(|(field, field_value)| {
+            if key_looks_like_secret(field) {
+                contains_secret_material(field_value)
+            } else {
+                looks_like_nested_secret_payload(field_value)
+            }
+        }),
+        Value::Array(items) => items.iter().any(looks_like_nested_secret_payload),
+        _ => false,
+    }
+}
+
+/// Metadata such as `hasSecret: false` is safe. Only values capable of carrying
+/// credential material are rejected when paired with a credential-like key.
+fn contains_secret_material(value: &Value) -> bool {
+    match value {
+        Value::String(value) => !value.trim().is_empty(),
+        Value::Array(items) => items.iter().any(contains_secret_material),
+        Value::Object(object) => object.values().any(contains_secret_material),
+        Value::Null | Value::Bool(_) | Value::Number(_) => false,
+    }
 }
 
 #[cfg(test)]
@@ -374,6 +423,27 @@ mod ai_config_tests {
     }
 
     #[test]
+    fn boolean_secret_metadata_is_allowed_but_plaintext_is_rejected() {
+        let conn = connection();
+        upsert_setting(
+            &conn,
+            "provider_configs",
+            "safe",
+            &serde_json::json!({ "hasSecret": true, "tokenBudget": 2048 }),
+        )
+        .unwrap();
+
+        let error = upsert_setting(
+            &conn,
+            "provider_configs",
+            "unsafe",
+            &serde_json::json!({ "hasSecret": true, "apiKey": "sk-plaintext" }),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("secret"));
+    }
+
+    #[test]
     fn default_config_drives_the_single_runtime_settings() {
         let conn = connection();
         let value = config("primary");
@@ -399,7 +469,7 @@ mod ai_config_tests {
                 .unwrap()
                 .unwrap()
                 .value,
-            Value::String("ai.config.primary".into())
+            Value::String("ai.config.primary.api_key".into())
         );
     }
 }

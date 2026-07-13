@@ -9,12 +9,15 @@ use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
 use ielts_domain::dto::{AttemptAnswer, AttemptRecord};
 
 use crate::attempts::upsert_attempt;
-use crate::reading::assets::{load_answer_key, load_controls, load_kinds};
+use crate::reading::assets::{
+    load_answer_key, load_controls, load_kinds, load_practice_asset_payload,
+};
 use crate::reading::scoring::{score_attempt, AnswerComparison, ScoreSummary};
 use crate::sqlite::{DbError, DbResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct ReadingDraftCommand {
     pub attempt_id: String,
     pub asset_id: String,
@@ -22,6 +25,12 @@ pub struct ReadingDraftCommand {
     pub answers: Value,
     #[serde(default)]
     pub marked_questions: Vec<String>,
+    #[serde(default)]
+    pub question_timeline: Vec<ReadingQuestionProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_revision: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_snapshot: Option<String>,
     pub idempotency_key: String,
@@ -29,20 +38,42 @@ pub struct ReadingDraftCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct ReadingSubmitCommand {
     pub attempt_id: String,
     pub asset_id: String,
-    /// Full reading payload (answerKey, interactionModel, questionGroups).
-    pub payload: Value,
+    /// Optional optimistic-lock fields from the asset the learner opened.
+    /// The answer key is never accepted from the caller.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_revision: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_fingerprint: Option<String>,
     #[serde(default)]
     pub answers: Value,
     #[serde(default)]
     pub marked_questions: Vec<String>,
+    #[serde(default)]
+    pub question_timeline: Vec<ReadingQuestionProgress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_snapshot: Option<String>,
     pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct ReadingQuestionProgress {
+    pub question_id: String,
+    #[serde(default)]
+    pub change_count: u32,
+    #[serde(default)]
+    pub visit_count: u32,
+    #[serde(default)]
+    pub elapsed_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,8 +89,14 @@ pub fn save_reading_draft(conn: &Connection, cmd: &ReadingDraftCommand) -> DbRes
     if cmd.idempotency_key.trim().is_empty() {
         return Err(DbError::Validation("idempotency_key required".into()));
     }
+    let loaded = load_answerable_asset(
+        conn,
+        &cmd.asset_id,
+        cmd.asset_revision,
+        cmd.asset_fingerprint.as_deref(),
+    )?;
     let now = chrono::Utc::now().to_rfc3339();
-    let answers = answers_to_vec(&cmd.answers, None);
+    let answers = answers_to_vec(&cmd.answers, &cmd.marked_questions, &cmd.question_timeline);
     let attempt = AttemptRecord {
         schema_version: AttemptRecord::SCHEMA_VERSION,
         id: cmd.attempt_id.clone(),
@@ -76,35 +113,31 @@ pub fn save_reading_draft(conn: &Connection, cmd: &ReadingDraftCommand) -> DbRes
         score_scale: None,
         correct_count: None,
         question_count: None,
-        title_snapshot: cmd.title_snapshot.clone(),
+        title_snapshot: Some(
+            cmd.title_snapshot
+                .clone()
+                .unwrap_or_else(|| loaded.asset.title.clone()),
+        ),
         prompt_snapshot: None,
         content_text: None,
         answers,
         annotations: vec![],
     };
-    // ensure asset stub
-    crate::attempts::ensure_asset_stub(
-        conn,
-        &cmd.asset_id,
-        Activity::Reading,
-        cmd.title_snapshot.as_deref().unwrap_or(&cmd.asset_id),
-        Some(&cmd.asset_id),
-    )?;
-    upsert_attempt(conn, &attempt)?;
-    // store marked as JSON in settings-like side table via attempt answers marked flag already in answers
-    conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    upsert_attempt(&tx, &attempt)?;
+    tx.execute(
         "INSERT INTO attempt_idempotency (scope, idempotency_key, attempt_id, evaluation_id, response_json, created_at)
          VALUES ('reading.draft', ?1, ?2, NULL, NULL, ?3)
          ON CONFLICT(scope, idempotency_key) DO UPDATE SET attempt_id = excluded.attempt_id, created_at = excluded.created_at",
         params![cmd.idempotency_key, cmd.attempt_id, now],
     )?;
-    // persist marked list
-    let marked_json = serde_json::to_string(&cmd.marked_questions).unwrap_or_else(|_| "[]".into());
-    conn.execute(
-        "INSERT INTO settings (namespace, key, value_json, updated_at) VALUES ('reading_draft', ?1, ?2, ?3)
-         ON CONFLICT(namespace, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
-        params![cmd.attempt_id, marked_json, now],
+    // Remove the obsolete settings mirror. Marks and timeline now live only in
+    // attempt_answers, including marked-but-unanswered questions.
+    tx.execute(
+        "DELETE FROM settings WHERE namespace = 'reading_draft' AND key = ?1",
+        params![cmd.attempt_id],
     )?;
+    tx.commit()?;
     Ok(attempt)
 }
 
@@ -117,46 +150,55 @@ pub fn submit_reading_attempt(
     }
 
     // Idempotent replay
-    if let Ok(Some(prev)) = lookup_submit_response(conn, &cmd.idempotency_key) {
+    if let Some(prev) =
+        lookup_submit_response(conn, &cmd.idempotency_key, &cmd.attempt_id, &cmd.asset_id)?
+    {
         return Ok(prev);
     }
 
-    let answer_key = load_answer_key(&cmd.payload);
+    let loaded = load_answerable_asset(
+        conn,
+        &cmd.asset_id,
+        cmd.asset_revision,
+        cmd.asset_fingerprint.as_deref(),
+    )?;
+    let answer_key = load_answer_key(&loaded.payload);
     if answer_key.is_empty() {
-        return Err(DbError::Validation("payload.answerKey required".into()));
+        return Err(DbError::Validation(format!(
+            "reading asset is not answerable: {}",
+            cmd.asset_id
+        )));
     }
-    let controls = load_controls(&cmd.payload);
-    let kinds = load_kinds(&cmd.payload);
+    let controls = load_controls(&loaded.payload);
+    let kinds = load_kinds(&loaded.payload);
     let user_map = value_to_map(&cmd.answers);
 
     let (summary, comparisons) = score_attempt(&answer_key, &user_map, &controls, &kinds);
     let now = chrono::Utc::now().to_rfc3339();
+    let progress = progress_by_question(&cmd.question_timeline);
     let answers = comparisons
         .iter()
-        .map(|c| AttemptAnswer {
-            question_id: c.question_id.clone(),
-            answer: c.user_answer.clone(),
-            is_correct: c.is_correct,
-            weight: c.weight,
-            question_kind: c.question_kind.clone(),
-            change_count: 0,
-            visit_count: 0,
-            elapsed_ms: 0,
-            marked: cmd
-                .marked_questions
-                .iter()
-                .any(|m| crate::reading::scoring::normalize_question_id(m) == c.question_id),
-            answered_at: Some(now.clone()),
+        .map(|c| {
+            let timeline = progress.get(&c.question_id);
+            AttemptAnswer {
+                question_id: c.question_id.clone(),
+                answer: c.user_answer.clone(),
+                is_correct: c.is_correct,
+                weight: c.weight,
+                question_kind: c.question_kind.clone(),
+                change_count: timeline.map(|p| p.change_count).unwrap_or(0),
+                visit_count: timeline.map(|p| p.visit_count).unwrap_or(0),
+                elapsed_ms: timeline.map(|p| p.elapsed_ms).unwrap_or(0),
+                marked: cmd
+                    .marked_questions
+                    .iter()
+                    .any(|m| crate::reading::scoring::normalize_question_id(m) == c.question_id),
+                answered_at: timeline
+                    .and_then(|p| p.answered_at.clone())
+                    .or_else(|| Some(now.clone())),
+            }
         })
         .collect();
-
-    crate::attempts::ensure_asset_stub(
-        conn,
-        &cmd.asset_id,
-        Activity::Reading,
-        cmd.title_snapshot.as_deref().unwrap_or(&cmd.asset_id),
-        Some(&cmd.asset_id),
-    )?;
 
     let attempt = AttemptRecord {
         schema_version: AttemptRecord::SCHEMA_VERSION,
@@ -174,7 +216,7 @@ pub fn submit_reading_attempt(
         score_scale: Some(ScoreScale::Ratio),
         correct_count: Some(summary.correct),
         question_count: Some(summary.total as u32),
-        title_snapshot: cmd.title_snapshot.clone(),
+        title_snapshot: Some(loaded.asset.title),
         prompt_snapshot: None,
         content_text: None,
         answers,
@@ -196,6 +238,10 @@ pub fn submit_reading_attempt(
         "INSERT INTO attempt_idempotency (scope, idempotency_key, attempt_id, evaluation_id, response_json, created_at)
          VALUES ('reading.submit', ?1, ?2, NULL, ?3, ?4)",
         params![cmd.idempotency_key, cmd.attempt_id, response_json, now],
+    )?;
+    tx.execute(
+        "DELETE FROM settings WHERE namespace = 'reading_draft' AND key = ?1",
+        params![cmd.attempt_id],
     )?;
     tx.commit()?;
 
@@ -314,7 +360,12 @@ pub fn get_open_reading_draft(
     Ok(Some(attempt))
 }
 
-fn lookup_submit_response(conn: &Connection, key: &str) -> DbResult<Option<ReadingSubmitResult>> {
+fn lookup_submit_response(
+    conn: &Connection,
+    key: &str,
+    attempt_id: &str,
+    asset_id: &str,
+) -> DbResult<Option<ReadingSubmitResult>> {
     let mut stmt = conn.prepare(
         "SELECT response_json FROM attempt_idempotency WHERE scope = 'reading.submit' AND idempotency_key = ?1",
     )?;
@@ -323,6 +374,11 @@ fn lookup_submit_response(conn: &Connection, key: &str) -> DbResult<Option<Readi
         let json: String = row.get(0)?;
         let mut result: ReadingSubmitResult = serde_json::from_str(&json)
             .map_err(|e| DbError::Message(format!("idempotency parse: {e}")))?;
+        if result.attempt.id != attempt_id || result.attempt.asset_id.as_deref() != Some(asset_id) {
+            return Err(DbError::Validation(
+                "idempotency key belongs to another reading submission".into(),
+            ));
+        }
         result.idempotent_replay = true;
         Ok(Some(result))
     } else {
@@ -345,30 +401,86 @@ fn value_to_map(v: &Value) -> serde_json::Map<String, Value> {
     }
 }
 
-fn answers_to_vec(answers: &Value, marked: Option<&[String]>) -> Vec<AttemptAnswer> {
-    let map = value_to_map(answers);
-    let mut out = Vec::new();
+fn answers_to_vec(
+    answers: &Value,
+    marked: &[String],
+    timeline: &[ReadingQuestionProgress],
+) -> Vec<AttemptAnswer> {
+    let mut map = value_to_map(answers);
+    let progress = progress_by_question(timeline);
+    for question_id in marked {
+        map.entry(crate::reading::scoring::normalize_question_id(question_id))
+            .or_insert(Value::Null);
+    }
+    for question_id in progress.keys() {
+        map.entry(question_id.clone()).or_insert(Value::Null);
+    }
+    let mut out = Vec::with_capacity(map.len());
     for (qid, ans) in map {
+        let timeline = progress.get(&qid);
         let marked_flag = marked
-            .map(|m| {
-                m.iter()
-                    .any(|x| crate::reading::scoring::normalize_question_id(x) == qid)
-            })
-            .unwrap_or(false);
+            .iter()
+            .any(|x| crate::reading::scoring::normalize_question_id(x) == qid);
         out.push(AttemptAnswer {
             question_id: qid,
             answer: ans,
             is_correct: None,
             weight: 1.0,
             question_kind: None,
-            change_count: 0,
-            visit_count: 0,
-            elapsed_ms: 0,
+            change_count: timeline.map(|p| p.change_count).unwrap_or(0),
+            visit_count: timeline.map(|p| p.visit_count).unwrap_or(0),
+            elapsed_ms: timeline.map(|p| p.elapsed_ms).unwrap_or(0),
             marked: marked_flag,
-            answered_at: None,
+            answered_at: timeline.and_then(|p| p.answered_at.clone()),
         });
     }
     out
+}
+
+fn progress_by_question(
+    timeline: &[ReadingQuestionProgress],
+) -> std::collections::HashMap<String, &ReadingQuestionProgress> {
+    timeline
+        .iter()
+        .filter_map(|entry| {
+            let qid = crate::reading::scoring::normalize_question_id(&entry.question_id);
+            (!qid.is_empty()).then_some((qid, entry))
+        })
+        .collect()
+}
+
+fn load_answerable_asset(
+    conn: &Connection,
+    asset_id: &str,
+    expected_revision: Option<u32>,
+    expected_fingerprint: Option<&str>,
+) -> DbResult<ielts_domain::dto::PracticeAssetV2Payload> {
+    let loaded = load_practice_asset_payload(conn, asset_id)?;
+    if loaded.asset.pdf_only {
+        return Err(DbError::Validation(format!(
+            "reading asset is not answerable: {asset_id}"
+        )));
+    }
+    if let Some(revision) = expected_revision {
+        if revision != loaded.asset.schema_version {
+            return Err(DbError::Validation(format!(
+                "reading asset revision mismatch: {asset_id}"
+            )));
+        }
+    }
+    if let Some(fingerprint) = expected_fingerprint {
+        if fingerprint.trim() != loaded.asset.fingerprint {
+            return Err(DbError::Validation(format!(
+                "reading asset fingerprint mismatch: {asset_id}"
+            )));
+        }
+    }
+    if load_answer_key(&loaded.payload).is_empty() {
+        return Err(DbError::Validation(format!(
+            "reading asset is not answerable: {asset_id}"
+        )));
+    }
+    Ok(loaded)
 }
 
 /// Incremental answer save without full resubmit.

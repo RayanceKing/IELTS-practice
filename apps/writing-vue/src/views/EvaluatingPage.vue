@@ -86,13 +86,6 @@ import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { evaluate, getErrorMessage, resolveApiErrorMessage } from '@/api/client.js'
 import { getDraft } from '@/api/writing-repository.js'
-import {
-  EVALUATION_CONTRACT_VERSION,
-  normalizeList,
-  normalizeMap,
-  normalizeReviewBlocks,
-  normalizeSentences
-} from '@/utils/evaluation-result.js'
 
 const props = defineProps({
   sessionId: {
@@ -105,48 +98,26 @@ const router = useRouter()
 
 const progress = ref(0)
 const statusMessage = ref('正在准备评测...')
-const scoreData = ref(null)
 const sentences = ref([])
 const feedback = ref('')
 const error = ref(null)
-const providerPath = ref([])
 const currentStage = ref('preparing')
 const stageMessage = ref('正在准备评测...')
 const isComplete = ref(false)
 const hasNavigatedToResult = ref(false)
-const analysisData = ref({})
-const reviewData = ref({})
 const timelineLogs = ref([])
 const isRetrying = ref(false)
+const currentEvaluationId = ref(null)
 let eventListenerId = null
 const seenEventSequences = new Set()
 let lastLogSignature = ''
 
 const fullResult = ref({
-  contract_version: EVALUATION_CONTRACT_VERSION,
-  sessionId: props.sessionId,
+  id: '',
+  status: 'queued',
+  stage: 'preparing',
   score: null,
-  scorecard: null,
-  sentences: [],
-  feedback: '',
-  overall_feedback: '',
-  analysis: {},
-  review: {},
-  task_analysis: {},
-  band_rationale: {},
-  improvement_plan: [],
-  review_blocks: [],
-  rewrite_suggestions: [],
-  input_context: {},
-  review_degraded: false,
-  review_status: {},
-  essayId: null,
-  providerPath: [],
-  stage: {
-    key: 'preparing',
-    label: '准备',
-    message: '正在准备评测...'
-  }
+  feedback: null
 })
 
 onMounted(() => {
@@ -159,20 +130,6 @@ onUnmounted(() => {
   eventListenerId = null
 })
 
-const analysisSummary = computed(() => {
-  const summary = []
-  if (Object.keys(normalizeMap(analysisData.value.task_analysis)).length > 0) {
-    summary.push('任务诊断')
-  }
-  if (Object.keys(normalizeMap(analysisData.value.band_rationale)).length > 0) {
-    summary.push('评分理由')
-  }
-  if (normalizeList(analysisData.value.improvement_plan).length > 0) {
-    summary.push('提分计划')
-  }
-  return summary
-})
-
 const recentLogs = computed(() => timelineLogs.value.slice(-3))
 
 const currentStageLabel = computed(() => stageLabel(currentStage.value, stageMessage.value))
@@ -180,7 +137,7 @@ const currentStageLabel = computed(() => stageLabel(currentStage.value, stageMes
 const tempDraft = ref(null)
 
 const essayContentFull = computed(() => {
-  return tempDraft.value?.content || (fullResult.value.input_context?.content || '')
+  return tempDraft.value?.content || ''
 })
 
 const displayedEssayContent = ref('')
@@ -226,11 +183,11 @@ watch(progress, (newVal) => {
 })
 
 const displayTopicText = computed(() => {
-  return fullResult.value.input_context?.topic_text || tempDraft.value?.topic_text || 'Preparing assessment context...'
+  return tempDraft.value?.topic_text || 'Preparing assessment context...'
 })
 
 const displayWordCount = computed(() => {
-  return fullResult.value.input_context?.word_count || tempDraft.value?.word_count || 0
+  return tempDraft.value?.word_count || 0
 })
 
 
@@ -239,6 +196,11 @@ const displayWordCount = computed(() => {
 function handleEvent(event) {
   if (!event || typeof event !== 'object') return
   if (event.sessionId !== props.sessionId) return
+  if (
+    currentEvaluationId.value
+    && event.evaluationId
+    && event.evaluationId !== currentEvaluationId.value
+  ) return
   if (typeof event.sequence === 'number') {
     if (seenEventSequences.has(event.sequence)) {
       return
@@ -247,64 +209,23 @@ function handleEvent(event) {
   }
 
   switch (event.type) {
-    case 'progress':
-      progress.value = event.data.percent
-      statusMessage.value = event.data.message
-      appendLog('progress', event.data.message, event)
-      if (!isComplete.value) {
-        const progressStage = inferStageFromProgress(event.data)
-        applyStage(progressStage.key, progressStage.message)
-      }
-      break
-
     case 'stage':
-      appendLog('stage', event.data?.message || `${event.data?.name || '评测'} ${event.data?.status || ''}`, event)
+      appendLog('stage', stageLabel(event.data?.stage), event)
       applyStageFromPayload(event.data)
-      if (
-        String(event.data?.name || '').toLowerCase() === 'review'
-        && String(event.data?.status || '').toLowerCase() === 'degraded'
-      ) {
-        fullResult.value.review_degraded = true
-        fullResult.value.review_status = {
-          stage: 'review',
-          degraded: true,
-          status: 'degraded',
-          message: typeof event.data?.message === 'string' ? event.data.message : ''
-        }
-      }
       break
 
     case 'score':
       appendLog('score', '评分结果已生成', event)
       applyStage('scoring', '分数计算完成，正在准备详解...')
-      scoreData.value = event.data
       fullResult.value.score = event.data
-      fullResult.value.scorecard = event.data
-      break
-
-    case 'analysis':
-      appendLog('analysis', '评分分析已生成', event)
-      applyStage('scoring', '评分分析已生成，正在继续深度评审...')
-      mergeAnalysis(event.data)
       break
 
     case 'review':
-      appendLog('review', event.data?.review_degraded ? '详解降级，仅保留评分结果' : '段落详解已生成', event)
+      appendLog('review', '段落详解已生成', event)
       applyStage('reviewing', '正在输出段落和句级详解...')
-      mergeReview(event.data)
-      break
-
-    case 'sentence':
-      appendLog('sentence', `句级诊断已更新（${sentences.value.length + 1}）`, event)
-      mergeSentences(Array.isArray(event.data) ? event.data : [event.data])
-      applyStage('reviewing', '正在输出段落和句级详解...')
-      break
-
-    case 'feedback':
-      appendLog('feedback', '整体建议已生成', event)
-      feedback.value = event.data
+      feedback.value = event.data?.overall || ''
+      sentences.value = Array.isArray(event.data?.sentences) ? event.data.sentences : []
       fullResult.value.feedback = event.data
-      fullResult.value.overall_feedback = event.data
       break
 
     case 'complete':
@@ -313,28 +234,8 @@ function handleEvent(event) {
       applyStage('completed', '评分完成！')
       progress.value = 100
       statusMessage.value = '评分完成！'
-      fullResult.value.essayId = event.data?.essay_id || null
-      fullResult.value.providerPath = event.data?.provider_path || []
-      if (typeof event.data?.review_degraded === 'boolean') {
-        fullResult.value.review_degraded = event.data.review_degraded
-      }
-      if (event.data?.review_status && typeof event.data.review_status === 'object') {
-        fullResult.value.review_status = event.data.review_status
-      }
-      providerPath.value = fullResult.value.providerPath
-      if (event.data?.analysis) {
-        mergeAnalysis(event.data.analysis)
-      }
-      if (event.data?.review) {
-        mergeReview(event.data.review)
-      }
-      if (Array.isArray(event.data?.sentences)) {
-        mergeSentences(event.data.sentences)
-      }
-      if (typeof event.data?.overall_feedback === 'string' && event.data.overall_feedback.trim()) {
-        feedback.value = event.data.overall_feedback
-        fullResult.value.feedback = event.data.overall_feedback
-        fullResult.value.overall_feedback = event.data.overall_feedback
+      if (event.data?.evaluation && typeof event.data.evaluation === 'object') {
+        fullResult.value = { ...fullResult.value, ...event.data.evaluation }
       }
       void navigateToResult()
       break
@@ -345,6 +246,11 @@ function handleEvent(event) {
         code: event.data.code,
         message: event.data.message || getErrorMessage(event.data.code)
       }
+      break
+
+    case 'cancelled':
+      appendLog('cancelled', '评测已取消，作文草稿已保留', event)
+      error.value = null
       break
 
     case 'log':
@@ -365,6 +271,10 @@ async function hydrateSessionState() {
       }
     }
     const state = await evaluate.getSessionState(props.sessionId)
+    currentEvaluationId.value = state.evaluationId
+    if (tempDraft.value && !tempDraft.value.task_type) {
+      tempDraft.value.task_type = state.evaluation?.taskType || ''
+    }
     const events = Array.isArray(state?.events) ? state.events : []
     for (const event of events) {
       handleEvent(event)
@@ -385,25 +295,22 @@ async function handleCancel() {
 }
 
 function buildRetryPayload() {
-  const draft = normalizeMap(tempDraft.value)
-  const inputContext = normalizeMap(fullResult.value.input_context)
-  const rawTaskType = String(draft.task_type || inputContext.task_type || '').trim()
+  const draft = tempDraft.value || {}
+  const rawTaskType = String(draft.task_type || '').trim()
   const taskType = rawTaskType === 'task1' ? 'task1' : (rawTaskType === 'task2' ? 'task2' : '')
-  const topicIdRaw = draft.topic_id ?? inputContext.topic_id
+  const topicIdRaw = draft.topic_id
   const topicIdNumber = Number(topicIdRaw)
   const topicId = Number.isInteger(topicIdNumber) && topicIdNumber > 0 ? topicIdNumber : null
   const topicText = String(
     draft.topic_text
-    || inputContext.topic_text
     || ''
   ).trim()
   const content = String(
     draft.content
-    || inputContext.content
     || essayContentFull.value
     || ''
   ).trim()
-  const wordCountRaw = Number(draft.word_count ?? inputContext.word_count)
+  const wordCountRaw = Number(draft.word_count)
   const wordCount = Number.isInteger(wordCountRaw) && wordCountRaw > 0
     ? wordCountRaw
     : (content ? content.split(/\s+/).filter((word) => word.length > 0).length : 0)
@@ -450,18 +357,21 @@ async function handleRetry() {
     }
 
     const result = await evaluate.start({
+      sessionId: props.sessionId,
       task_type: retryPayload.task_type,
       topic_id: retryPayload.topic_id,
       topic_text: retryPayload.topic_id ? null : retryPayload.topic_text,
       content: retryPayload.content,
-      word_count: retryPayload.word_count
+      word_count: retryPayload.word_count,
+      retryOf: currentEvaluationId.value
     })
 
+    currentEvaluationId.value = result.evaluationId
+    seenEventSequences.clear()
+    isComplete.value = false
+    progress.value = 0
+    applyStage('preparing', '正在准备评测...')
     appendLog('system', '新会话已创建，正在重启评分流程。')
-    await router.replace({
-      name: 'Evaluating',
-      params: { sessionId: result.sessionId }
-    })
   } catch (retryError) {
     console.error('重试失败:', retryError)
     const code = String(retryError?.code || 'unknown_error')
@@ -502,23 +412,6 @@ function stageLabel(key, fallbackMessage = '') {
   return '评测中'
 }
 
-function inferStageFromProgress(data) {
-  const message = typeof data?.message === 'string' ? data.message : ''
-  const percent = typeof data?.percent === 'number' ? data.percent : 0
-  const lower = message.toLowerCase()
-
-  if (percent >= 100 || lower.includes('完成')) {
-    return { key: 'completed', message: message || '评分完成！' }
-  }
-  if (lower.includes('review') || lower.includes('详解') || lower.includes('句子')) {
-    return { key: 'reviewing', message: message || '正在输出段落和句级详解...' }
-  }
-  if (lower.includes('score') || lower.includes('评分') || percent >= 20) {
-    return { key: 'scoring', message: message || '正在进行评分...' }
-  }
-  return { key: 'preparing', message: message || '正在准备评测...' }
-}
-
 function applyStageFromPayload(data) {
   const stage = normalizeMap(data)
   const rawKey = typeof stage.name === 'string'
@@ -535,6 +428,7 @@ function mapStageKey(rawKey) {
   if (['prepare', 'preparing', 'starting', 'start'].includes(key)) return 'preparing'
   if (['score', 'scoring', 'analysis', 'stage1', 'scoring_stage'].includes(key)) return 'scoring'
   if (['review', 'reviewing', 'stage2', 'detail', 'rewrite'].includes(key)) return 'reviewing'
+  if (key === 'finalizing') return 'reviewing'
   if (['complete', 'completed', 'done', 'finish', 'finished'].includes(key)) return 'completed'
   return currentStage.value
 }
@@ -546,116 +440,9 @@ function applyStage(stageKey, message) {
     ? message
     : stageLabel(normalizedStage)
   statusMessage.value = stageMessage.value
-  fullResult.value.stage = {
-    key: normalizedStage,
-    label: stageLabel(normalizedStage, stageMessage.value),
-    message: stageMessage.value
-  }
-}
-
-function mergeAnalysis(payload) {
-  const next = normalizeMap(payload)
-  if (!Object.keys(next).length) return
-
-  analysisData.value = {
-    ...normalizeMap(analysisData.value),
-    ...next
-  }
-  fullResult.value.analysis = {
-    ...normalizeMap(fullResult.value.analysis),
-    ...next
-  }
-
-  if (next.task_analysis) {
-    fullResult.value.task_analysis = normalizeMap(next.task_analysis)
-  }
-  if (next.band_rationale) {
-    fullResult.value.band_rationale = normalizeMap(next.band_rationale)
-  }
-  if (next.improvement_plan) {
-    fullResult.value.improvement_plan = normalizeList(next.improvement_plan)
-  }
-  if (next.input_context) {
-    fullResult.value.input_context = normalizeMap(next.input_context)
-  }
-}
-
-function mergeReview(payload) {
-  const next = normalizeMap(payload)
-  if (!Object.keys(next).length) return
-  const nextReviewBlocks = normalizeReviewBlocks(next.review_blocks || next.paragraph_reviews)
-
-  reviewData.value = {
-    ...normalizeMap(reviewData.value),
-    ...next,
-    ...(nextReviewBlocks.length ? {
-      review_blocks: nextReviewBlocks,
-      paragraph_reviews: nextReviewBlocks
-    } : {})
-  }
-  fullResult.value.review = {
-    ...normalizeMap(fullResult.value.review),
-    ...next,
-    ...(nextReviewBlocks.length ? {
-      review_blocks: nextReviewBlocks,
-      paragraph_reviews: nextReviewBlocks
-    } : {})
-  }
-
-  if (Array.isArray(next.sentences)) {
-    mergeSentences(next.sentences)
-  }
-  if (typeof next.overall_feedback === 'string' && next.overall_feedback.trim()) {
-    feedback.value = next.overall_feedback
-    fullResult.value.feedback = next.overall_feedback
-    fullResult.value.overall_feedback = next.overall_feedback
-  }
-  if (next.improvement_plan) {
-    const reviewPlan = normalizeList(next.improvement_plan)
-    if (reviewPlan.length > 0) {
-      fullResult.value.improvement_plan = reviewPlan
-    }
-  }
-  if (nextReviewBlocks.length > 0) {
-    fullResult.value.review_blocks = nextReviewBlocks
-  }
-  if (Array.isArray(next.rewrite_suggestions)) {
-    fullResult.value.rewrite_suggestions = normalizeList(next.rewrite_suggestions)
-  }
-  if (typeof next.review_degraded === 'boolean') {
-    fullResult.value.review_degraded = next.review_degraded
-  }
-  if (next.review_status && typeof next.review_status === 'object') {
-    fullResult.value.review_status = next.review_status
-  }
-}
-
-function mergeSentences(list) {
-  const incoming = normalizeSentences(list)
-  if (!incoming.length) return
-
-  const map = new Map()
-  const seed = normalizeSentences(fullResult.value.sentences)
-
-  for (const item of seed) {
-    const key = sentenceKey(item)
-    if (key) map.set(key, item)
-  }
-  for (const item of incoming) {
-    const key = sentenceKey(item)
-    if (key) map.set(key, item)
-  }
-
-  const merged = Array.from(map.values())
-  fullResult.value.sentences = merged
-  sentences.value = merged
-}
-
-function sentenceKey(sentence) {
-  if (!sentence || typeof sentence !== 'object') return ''
-  if (typeof sentence.index === 'number') return `i:${sentence.index}`
-  if (typeof sentence.original === 'string') return `o:${sentence.original}`
-  return ''
+  fullResult.value.stage = normalizedStage
+  const stageProgress = { preparing: 10, scoring: 45, reviewing: 80, completed: 100 }
+  progress.value = Math.max(progress.value, stageProgress[normalizedStage] || 0)
 }
 
 function getStageClass(chip) {

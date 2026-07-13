@@ -2,6 +2,7 @@
  * Writing evaluation client — Tauri persisted state machine only.
  */
 
+import { Channel } from '@tauri-apps/api/core'
 import { invokeCommand, isTauriRuntime, unwrapCommandResponse } from '@/api/tauri-bridge.js'
 
 export function newIdempotencyKey(prefix = 'w') {
@@ -38,17 +39,22 @@ export async function submitAttempt(attemptId, idempotencyKey) {
 }
 
 export async function startEvaluation(payload) {
+  const onEvent = new Channel()
+  onEvent.onmessage = (event) => {
+    if (typeof payload.onEvent === 'function') payload.onEvent(event)
+  }
   const response = await invokeCommand('writing_start_evaluation', {
     cmd: {
       attemptId: payload.attemptId,
       idempotencyKey: payload.idempotencyKey || newIdempotencyKey('eval'),
       taskType: payload.taskType || null,
       retryOf: payload.retryOf || null
-    }
+    },
+    onEvent
   })
   return {
     source: 'tauri',
-    result: unwrapCommandResponse(response, 'writing_start_evaluation')
+    handle: unwrapCommandResponse(response, 'writing_start_evaluation')
   }
 }
 

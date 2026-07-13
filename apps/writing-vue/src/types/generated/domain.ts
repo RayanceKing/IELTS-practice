@@ -97,6 +97,7 @@ export interface EvaluationDegradation {
 /** Canonical evaluation result. Never write legacy aliases into this shape. */
 export interface WritingEvaluationV4 {
   schemaVersion: 4 | number;
+  id: string;
   status: EvaluationStatus;
   stage: EvaluationStage;
   taskType?: WritingTaskType;

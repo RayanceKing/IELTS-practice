@@ -62,6 +62,7 @@ pub fn evaluation_v3_to_v4(raw: &Value) -> DomainResult<WritingEvaluationV4> {
 
         return Ok(WritingEvaluationV4 {
             schema_version: WritingEvaluationV4::SCHEMA_VERSION,
+            id: String::new(),
             status: EvaluationStatus::Failed,
             stage: EvaluationStage::Scoring,
             task_type,
@@ -100,6 +101,7 @@ pub fn evaluation_v3_to_v4(raw: &Value) -> DomainResult<WritingEvaluationV4> {
 
     Ok(WritingEvaluationV4 {
         schema_version: WritingEvaluationV4::SCHEMA_VERSION,
+        id: String::new(),
         status,
         stage,
         task_type,

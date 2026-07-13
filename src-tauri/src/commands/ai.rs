@@ -11,7 +11,8 @@ use tauri::State;
 
 use crate::app::state::{AppDb, AppVault};
 use ielts_db::{
-    ai_secret_name, get_setting, list_secret_refs, DbError, DbResult, ProviderError, NS_AI,
+    ai_secret_name, get_setting, legacy_ai_secret_name, list_secret_refs, DbError, DbResult,
+    ProviderError, NS_AI,
 };
 use uuid::Uuid;
 
@@ -152,6 +153,7 @@ pub fn ai_delete_config(
     id: String,
 ) -> CommandResponse<bool> {
     let secret_name = ai_secret_name(&id);
+    let legacy_secret_name = legacy_ai_secret_name(&id);
     let result = db.with_conn(|conn| {
         let configs = ielts_db::list_ai_configs(conn)?;
         let was_default = configs.iter().any(|c| c.id == id && c.is_default);
@@ -163,7 +165,9 @@ pub fn ai_delete_config(
         Ok(deleted)
     });
     let _ = vault.0.delete_secret(&secret_name);
+    let _ = vault.0.delete_secret(&legacy_secret_name);
     let _ = db.with_conn(|conn| ielts_db::delete_secret_ref(conn, &secret_name));
+    let _ = db.with_conn(|conn| ielts_db::delete_secret_ref(conn, &legacy_secret_name));
     match result {
         Ok(v) => CommandResponse::success(v),
         Err(e) => CommandResponse::failure(config_error(e)),

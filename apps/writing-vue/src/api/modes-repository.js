@@ -40,9 +40,11 @@ export async function submitSuitePassage(payload) {
     cmd: {
       suiteId: payload.suiteId,
       assetId: payload.assetId,
-      payload: payload.assetPayload || payload.payload,
+      assetRevision: payload.assetRevision ?? null,
+      assetFingerprint: payload.assetFingerprint || null,
       answers: payload.answers || {},
       markedQuestions: payload.markedQuestions || [],
+      questionTimeline: payload.questionTimeline || [],
       durationMs: payload.durationMs ?? null,
       titleSnapshot: payload.titleSnapshot || null,
       timerSnapshot: payload.timerSnapshot || null,
@@ -85,9 +87,11 @@ export async function submitEndless(payload) {
     cmd: {
       sessionId: payload.sessionId,
       assetId: payload.assetId,
-      payload: payload.assetPayload || payload.payload,
+      assetRevision: payload.assetRevision ?? null,
+      assetFingerprint: payload.assetFingerprint || null,
       answers: payload.answers || {},
       markedQuestions: payload.markedQuestions || [],
+      questionTimeline: payload.questionTimeline || [],
       durationMs: payload.durationMs ?? null,
       titleSnapshot: payload.titleSnapshot || null,
       idempotencyKey: payload.idempotencyKey || newKey('endless-submit')

@@ -243,13 +243,62 @@ fn default_true() -> bool {
 )]
 pub struct BackupManifest {
     pub schema_version: u32,
+    /// SQLite schema version the snapshot was created from. Legacy v1
+    /// packages omit this field.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub database_schema_version: u32,
     pub created_at: String,
     pub app_version: String,
     pub includes_secrets: bool,
     pub attempt_count: u32,
     pub settings_count: u32,
     pub secret_ref_count: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub table_count: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub row_count: u64,
     pub checksum_sha256: String,
+}
+
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
+}
+
+/// Lossless representation of one SQLite value. Do not flatten values into
+/// JSON scalars: doing so loses INTEGER/REAL/BLOB type information and makes a
+/// database round-trip subtly lossy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub enum BackupSqlValue {
+    Null,
+    Integer(i64),
+    Real(f64),
+    Text(String),
+    Blob(Vec<u8>),
+}
+
+/// A canonical SQLite table snapshot. Columns are stored explicitly so dry-run
+/// can reject a package made for an incompatible schema before mutating data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct BackupTable {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<BackupSqlValue>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -265,6 +314,10 @@ pub struct BackupPackage {
     pub settings: Vec<SettingEntry>,
     /// Only refs; never plaintext secrets in ordinary backups.
     pub secret_refs: Vec<SecretRef>,
+    /// Complete canonical database payload (schema v2+). Empty only for
+    /// explicitly supported legacy v1 packages.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub database: Vec<BackupTable>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -280,6 +333,10 @@ pub struct ImportBackupReport {
     pub attempt_imported: u32,
     pub settings_imported: u32,
     pub secret_refs_imported: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub tables_imported: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub rows_imported: u64,
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
 }

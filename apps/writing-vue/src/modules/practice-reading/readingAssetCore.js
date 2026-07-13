@@ -17,7 +17,7 @@ export function createReadingAssetController(api, normalizeReadingRecordId) {
     state.loading = true
     state.error = ''
     try {
-      const data = await api.getAsset(normalizedAssetId, requestOptions)
+      const data = normalizeReadingAssetViewModel(await api.getAsset(normalizedAssetId, requestOptions))
       state.asset = data
       if (typeof afterLoad === 'function') {
         await afterLoad(data)
@@ -53,4 +53,16 @@ export function createReadingAssetController(api, normalizeReadingRecordId) {
     clearReadingAssetError,
     clearReadingAsset
   }
+}
+
+export function normalizeReadingAssetViewModel(value) {
+  if (!value || typeof value !== 'object') return value
+  const nested = value.payload
+  if (nested?.asset && Object.prototype.hasOwnProperty.call(nested, 'payload')) {
+    return { ...value, ...nested.asset, payload: nested.payload }
+  }
+  if (value.asset && Object.prototype.hasOwnProperty.call(value, 'payload')) {
+    return { ...value.asset, payload: value.payload }
+  }
+  return value
 }

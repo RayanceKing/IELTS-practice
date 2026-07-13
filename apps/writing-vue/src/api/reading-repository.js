@@ -24,7 +24,23 @@ export async function getReadingAssetPayload(assetId) {
   const response = await invokeCommand('reading_get_asset_payload', {
     assetId: normalizedAssetId
   })
-  return unwrapCommandResponse(response, 'reading_get_asset_payload')
+  return normalizeReadingAssetEnvelope(
+    unwrapCommandResponse(response, 'reading_get_asset_payload')
+  )
+}
+
+/**
+ * Normalize the canonical `{ asset, payload }` DTO. One nested envelope is
+ * accepted for old in-memory/cache entries created by the former adapter.
+ */
+export function normalizeReadingAssetEnvelope(value) {
+  const candidate = value?.payload?.asset && Object.prototype.hasOwnProperty.call(value.payload, 'payload')
+    ? value.payload
+    : value
+  if (candidate?.asset && Object.prototype.hasOwnProperty.call(candidate, 'payload')) {
+    return { asset: candidate.asset, payload: candidate.payload }
+  }
+  return { asset: null, payload: candidate ?? null }
 }
 
 export async function saveReadingDraft(payload) {
@@ -32,8 +48,11 @@ export async function saveReadingDraft(payload) {
     cmd: {
       attemptId: payload.attemptId,
       assetId: payload.assetId,
+      assetRevision: payload.assetRevision ?? null,
+      assetFingerprint: payload.assetFingerprint || null,
       answers: payload.answers || {},
       markedQuestions: payload.markedQuestions || [],
+      questionTimeline: payload.questionTimeline || [],
       titleSnapshot: payload.titleSnapshot || null,
       idempotencyKey: payload.idempotencyKey || newKey('draft')
     }
@@ -66,9 +85,11 @@ export async function submitReadingAttempt(payload) {
     cmd: {
       attemptId: payload.attemptId,
       assetId: payload.assetId,
-      payload: payload.assetPayload || payload.payload,
+      assetRevision: payload.assetRevision ?? null,
+      assetFingerprint: payload.assetFingerprint || null,
       answers: payload.answers || {},
       markedQuestions: payload.markedQuestions || [],
+      questionTimeline: payload.questionTimeline || [],
       durationMs: payload.durationMs ?? null,
       titleSnapshot: payload.titleSnapshot || null,
       idempotencyKey: payload.idempotencyKey || newKey('submit')
@@ -83,6 +104,7 @@ export async function submitReadingAttempt(payload) {
 export const readingRepository = {
   listReadingAssets,
   getReadingAssetPayload,
+  normalizeReadingAssetEnvelope,
   saveReadingDraft,
   getOpenReadingDraft,
   patchReadingAnswer,

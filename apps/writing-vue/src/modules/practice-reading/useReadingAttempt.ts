@@ -67,8 +67,17 @@ interface SubmissionExtras {
   assetId?: string | null
   answers?: JsonMap
   markedQuestions?: string[]
+  questionTimeline?: ReadingQuestionProgress[]
   durationMs?: number | null
   titleSnapshot?: string | null
+}
+
+interface ReadingQuestionProgress {
+  questionId: string
+  changeCount?: number
+  visitCount?: number
+  elapsedMs?: number
+  answeredAt?: string | null
 }
 
 interface PersistDraftInput {
@@ -76,13 +85,14 @@ interface PersistDraftInput {
   assetId: string
   answers?: JsonMap
   markedQuestions?: string[]
+  questionTimeline?: ReadingQuestionProgress[]
+  assetRevision?: number | null
+  assetFingerprint?: string | null
   titleSnapshot?: string | null
   idempotencyKey?: string | null
 }
 
 interface SubmitInput extends PersistDraftInput {
-  assetPayload?: unknown
-  payload?: unknown
   durationMs?: number | null
 }
 
@@ -153,6 +163,7 @@ export function mapSubmitResultToSubmission(
     durationMs: attempt.durationMs || extras.durationMs || 0,
     answers: extras.answers || {},
     markedQuestions: extras.markedQuestions || [],
+    questionTimelineLite: extras.questionTimeline || [],
     answerComparison: comparison,
     scoreSummary: score,
     submittedAt: attempt.submittedAt || attempt.completedAt || null,
@@ -194,6 +205,9 @@ export function useReadingAttempt(options: ReadingAttemptDependencies = {}) {
     assetId,
     answers,
     markedQuestions,
+    questionTimeline,
+    assetRevision,
+    assetFingerprint,
     titleSnapshot,
     idempotencyKey
   }: PersistDraftInput) {
@@ -203,6 +217,9 @@ export function useReadingAttempt(options: ReadingAttemptDependencies = {}) {
       assetId,
       answers: answers || {},
       markedQuestions: markedQuestions || [],
+      questionTimeline: questionTimeline || [],
+      assetRevision: assetRevision ?? null,
+      assetFingerprint: assetFingerprint || null,
       titleSnapshot: titleSnapshot || null,
       idempotencyKey: idempotencyKey || readingRepository.newKey('draft')
     })
@@ -224,10 +241,11 @@ export function useReadingAttempt(options: ReadingAttemptDependencies = {}) {
   async function submit({
     attemptId,
     assetId,
-    assetPayload,
-    payload,
+    assetRevision,
+    assetFingerprint,
     answers,
     markedQuestions,
+    questionTimeline,
     durationMs,
     titleSnapshot,
     idempotencyKey
@@ -236,10 +254,11 @@ export function useReadingAttempt(options: ReadingAttemptDependencies = {}) {
     const { source, result } = await deps.submitReadingAttempt({
       attemptId: id,
       assetId,
-      assetPayload: assetPayload || payload,
-      payload: assetPayload || payload,
+      assetRevision: assetRevision ?? null,
+      assetFingerprint: assetFingerprint || null,
       answers: answers || {},
       markedQuestions: markedQuestions || [],
+      questionTimeline: questionTimeline || [],
       durationMs: durationMs ?? null,
       titleSnapshot: titleSnapshot || null,
       idempotencyKey: idempotencyKey || readingRepository.newKey('submit')
@@ -252,6 +271,7 @@ export function useReadingAttempt(options: ReadingAttemptDependencies = {}) {
         assetId,
         answers,
         markedQuestions,
+        questionTimeline,
         durationMs,
         titleSnapshot
       })

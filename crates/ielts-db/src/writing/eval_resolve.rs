@@ -9,7 +9,10 @@ use crate::settings::{get_setting, list_settings};
 use crate::sqlite::DbResult;
 
 const NS_PROMPTS: &str = "prompts";
-const NS_MODEL: &str = "model";
+/// The Settings product facade writes user preferences to `app`.
+/// `model` is read-only compatibility for pre-cutover databases.
+const NS_APP: &str = "app";
+const NS_LEGACY_MODEL: &str = "model";
 
 #[derive(Debug, Clone)]
 pub struct ResolvedWritingEvalPolicy {
@@ -30,7 +33,8 @@ pub fn resolve_writing_eval_policy(
     let temperature = resolve_temperature(conn, task_type)?;
     let (system_prompt, prompt_id, prompt_version) = match prompt {
         Some(p) => {
-            let body = extract_prompt_body(&p.value).unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.into());
+            let body =
+                extract_prompt_body(&p.value).unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.into());
             let version = p
                 .value
                 .get("version")
@@ -75,9 +79,9 @@ fn resolve_active_prompt(
 
     let task_key = task_type.map(task_type_key);
     // Prefer active + matching task, then active any, then first matching task, then first.
-    let active_match = items.iter().find(|p| {
-        is_active(&p.value) && task_matches(&p.value, task_key)
-    });
+    let active_match = items
+        .iter()
+        .find(|p| is_active(&p.value) && task_matches(&p.value, task_key));
     if let Some(p) = active_match {
         return Ok(Some(p.clone()));
     }
@@ -125,7 +129,14 @@ fn task_type_key(task: WritingTaskType) -> &'static str {
 }
 
 fn extract_prompt_body(value: &Value) -> Option<String> {
-    for key in ["body", "content", "system", "systemPrompt", "prompt", "text"] {
+    for key in [
+        "body",
+        "content",
+        "system",
+        "systemPrompt",
+        "prompt",
+        "text",
+    ] {
         if let Some(s) = value.get(key).and_then(|v| v.as_str()) {
             let trimmed = s.trim();
             if !trimmed.is_empty() {
@@ -137,15 +148,15 @@ fn extract_prompt_body(value: &Value) -> Option<String> {
 }
 
 fn resolve_temperature(conn: &Connection, task_type: Option<WritingTaskType>) -> DbResult<f32> {
-    let mode = read_string_setting(conn, NS_MODEL, "temperature_mode")?
+    let mode = read_compatible_string_setting(conn, "temperature_mode")?
         .unwrap_or_else(|| "balanced".into())
         .to_ascii_lowercase();
     let (t1, t2) = match mode.as_str() {
         "precise" => (0.3, 0.3),
         "creative" => (0.8, 0.8),
         "custom" => (
-            read_f32_setting(conn, NS_MODEL, "temperature_task1")?.unwrap_or(0.3),
-            read_f32_setting(conn, NS_MODEL, "temperature_task2")?.unwrap_or(0.5),
+            read_compatible_f32_setting(conn, "temperature_task1")?.unwrap_or(0.3),
+            read_compatible_f32_setting(conn, "temperature_task2")?.unwrap_or(0.5),
         ),
         // balanced + unknown
         _ => (0.5, 0.5),
@@ -158,6 +169,20 @@ fn resolve_temperature(conn: &Connection, task_type: Option<WritingTaskType>) ->
     Ok(temp.clamp(0.0, 2.0))
 }
 
+fn read_compatible_string_setting(conn: &Connection, key: &str) -> DbResult<Option<String>> {
+    if let Some(value) = read_string_setting(conn, NS_APP, key)? {
+        return Ok(Some(value));
+    }
+    read_string_setting(conn, NS_LEGACY_MODEL, key)
+}
+
+fn read_compatible_f32_setting(conn: &Connection, key: &str) -> DbResult<Option<f32>> {
+    if let Some(value) = read_f32_setting(conn, NS_APP, key)? {
+        return Ok(Some(value));
+    }
+    read_f32_setting(conn, NS_LEGACY_MODEL, key)
+}
+
 fn read_string_setting(conn: &Connection, namespace: &str, key: &str) -> DbResult<Option<String>> {
     let Some(entry) = get_setting(conn, namespace, key)? else {
         return Ok(None);
@@ -166,10 +191,7 @@ fn read_string_setting(conn: &Connection, namespace: &str, key: &str) -> DbResul
         Value::String(s) => Some(s),
         Value::Number(n) => Some(n.to_string()),
         Value::Bool(b) => Some(b.to_string()),
-        other => {
-            let raw = other.to_string();
-            Some(raw.trim_matches('"').to_string())
-        }
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
     })
 }
 
@@ -207,13 +229,13 @@ mod tests {
         let conn = connection();
         upsert_setting(
             &conn,
-            NS_MODEL,
+            NS_APP,
             "temperature_mode",
             &Value::String("custom".into()),
         )
         .unwrap();
-        upsert_setting(&conn, NS_MODEL, "temperature_task1", &Value::from(0.25)).unwrap();
-        upsert_setting(&conn, NS_MODEL, "temperature_task2", &Value::from(0.75)).unwrap();
+        upsert_setting(&conn, NS_APP, "temperature_task1", &Value::from(0.25)).unwrap();
+        upsert_setting(&conn, NS_APP, "temperature_task2", &Value::from(0.75)).unwrap();
         upsert_setting(
             &conn,
             NS_PROMPTS,
@@ -231,5 +253,29 @@ mod tests {
         assert!((policy.temperature - 0.75).abs() < f32::EPSILON);
         assert!(policy.system_prompt.contains("strict IELTS"));
         assert_eq!(policy.prompt_id.as_deref(), Some("p1"));
+    }
+
+    #[test]
+    fn app_namespace_wins_with_legacy_model_fallback() {
+        let conn = connection();
+        upsert_setting(
+            &conn,
+            NS_LEGACY_MODEL,
+            "temperature_mode",
+            &Value::String("creative".into()),
+        )
+        .unwrap();
+        let legacy = resolve_writing_eval_policy(&conn, Some(WritingTaskType::Task2)).unwrap();
+        assert!((legacy.temperature - 0.8).abs() < f32::EPSILON);
+
+        upsert_setting(
+            &conn,
+            NS_APP,
+            "temperature_mode",
+            &Value::String("precise".into()),
+        )
+        .unwrap();
+        let canonical = resolve_writing_eval_policy(&conn, Some(WritingTaskType::Task2)).unwrap();
+        assert!((canonical.temperature - 0.3).abs() < f32::EPSILON);
     }
 }
