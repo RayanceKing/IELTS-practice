@@ -4,13 +4,27 @@
 
 import { invokeCommand, isTauriRuntime, unwrapCommandResponse } from '@/api/tauri-bridge.js'
 
-function newKey(prefix = 'r') {
+export function newKey(prefix = 'r') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 export async function listReadingAssets() {
   const response = await invokeCommand('reading_list_assets')
   return { source: 'tauri', items: unwrapCommandResponse(response, 'reading_list_assets') || [] }
+}
+
+export async function getReadingAssetPayload(assetId) {
+  const normalizedAssetId = String(assetId || '').trim()
+  if (!normalizedAssetId) {
+    const error = new Error('reading_get_asset_payload: assetId is required')
+    error.code = 'reading.asset_id_required'
+    throw error
+  }
+
+  const response = await invokeCommand('reading_get_asset_payload', {
+    assetId: normalizedAssetId
+  })
+  return unwrapCommandResponse(response, 'reading_get_asset_payload')
 }
 
 export async function saveReadingDraft(payload) {
@@ -58,6 +72,7 @@ export async function submitReadingAttempt(payload) {
 
 export const readingRepository = {
   listReadingAssets,
+  getReadingAssetPayload,
   saveReadingDraft,
   patchReadingAnswer,
   submitReadingAttempt,

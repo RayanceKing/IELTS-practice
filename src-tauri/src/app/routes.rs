@@ -139,11 +139,7 @@ fn map_legacy(path: &str, query: &[(String, String)]) -> Option<RouteTarget> {
             if view == "browse" {
                 return Some(RouteTarget {
                     path: "/reading/library".into(),
-                    query: query
-                        .iter()
-                        .filter(|(k, _)| k != "view")
-                        .cloned()
-                        .collect(),
+                    query: query.iter().filter(|(k, _)| k != "view").cloned().collect(),
                     hash: String::new(),
                     legacy: true,
                     rejected: false,
@@ -166,15 +162,14 @@ fn map_legacy(path: &str, query: &[(String, String)]) -> Option<RouteTarget> {
 
     // old memorize / review query markers
     if path.starts_with("/practice") || path == "/reading" {
-        let mode = query.iter().find(|(k, _)| k == "mode").map(|(_, v)| v.as_str());
+        let mode = query
+            .iter()
+            .find(|(k, _)| k == "mode")
+            .map(|(_, v)| v.as_str());
         if mode == Some("memorize") || mode == Some("memorise") {
             return Some(RouteTarget {
                 path: "/reading/memorize".into(),
-                query: query
-                    .iter()
-                    .filter(|(k, _)| k != "mode")
-                    .cloned()
-                    .collect(),
+                query: query.iter().filter(|(k, _)| k != "mode").cloned().collect(),
                 hash: String::new(),
                 legacy: true,
                 rejected: false,
@@ -184,11 +179,7 @@ fn map_legacy(path: &str, query: &[(String, String)]) -> Option<RouteTarget> {
         if mode == Some("review") {
             return Some(RouteTarget {
                 path: "/reading/review".into(),
-                query: query
-                    .iter()
-                    .filter(|(k, _)| k != "mode")
-                    .cloned()
-                    .collect(),
+                query: query.iter().filter(|(k, _)| k != "mode").cloned().collect(),
                 hash: String::new(),
                 legacy: true,
                 rejected: false,

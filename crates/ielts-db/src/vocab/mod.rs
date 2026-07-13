@@ -191,11 +191,12 @@ pub fn review_vocab(conn: &Connection, cmd: &ReviewVocabCommand) -> DbResult<Voc
         review.lapses += 1;
         review.ease = (review.ease - 0.2).max(1.3);
     } else {
-        review.ease = (review.ease + match grade {
-            1 => -0.05,
-            2 => 0.0,
-            _ => 0.15,
-        })
+        review.ease = (review.ease
+            + match grade {
+                1 => -0.05,
+                2 => 0.0,
+                _ => 0.15,
+            })
         .clamp(1.3, 3.0);
         review.repetitions += 1;
         review.interval_days = match review.repetitions {

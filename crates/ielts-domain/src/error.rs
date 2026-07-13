@@ -8,7 +8,11 @@ use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub struct ErrorEnvelope {
     pub code: String,
     pub message: String,

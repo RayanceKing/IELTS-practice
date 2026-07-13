@@ -1,7 +1,9 @@
 import { readingLibraryApi } from './api'
 import { createReadingLibraryClient } from './readingLibraryCore.js'
 
-export function useReadingLibrary(dependencies = {}) {
+interface ReadingLibraryDependencies { api?: typeof readingLibraryApi }
+
+export function useReadingLibrary(dependencies: ReadingLibraryDependencies = {}) {
   const api = dependencies.api || readingLibraryApi
   return createReadingLibraryClient(api)
 }

@@ -145,11 +145,7 @@ fn extract_score_fields(raw: &Value) -> (Option<f64>, Option<u32>, Option<f64>) 
             _ => None,
         });
 
-    (
-        correct,
-        total.map(|t| t as u32),
-        accuracy,
-    )
+    (correct, total.map(|t| t as u32), accuracy)
 }
 
 fn extract_answers(raw: &Value) -> Vec<AttemptAnswer> {
@@ -164,7 +160,9 @@ fn extract_answers(raw: &Value) -> Vec<AttemptAnswer> {
 
     map.iter()
         .map(|(qid, answer)| {
-            let is_correct = correct.get(qid).map(|expected| answers_equal(answer, expected));
+            let is_correct = correct
+                .get(qid)
+                .map(|expected| answers_equal(answer, expected));
             AttemptAnswer {
                 question_id: qid.clone(),
                 answer: answer.clone(),
@@ -240,9 +238,7 @@ fn parse_mode(raw: Option<&str>) -> AttemptMode {
 
 fn answers_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::String(x), Value::String(y)) => {
-            x.trim().eq_ignore_ascii_case(y.trim())
-        }
+        (Value::String(x), Value::String(y)) => x.trim().eq_ignore_ascii_case(y.trim()),
         _ => a == b,
     }
 }

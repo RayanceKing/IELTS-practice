@@ -35,7 +35,8 @@ pub fn upsert_setting(
     db: State<'_, AppDb>,
     cmd: UpsertSettingCommand,
 ) -> CommandResponse<SettingEntry> {
-    match db.with_conn(|conn| ielts_db::upsert_setting(conn, &cmd.namespace, &cmd.key, &cmd.value)) {
+    match db.with_conn(|conn| ielts_db::upsert_setting(conn, &cmd.namespace, &cmd.key, &cmd.value))
+    {
         Ok(v) => CommandResponse::success(v),
         Err(e) => CommandResponse::failure(map_db_err(e)),
     }

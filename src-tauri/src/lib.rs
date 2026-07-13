@@ -33,7 +33,6 @@ pub fn run() {
     };
 
     let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
@@ -49,7 +48,13 @@ pub fn run() {
         .manage(db)
         .manage(vault)
         .invoke_handler(tauri::generate_handler![
+            commands::ai::ai_test_provider,
+            commands::ai::ai_list_configs,
+            commands::ai::ai_upsert_config,
+            commands::ai::ai_delete_config,
+            commands::ai::ai_set_default_config,
             commands::diagnostics::get_app_info,
+            commands::diagnostics::check_for_updates,
             commands::diagnostics::get_startup_diagnostics,
             commands::diagnostics::get_performance_budgets,
             commands::diagnostics::get_query_plan_baselines,
@@ -77,6 +82,7 @@ pub fn run() {
             commands::writing::writing_cancel_evaluation,
             commands::writing::writing_get_evaluation,
             commands::reading::reading_list_assets,
+            commands::reading::reading_get_asset_payload,
             commands::reading::reading_save_draft,
             commands::reading::reading_patch_answer,
             commands::reading::reading_submit_attempt,
@@ -106,12 +112,23 @@ pub fn run() {
             commands::enrichment::coach_append_message,
             commands::enrichment::coach_list_messages,
             commands::enrichment::coach_record_failure,
+            commands::enrichment::coach_run,
         ])
         .setup(|app| {
             let paths = app.state::<app::state::AppPaths>();
             let db = app.state::<app::state::AppDb>();
+            let reading_pack = app.path().resource_dir()?.join("reading");
+            let seed_report =
+                db.with_conn(|conn| ielts_db::seed_builtin_reading_pack(conn, &reading_pack))?;
+            tracing::info!(
+                pack_id = %seed_report.pack_id,
+                assets = seed_report.imported,
+                "validated and indexed bundled reading resources"
+            );
             match db.with_conn(|conn| ielts_db::recover_interrupted_sessions(conn)) {
-                Ok(n) if n > 0 => tracing::warn!(count = n, "marked interrupted evaluation sessions"),
+                Ok(n) if n > 0 => {
+                    tracing::warn!(count = n, "marked interrupted evaluation sessions")
+                }
                 Ok(_) => {}
                 Err(err) => tracing::error!(error = %err, "failed to recover evaluation sessions"),
             }

@@ -410,7 +410,7 @@ async function selectTopicMode(nextMode) {
 }
 
 async function hydrateEntryState(options = {}) {
-  const hasExistingDraft = hasDraft()
+  const hasExistingDraft = await hasDraft()
   if (getRouteTopicId()) {
     await hydrateFromPracticeAssetQuery({ preserveExistingDraft: hasExistingDraft })
   } else if (options.resetDefault && !hasExistingDraft) {
@@ -437,7 +437,7 @@ watch(() => [route.query.topicId, route.query.taskType], async ([nextTopicId], [
     await hydrateEntryState()
     return
   }
-  if (route.name === 'Compose' && previousTopicId && !nextTopicId && !hasDraft()) {
+  if (route.name === 'Compose' && previousTopicId && !nextTopicId && !(await hasDraft())) {
     resetComposeWorkspace()
   }
 })
@@ -550,7 +550,7 @@ async function hydrateFromPracticeAssetQuery(options = {}) {
 }
 
 async function handleRecoverDraft() {
-  const draft = loadDraft()
+  const draft = await loadDraft()
   if (!draft) {
     showDraftNotification.value = false
     return
@@ -584,8 +584,8 @@ async function handleRecoverDraft() {
   scheduleSave()
 }
 
-function handleDiscardDraft() {
-  clearDraft()
+async function handleDiscardDraft() {
+  await clearDraft()
   showDraftNotification.value = false
   restoreNotice.value = ''
 }
@@ -651,11 +651,7 @@ async function submitEssay() {
       word_count: payload.word_count
     })
 
-    try {
-      sessionStorage.setItem('temp_essay_' + result.sessionId, JSON.stringify(payload))
-    } catch(err) { console.warn(err) }
-
-    discardDraft()
+    await discardDraft()
     stopAutoSave()
 
     router.push({

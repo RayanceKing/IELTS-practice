@@ -176,13 +176,6 @@ export interface CommandResponse<T> {
   error?: ErrorEnvelope;
 }
 
-export interface ListHistoryQuery {
-  activity?: Activity;
-  limit?: number;
-  cursor?: string;
-  search?: string;
-}
-
 export interface HistoryListItemVm {
   id: string;
   activity: Activity;

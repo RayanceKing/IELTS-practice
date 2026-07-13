@@ -72,8 +72,8 @@
           <div>Task 1: <span id="html-exams">{{ topicLibraryStats.task1 }}</span></div>
           <div>Task 2: <span id="pdf-exams">{{ topicLibraryStats.task2 }}</span></div>
           <div>最近更新: <span id="last-update">{{ topicLibraryStats.lastUpdate }}</span></div>
-          <div>Host: <span>{{ electronVersion }}</span></div>
-          <div>Tauri版本: <span>{{ nodeVersion }}</span></div>
+          <div>Host: <span>{{ hostName }}</span></div>
+          <div>Tauri版本: <span>{{ tauriVersion }}</span></div>
           <div>数据目录: <span>{{ userDataPath || '加载中...' }}</span></div>
         </div>
         <div class="settings-credit">
@@ -469,11 +469,11 @@
             </div>
             <div class="info-row">
               <span class="label">Host</span>
-              <span class="value">{{ electronVersion }}</span>
+              <span class="value">{{ hostName }}</span>
             </div>
             <div class="info-row">
               <span class="label">Tauri版本</span>
-              <span class="value">{{ nodeVersion }}</span>
+              <span class="value">{{ tauriVersion }}</span>
             </div>
             <div class="info-row">
               <span class="label">数据目录</span>
@@ -498,6 +498,35 @@
           </div>
         </section>
       </section>
+    </div>
+
+    <div v-if="onboardingOpen" class="dialog-overlay" role="dialog" aria-modal="true" @click.self="onboardingOpen = false">
+      <div class="dialog card onboarding-dialog">
+        <p class="settings-detail-eyebrow">快速引导 {{ onboardingStep + 1 }} / {{ onboardingSteps.length }}</p>
+        <h3>{{ onboardingSteps[onboardingStep].title }}</h3>
+        <p>{{ onboardingSteps[onboardingStep].body }}</p>
+        <div class="dialog-actions">
+          <button class="btn btn-warm-sand" type="button" :disabled="onboardingStep === 0" @click="onboardingStep -= 1">上一步</button>
+          <button class="btn btn-brand" type="button" @click="advanceOnboarding">
+            {{ onboardingStep === onboardingSteps.length - 1 ? '完成' : '下一步' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="updateDialogOpen" class="dialog-overlay" role="dialog" aria-modal="true" @click.self="updateDialogOpen = false">
+      <div class="dialog card">
+        <h3>应用更新</h3>
+        <p>{{ updateStatus.message }}</p>
+        <p>当前版本：{{ updateStatus.currentVersion || appVersion }}</p>
+        <p v-if="updateStatus.latestVersion">最新版本：{{ updateStatus.latestVersion }}</p>
+        <div class="dialog-actions">
+          <button class="btn btn-warm-sand" type="button" @click="updateDialogOpen = false">关闭</button>
+          <button class="btn btn-brand" type="button" :disabled="updateChecking || !updateStatus.configured" @click="checkUpdates">
+            {{ updateChecking ? '检查中...' : '重新检查' }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <div
@@ -592,12 +621,10 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { settings, essays, configs, prompts, topics } from '@/api/client.js'
-import {
-  openLegacyUpdateManager,
-  startLegacyOnboardingTour,
-  switchLegacyBackgroundTheme
-} from '@/modules/legacy/legacyBridge'
+import { listSettings, upsertSetting } from '@/api/settings-repository.js'
+import { invokeCommand } from '@/api/tauri-bridge.js'
 import { createRequestGate } from '@/utils/request-gate.js'
+import { useTauriPreferences } from '@/composables/useTauriPreferences.js'
 import {
   isProviderDefaultUrl,
   resolveProviderBaseUrlOnChange
@@ -668,6 +695,7 @@ const tabs = [
 const appLogoSrc = '../../assets/images/herbal_green_flat_logo_1776094316057.png?v=20260414b'
 
 const router = useRouter()
+const preferences = useTauriPreferences()
 const WRITING_SETTINGS_BACKUP_STORAGE_KEY = 'ielts_writing_settings_backups_v1'
 const MAX_SETTINGS_BACKUPS = 10
 const activeTab = ref('model')
@@ -680,6 +708,16 @@ const settingsImportInput = ref(null)
 const settingsBackupListOpen = ref(false)
 const settingsBackups = ref([])
 const themeSwitcherOpen = ref(false)
+const onboardingOpen = ref(false)
+const onboardingStep = ref(0)
+const updateDialogOpen = ref(false)
+const updateChecking = ref(false)
+const updateStatus = reactive({ configured: false, updateAvailable: false, currentVersion: '', latestVersion: null, message: '尚未检查更新。' })
+const onboardingSteps = [
+  { title: '选择练习', body: '从阅读或写作题库开始练习，进度统一保存在本机 SQLite。' },
+  { title: '配置 AI', body: '在 API 配置中添加供应商密钥；密钥由系统安全存储保管。' },
+  { title: '查看结果', body: '提交后在历史记录中查看评分、反馈和练习恢复状态。' }
+]
 const topicLibraryStats = ref({
   total: '加载中...',
   task1: '加载中...',
@@ -797,21 +835,22 @@ const promptRequestGate = createRequestGate()
 const settingsRequestGate = createRequestGate()
 
 // 关于页面数据（Tauri host）
-const electronVersion = ref('Tauri')
-const nodeVersion = ref('N/A')
+const hostName = ref('Tauri')
+const tauriVersion = ref('N/A')
+const appVersion = ref('N/A')
 const userDataPath = ref('')
 
 async function loadTauriAboutInfo() {
   try {
-    const { invokeCommand } = await import('@/api/tauri-bridge.js')
     const info = await invokeCommand('get_app_info')
-    electronVersion.value = info?.host || 'tauri'
-    nodeVersion.value = info?.tauriVersion || info?.version || 'N/A'
+    hostName.value = info?.host || 'tauri'
+    tauriVersion.value = info?.tauriVersion || 'N/A'
+    appVersion.value = info?.version || 'N/A'
     const paths = await invokeCommand('get_app_data_paths')
     userDataPath.value = paths?.appData || paths?.app_data || ''
   } catch (error) {
-    electronVersion.value = 'tauri'
-    nodeVersion.value = 'N/A'
+    hostName.value = 'tauri'
+    tauriVersion.value = 'N/A'
     userDataPath.value = '无法获取（需 Tauri 运行时）'
   }
 }
@@ -1115,7 +1154,7 @@ async function testConfig(id) {
   clearSectionMessage('api')
   try {
     const result = await configs.test(id)
-    setSectionMessage('api', 'success', `连接成功，延迟 ${result.latency}ms`)
+    setSectionMessage('api', 'success', `连接成功，延迟 ${result.latencyMs ?? result.latency_ms ?? 0}ms`)
   } catch (error) {
     setSectionMessage('api', 'error', '连接失败: ' + error.message)
   } finally {
@@ -1401,16 +1440,13 @@ function hideThemeSwitcher() {
   themeSwitcherOpen.value = false
 }
 
-function applyBackgroundTheme(themeName) {
+async function applyBackgroundTheme(themeName) {
   const nextTheme = backgroundThemes.some((theme) => theme.value === themeName)
     ? themeName
     : 'misty-mountain'
-  if (!switchLegacyBackgroundTheme(nextTheme)) {
-    try {
-      localStorage.setItem('three_bg_theme', nextTheme)
-    } catch (_) {}
-    window.dispatchEvent(new CustomEvent('shui-bg-theme-change', { detail: { theme: nextTheme } }))
-  }
+  await upsertSetting('ui', 'background_theme', nextTheme)
+  document.documentElement.dataset.backgroundTheme = nextTheme
+  window.dispatchEvent(new CustomEvent('shui-bg-theme-change', { detail: { theme: nextTheme } }))
   themeSwitcherOpen.value = false
   const label = backgroundThemes.find((theme) => theme.value === nextTheme)?.title || nextTheme
   setGlobalMessage('success', `主题已切换：${label}`)
@@ -1419,22 +1455,44 @@ function applyBackgroundTheme(themeName) {
 async function startOnboardingTour(event) {
   event?.preventDefault?.()
   event?.stopImmediatePropagation?.()
-  try {
-    await startLegacyOnboardingTour()
-  } catch (error) {
-    console.error('打开引导流程失败:', error)
-    setGlobalMessage('error', error?.message ? `引导打开失败：${error.message}` : '引导打开失败，请稍后重试。')
+  onboardingStep.value = 0
+  onboardingOpen.value = true
+}
+
+function advanceOnboarding() {
+  if (onboardingStep.value < onboardingSteps.length - 1) {
+    onboardingStep.value += 1
+    return
   }
+  onboardingOpen.value = false
 }
 
 async function openUpdateManager(event) {
   event?.preventDefault?.()
   event?.stopImmediatePropagation?.()
+  updateDialogOpen.value = true
+  await checkUpdates()
+}
+
+async function checkUpdates() {
+  updateChecking.value = true
   try {
-    await openLegacyUpdateManager()
+    Object.assign(updateStatus, await invokeCommand('check_for_updates'))
   } catch (error) {
-    console.error('打开更新管理失败:', error)
-    setGlobalMessage('error', error?.message ? `更新检查打开失败：${error.message}` : '更新检查打开失败，请稍后重试。')
+    updateStatus.message = `更新检查失败：${error?.message || error}`
+  } finally {
+    updateChecking.value = false
+  }
+}
+
+async function loadBackgroundTheme() {
+  const result = await listSettings('ui')
+  const entry = result.items.find((item) => item.key === 'background_theme')
+  if (!entry) return
+  const value = typeof entry.value === 'string' ? entry.value.replace(/^"|"$/g, '') : entry.value
+  if (backgroundThemes.some((theme) => theme.value === value)) {
+    document.documentElement.dataset.backgroundTheme = value
+    window.dispatchEvent(new CustomEvent('shui-bg-theme-change', { detail: { theme: value } }))
   }
 }
 
@@ -1492,19 +1550,13 @@ function normalizeSettingsBackupEntry(entry) {
 }
 
 function readSettingsBackups() {
-  try {
-    const raw = window.localStorage?.getItem(WRITING_SETTINGS_BACKUP_STORAGE_KEY)
-    const parsed = raw ? JSON.parse(raw) : []
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((entry) => normalizeSettingsBackupEntry(entry))
-      .filter(Boolean)
-      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-      .slice(0, MAX_SETTINGS_BACKUPS)
-  } catch (error) {
-    console.warn('读取写作设置备份失败:', error)
-    return []
-  }
+  const parsed = preferences.get(WRITING_SETTINGS_BACKUP_STORAGE_KEY, [])
+  if (!Array.isArray(parsed)) return []
+  return parsed
+    .map((entry) => normalizeSettingsBackupEntry(entry))
+    .filter(Boolean)
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, MAX_SETTINGS_BACKUPS)
 }
 
 function persistSettingsBackups(backups) {
@@ -1515,12 +1567,7 @@ function persistSettingsBackups(backups) {
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
     .slice(0, MAX_SETTINGS_BACKUPS)
   settingsBackups.value = nextBackups
-  try {
-    window.localStorage?.setItem(WRITING_SETTINGS_BACKUP_STORAGE_KEY, JSON.stringify(nextBackups))
-  } catch (error) {
-    console.warn('保存写作设置备份索引失败:', error)
-    setGlobalMessage('error', '备份已生成，但本机备份索引保存失败: ' + error.message)
-  }
+  preferences.set(WRITING_SETTINGS_BACKUP_STORAGE_KEY, nextBackups)
   return nextBackups
 }
 
@@ -1678,12 +1725,14 @@ async function handleSettingsImport(event) {
 }
 
 // 初始化
-onMounted(() => {
+onMounted(async () => {
+  await preferences.hydrate()
   loadSettings()
   getUserDataPath()
   loadTopicLibraryStats()
   loadApiConfigs()
   loadPromptList()
+  loadBackgroundTheme().catch((error) => setGlobalMessage('error', `主题加载失败：${error.message}`))
   settingsBackups.value = readSettingsBackups()
   document.addEventListener('keydown', handleSettingsKeydown)
 })

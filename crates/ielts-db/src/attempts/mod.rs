@@ -47,12 +47,10 @@ pub fn upsert_attempt(conn: &Connection, attempt: &AttemptRecord) -> DbResult<()
             attempt.completed_at,
             attempt.duration_ms as i64,
             attempt.score_value,
-            attempt
-                .score_scale
-                .map(|s| match s {
-                    ScoreScale::Ratio => "ratio",
-                    ScoreScale::Band9 => "band9",
-                }),
+            attempt.score_scale.map(|s| match s {
+                ScoreScale::Ratio => "ratio",
+                ScoreScale::Band9 => "band9",
+            }),
             attempt.correct_count,
             attempt.question_count.map(|v| v as i64),
             attempt.title_snapshot,

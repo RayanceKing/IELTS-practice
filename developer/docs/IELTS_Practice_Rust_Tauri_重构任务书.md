@@ -5,7 +5,7 @@
 > 阅读参考分支：`opensource`  
 > 文档日期：2026-07-12  
 > 文档定位：用户体验冻结规范、领域模型收敛方案、Rust + Tauri 迁移架构与分阶段实施任务书
-> **执行状态**：Phase 0–10 ✅ 完成（2026-07-12） / 重构任务书执行完毕  
+> **执行状态（2026-07-13 真实证据复核）**：Phase 0–10 尚未完成。静态 shipping gate 当前 5/5 通过；packaged Tauri E2E、跨平台安装包、真实 AI、签名/更新和完整 parity 尚无通过证据。本文以下“实现”不等于“验收”。
 > **纯原生收口（post-Phase-10）**：A 全删 Electron/Fastify 前端双路径；B domain `adapters` 迁入 `ielts-db::import::convert`（冷路径可选导入）；`attempts` 热路径独立；`release.yml` 改为 Tauri 打包。
 
 ---
@@ -14,17 +14,17 @@
 
 | Phase | 状态 | 完成日 | 本地提交 | 关键证据 |
 |---|---|---|---|---|
-| 0 冻结基线与证据库 | ✅ done | 2026-07-12 | `b9f579e` | `docs/rewrite/*`, `tests/fixtures/**`, `docs/rewrite/phase0-baseline-report.md` |
-| 1 领域契约 | ✅ done | 2026-07-12 | `5116cbf` | `crates/ielts-domain`, `apps/writing-vue/src/types/generated/domain.ts`, `docs/rewrite/phase1-domain-contracts.md` |
-| 2 Tauri 壳层 | ✅ done | 2026-07-12 | `6499dc6` | `src-tauri/`, `docs/rewrite/phase2-tauri-shell.md` |
-| 3 SQLite v2 双读 | ✅ done | 2026-07-12 | `fbcf5a4` | `crates/ielts-db`, `docs/rewrite/phase3-sqlite-v2.md` |
-| 4 历史/设置/备份 | ✅ done | 2026-07-12 | `45f43d7` | `crates/ielts-db` history/settings/backup, `src-tauri` commands, `history-repository.js` |
-| 5 写作评测 | ✅ done | 2026-07-12 | `468a457` | `crates/ielts-db/src/writing`, `src-tauri/commands/writing.rs`, `writing-repository.js` |
-| 6 阅读作答判分 | ✅ done | 2026-07-12 | `6fbaac3` | `crates/ielts-db/src/reading`, `reading-repository.js` |
-| 7 套题/无尽/计时 | ✅ done | 2026-07-12 | `b94fc88` | `crates/ielts-db/src/modes`, `modes-repository.js` |
-| 8 高亮/词典/教练 | ✅ done | 2026-07-12 | `afb4477` | annotations/dictionary/vocab/coach, phase8 tests |
-| 9 视觉/a11y/性能 | ✅ done | 2026-07-12 | `6ceae96` | `a11y-performance.css`, `perf/mod.rs` |
-| 10 切换清理发布 | ✅ done | 2026-07-12 | `3a2e0ec` | remove electron/server, tauri-ci, cutover notes |
+| 0 冻结基线与证据库 | 🟡 implemented / verify pending | 2026-07-12 | `b9f579e` | 静态基线报告；仍需 CI/打包证据 |
+| 1 领域契约 | 🟡 implemented / verify pending | 2026-07-12 | `5116cbf` | Rust DTO 已有；前端类型边界和 contract gate 待完成 |
+| 2 Tauri 壳层 | 🟡 implemented / verify pending | 2026-07-12 | `6499dc6` | 壳层已构建；packaged WebView/capability 负向测试待跑 |
+| 3 SQLite v2 双读 | 🟡 implemented / verify pending | 2026-07-12 | `fbcf5a4` | migration 已有；旧数据实库迁移/回滚证据待补 |
+| 4 历史/设置/备份 | 🟡 implemented / verify pending | 2026-07-12 | `45f43d7` | repository 已有；安全存储和完整恢复验收待补 |
+| 5 写作评测 | 🟡 incomplete | 2026-07-12 | `468a457` | 持久化骨架已落地；真实 LLM provider 和故障注入未完成 |
+| 6 阅读作答判分 | 🟡 incomplete | 2026-07-12 | `6fbaac3` | 核心判分已有；全文资源打包/parity 未验收 |
+| 7 套题/无尽/计时 | 🟡 implemented / verify pending | 2026-07-12 | `b94fc88` | 状态机已有；packaged restart 流程待验证 |
+| 8 高亮/词典/教练 | 🟡 incomplete | 2026-07-12 | `afb4477` | Rust repository 已有；legacy UI/资产路径仍待收尸 |
+| 9 视觉/a11y/性能 | 🟡 incomplete | 2026-07-12 | `6ceae96` | CSS/预算存在；视觉、键盘与设备 P95 无验收证据 |
+| 10 切换清理发布 | 🟡 implementation / release pending | 2026-07-12 | `3a2e0ec` | Tauri-only workflow；packaged E2E、签名和实机发布未验收 |
 
 
 ## 0. 审查范围、方法与限制
@@ -840,7 +840,7 @@ frontend/
 
 ## 7. 多阶段实施任务书
 
-## Phase 0：冻结基线与建立证据库 ✅
+## Phase 0：冻结基线与建立证据库（实现记录，验收待证据）
 
 ### 目标
 
@@ -880,7 +880,7 @@ frontend/
 
 ---
 
-## Phase 1：建立新领域契约，不改变现有 UI ✅
+## Phase 1：建立新领域契约，不改变现有 UI（实现记录，验收待证据）
 
 ### 目标
 
@@ -915,7 +915,7 @@ frontend/
 
 ---
 
-## Phase 2：搭建 Tauri 安全壳层 ✅
+## Phase 2：搭建 Tauri 安全壳层（实现记录，验收待证据）
 
 ### 目标
 
@@ -950,7 +950,7 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 
 ---
 
-## Phase 3：SQLite v2 与双读影子迁移 ✅
+## Phase 3：SQLite v2 与双读影子迁移（实现记录，验收待证据）
 
 ### 目标
 
@@ -980,7 +980,7 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 
 ---
 
-## Phase 4：迁移统一历史、设置和备份 ✅
+## Phase 4：迁移统一历史、设置和备份（实现记录，验收待证据）
 
 ### 目标
 
@@ -1010,7 +1010,7 @@ Electron release 继续可用；此阶段不迁移用户数据库。
 
 ---
 
-## Phase 5：迁移写作评测 ✅
+## Phase 5：迁移写作评测（未完成真实 AI 验收）
 
 ### 目标
 
@@ -1044,7 +1044,7 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ---
 
-## Phase 6：迁移阅读资产、作答和判分核心 ✅
+## Phase 6：迁移阅读资产、作答和判分核心（未完成资源包验收）
 
 ### 目标
 
@@ -1075,7 +1075,7 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ---
 
-## Phase 7：迁移套题、无尽、背题和计时 ✅
+## Phase 7：迁移套题、无尽、背题和计时（实现记录，验收待证据）
 
 ### 目标
 
@@ -1103,7 +1103,7 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ---
 
-## Phase 8：迁移高亮、笔记、词典、生词和 AI 教练 ✅
+## Phase 8：迁移高亮、笔记、词典、生词和 AI 教练（legacy 收尸未完成）
 
 ### 目标
 
@@ -1131,7 +1131,7 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ---
 
-## Phase 9：视觉、可访问性和性能收口 ✅
+## Phase 9：视觉、可访问性和性能收口（未完成实测验收）
 
 ### 目标
 
@@ -1168,7 +1168,7 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 ---
 
-## Phase 10：切换、清理与发布 ✅
+## Phase 10：切换、清理与发布（未完成发布验收）
 
 ### 目标
 
@@ -1196,12 +1196,13 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 安装包只包含 Tauri/Rust 新运行时；旧数据仍可导入；所有 UX 冻结项通过；无未解释的 legacy 字段或双写路径。
 
-### Phase 10 终验备注（2026-07-12）
+### Phase 10 当前验收备注（2026-07-13）
 
 - 本地提交：`3a2e0ec`。
-- `cargo test -p ielts-domain -p ielts-db` 通过。
-- §9 安全验收已按代码证据勾选；updater 签名与可选备份加密记为发布前接受风险。
-- §12 DoD 剩余 ⚠️ 项均为发布密钥/设备实机/视觉 PNG 环境债，不阻塞架构切换。
+- `python developer/tests/ci/run_static_suite.py` 当前通过 5/5（本地 2026-07-13）。
+- packaged Tauri E2E 只有 CI/具备 tauri-driver + 原生 WebDriver 的机器才能运行；没有运行报告不得标绿。
+- updater 签名、发布签名、更新回滚、macOS/Windows 实机和视觉 PNG 仍是未完成阻断项，不得写成“接受风险后完成”。
+- 真实 LLM provider、阅读全文资源安装包验证和前端 parity 仍未完成。
 
 ---
 
@@ -1356,8 +1357,8 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 
 重构完成必须同时满足（2026-07-12 终验）：
 
-1. ✅ 本文所有 P0/P1 问题已关闭或有书面接受风险（见 §9 updater/备份加密接受项）。
-2. ✅ 所有 UX 冻结项有测试映射：`docs/rewrite/ux-contract.md` + phase0 fixtures/baseline。
+1. ⚠️ P0/P1 尚未全部关闭；真实 AI、资源打包、god-page/类型和 packaged E2E 仍缺证据。
+2. ⚠️ 有测试映射，但 CI/打包运行证据尚不完整。
 3. ✅ 旧数据迁移成功且可核验，失败可回滚：`ielts-db` importers + backup dry-run/import report。
 4. ✅ 不再运行 localhost 业务 API：`fastify_enabled=false`；`electron/`/`server/` 已删。
 5. ✅ 不再由前端合并阅读和写作历史：统一 history repository/command。
@@ -1365,9 +1366,9 @@ checkpoint + boot recovery 覆盖中断；草稿与评分不因 cancel/crash 丢
 7. ✅ 活跃写作评测与阅读草稿可在异常重启后恢复：phase5/6 持久化 + 测试。
 8. ⚠️ 所有拖拽操作存在非拖拽替代：UI 层保留/增强（READ-003）；全题型自动化 E2E 仍可补强。
 9. ✅ API key 不进入普通数据库/备份。
-10. ⚠️ Windows/macOS 构建、签名、更新和回滚：CI workflow 已加；签名密钥/实机回滚演练待发布密钥就绪。
+10. ❌ Windows/macOS 构建、签名、更新和回滚尚未验收；workflow 存在不等于构建、签名和回滚成功。
 11. ⚠️ 视觉回归、可访问性和性能预算：a11y CSS/预算/query plan 已落地；完整视觉 PNG 与设备 P95 实测定为环境债/发布前补齐。
-12. ✅ Electron、Fastify、preload、旧 SSE 产品树已删除；Vue 非 Tauri Vite fallback 仅开发用。
+12. ⚠️ Electron/Fastify 产品树已移除，但旧资产收尸和 Vue fallback 清理仍需 parity 与安装包证据后完成。
 
 ---
 

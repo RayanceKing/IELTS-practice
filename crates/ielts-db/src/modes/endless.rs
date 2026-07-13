@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::reading::attempt::{
-    submit_reading_attempt, ReadingSubmitCommand, ReadingSubmitResult,
-};
+use crate::reading::attempt::{submit_reading_attempt, ReadingSubmitCommand, ReadingSubmitResult};
 use crate::sqlite::{DbError, DbResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,10 +169,7 @@ pub fn remaining_pool(session: &EndlessSession) -> Vec<String> {
         .collect()
 }
 
-pub fn advance_endless(
-    conn: &Connection,
-    cmd: &AdvanceEndlessCommand,
-) -> DbResult<EndlessSession> {
+pub fn advance_endless(conn: &Connection, cmd: &AdvanceEndlessCommand) -> DbResult<EndlessSession> {
     let mut session = load(conn, &cmd.session_id)?;
     if session.status != EndlessStatus::Active {
         return Err(DbError::Validation("endless session not active".into()));
@@ -248,7 +243,11 @@ pub fn submit_endless_passage(
         params![session.id, attempt_id],
     )?;
 
-    if !session.completed_asset_ids.iter().any(|c| c == &cmd.asset_id) {
+    if !session
+        .completed_asset_ids
+        .iter()
+        .any(|c| c == &cmd.asset_id)
+    {
         session.completed_asset_ids.push(cmd.asset_id.clone());
     }
     session.current_attempt_id = Some(attempt_id);
@@ -271,8 +270,8 @@ pub fn submit_endless_passage(
 }
 
 fn persist(conn: &Connection, session: &EndlessSession) -> DbResult<()> {
-    let policy = serde_json::to_string(&session.pool_policy)
-        .map_err(|e| DbError::Message(e.to_string()))?;
+    let policy =
+        serde_json::to_string(&session.pool_policy).map_err(|e| DbError::Message(e.to_string()))?;
     let pool = serde_json::to_string(&session.pool).map_err(|e| DbError::Message(e.to_string()))?;
     let completed = serde_json::to_string(&session.completed_asset_ids)
         .map_err(|e| DbError::Message(e.to_string()))?;
@@ -380,10 +379,7 @@ fn store_submit_idempotent(
     Ok(())
 }
 
-fn load_submit_idempotent(
-    conn: &Connection,
-    key: &str,
-) -> DbResult<Option<SubmitEndlessResult>> {
+fn load_submit_idempotent(conn: &Connection, key: &str) -> DbResult<Option<SubmitEndlessResult>> {
     let mut stmt = conn.prepare(
         "SELECT response_json FROM mode_idempotency WHERE scope = 'endless.submit' AND idempotency_key = ?1",
     )?;
@@ -399,7 +395,11 @@ fn load_submit_idempotent(
 }
 
 /// Helper for UI pool filtering without session.
-pub fn filter_pool_ids(pool: &[String], completed: &[String], exclude_completed: bool) -> Vec<String> {
+pub fn filter_pool_ids(
+    pool: &[String],
+    completed: &[String],
+    exclude_completed: bool,
+) -> Vec<String> {
     if !exclude_completed {
         return pool.to_vec();
     }

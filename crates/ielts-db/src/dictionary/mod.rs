@@ -43,10 +43,7 @@ pub fn upsert_dictionary_entry(conn: &Connection, entry: &DictionaryEntry) -> Db
     } else {
         entry.normalized_term.clone()
     };
-    let payload = entry
-        .payload
-        .as_ref()
-        .map(|v| v.to_string());
+    let payload = entry.payload.as_ref().map(|v| v.to_string());
     conn.execute(
         "INSERT INTO dictionary_entries (
             term, normalized_term, definition, phonetic, part_of_speech, example, source_label, license, payload_json
@@ -75,10 +72,7 @@ pub fn upsert_dictionary_entry(conn: &Connection, entry: &DictionaryEntry) -> Db
     Ok(())
 }
 
-pub fn import_dictionary(
-    conn: &Connection,
-    cmd: &ImportDictionaryCommand,
-) -> DbResult<u32> {
+pub fn import_dictionary(conn: &Connection, cmd: &ImportDictionaryCommand) -> DbResult<u32> {
     let mut n = 0u32;
     for entry in &cmd.entries {
         upsert_dictionary_entry(conn, entry)?;

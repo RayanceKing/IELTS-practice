@@ -7,7 +7,11 @@ use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct AttemptRecord {
     pub schema_version: u32,
     pub id: String,
@@ -50,7 +54,11 @@ impl AttemptRecord {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct AttemptAnswer {
     pub question_id: String,
     pub answer: serde_json::Value,
@@ -78,7 +86,11 @@ fn default_weight() -> f64 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct AttemptAnnotationDto {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

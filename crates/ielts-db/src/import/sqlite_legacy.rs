@@ -213,7 +213,13 @@ fn import_history_row(conn: &Connection, row: &LegacyHistoryRow) -> DbResult<()>
     };
     let asset_id = row.asset_id.clone().or_else(|| row.exam_id.clone());
     if let Some(asset) = asset_id.as_deref() {
-        crate::attempts::ensure_asset_stub(conn, asset, activity, &row.title, row.exam_id.as_deref())?;
+        crate::attempts::ensure_asset_stub(
+            conn,
+            asset,
+            activity,
+            &row.title,
+            row.exam_id.as_deref(),
+        )?;
     }
 
     let attempt = AttemptRecord {

@@ -59,7 +59,9 @@ pub fn upsert_writing_evaluation(
     Ok(())
 }
 
-pub fn list_history_view_models(conn: &Connection) -> DbResult<Vec<ielts_domain::HistoryListItemVm>> {
+pub fn list_history_view_models(
+    conn: &Connection,
+) -> DbResult<Vec<ielts_domain::HistoryListItemVm>> {
     let mut stmt = conn.prepare(
         "SELECT id, activity, asset_id, mode, suite_id, status, started_at, submitted_at, completed_at,
                 duration_ms, score_value, score_scale, correct_count, question_count, title_snapshot,
@@ -112,8 +114,7 @@ pub fn import_evaluation_json(conn: &Connection, attempt_id: &str, raw: &Value) 
 }
 
 pub fn import_reading_submission_json(conn: &Connection, raw: &Value) -> DbResult<String> {
-    let attempt =
-        reading_submission_to_attempt(raw).map_err(|e| DbError::Import(e.to_string()))?;
+    let attempt = reading_submission_to_attempt(raw).map_err(|e| DbError::Import(e.to_string()))?;
     if let Some(asset_id) = attempt.asset_id.as_deref() {
         ensure_asset_stub(
             conn,

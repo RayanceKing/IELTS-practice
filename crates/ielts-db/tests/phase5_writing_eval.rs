@@ -6,9 +6,9 @@ use tempfile::tempdir;
 
 use ielts_db::{
     get_writing_draft, list_events, load_evaluation_for_attempt, migrate, open_connection,
-    recover_interrupted_sessions, request_cancel, save_writing_draft, start_evaluation,
-    submit_writing_attempt, DeterministicProvider, DbOpenOptions, ProviderError, StartEvaluationCommand,
-    WritingProvider,
+    prepare_evaluation, recover_interrupted_sessions, request_cancel, save_writing_draft,
+    start_evaluation, submit_writing_attempt, DbOpenOptions, DeterministicProvider, ProviderError,
+    StartEvaluationCommand, WritingProvider,
 };
 use ielts_domain::domain::WritingTaskType;
 use ielts_domain::dto::{WritingFeedbackV4, WritingScoreV4};
@@ -48,7 +48,10 @@ fn draft_and_idempotent_submit() {
         },
     )
     .unwrap();
-    assert_eq!(format!("{:?}", submitted.status).to_ascii_lowercase(), "submitted");
+    assert_eq!(
+        format!("{:?}", submitted.status).to_ascii_lowercase(),
+        "submitted"
+    );
 
     let again = submit_writing_attempt(
         &conn,
@@ -280,6 +283,44 @@ fn recover_marks_running_sessions_interrupted() {
     assert_eq!(status, "interrupted");
     // draft still there
     assert!(get_writing_draft(&conn, "a6").unwrap().is_some());
+}
+
+#[test]
+fn crash_during_unlocked_provider_call_recovers_without_losing_input() {
+    let (_dir, conn) = open_db();
+    let essay = "The provider call must not own the database lock. ".repeat(30);
+    save_writing_draft(&conn, &draft_cmd("a-network", &essay, "d-network")).unwrap();
+    let prepared = prepare_evaluation(
+        &conn,
+        &StartEvaluationCommand {
+            attempt_id: "a-network".into(),
+            idempotency_key: "eval-network".into(),
+            task_type: Some("task2".into()),
+            retry_of: None,
+        },
+        "openai-compatible",
+        "test-model",
+    )
+    .unwrap();
+
+    assert!(prepared.existing.is_none());
+    assert_eq!(prepared.essay, essay);
+    assert_eq!(recover_interrupted_sessions(&conn).unwrap(), 1);
+    let status: String = conn
+        .query_row(
+            "SELECT status FROM evaluation_sessions WHERE id = ?1",
+            rusqlite::params![prepared.session_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(status, "interrupted");
+    assert_eq!(
+        get_writing_draft(&conn, "a-network")
+            .unwrap()
+            .unwrap()
+            .content_text,
+        essay
+    );
 }
 
 #[test]

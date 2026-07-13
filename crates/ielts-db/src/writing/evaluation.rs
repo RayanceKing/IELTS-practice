@@ -9,9 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use ielts_domain::domain::{
-    AttemptStatus, EvaluationStage, EvaluationStatus, WritingTaskType,
-};
+use ielts_domain::domain::{AttemptStatus, EvaluationStage, EvaluationStatus, WritingTaskType};
 use ielts_domain::dto::{
     EvaluationDegradation, WritingEvaluationV4, WritingFeedbackV4, WritingScoreV4,
 };
@@ -73,6 +71,16 @@ pub struct EvaluationRunResult {
     pub session: EvaluationSession,
     pub evaluation: WritingEvaluationV4,
     pub events: Vec<EvaluationEvent>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedEvaluation {
+    pub evaluation_id: String,
+    pub session_id: String,
+    pub essay: String,
+    pub prompt: Option<String>,
+    pub task_type: Option<WritingTaskType>,
+    pub existing: Option<EvaluationRunResult>,
 }
 
 /// Provider abstraction: production plugs real HTTP/AI; tests use Fake/Deterministic.
@@ -171,7 +179,10 @@ pub struct ProviderOrchestrator {
 }
 
 impl ProviderOrchestrator {
-    pub fn select<'a>(&self, providers: &'a [&'a dyn WritingProvider]) -> Option<&'a dyn WritingProvider> {
+    pub fn select<'a>(
+        &self,
+        providers: &'a [&'a dyn WritingProvider],
+    ) -> Option<&'a dyn WritingProvider> {
         if let Some(until) = self.cooldown_until {
             if chrono::Utc::now().timestamp() < until {
                 return None;
@@ -198,6 +209,33 @@ pub fn start_evaluation(
     cmd: &StartEvaluationCommand,
     provider: &dyn WritingProvider,
 ) -> DbResult<EvaluationRunResult> {
+    let prepared = prepare_evaluation(conn, cmd, provider.id(), provider.model())?;
+    if let Some(existing) = prepared.existing {
+        return Ok(existing);
+    }
+    let score = provider.score(
+        &prepared.essay,
+        prepared.prompt.as_deref(),
+        prepared.task_type,
+    );
+    let (feedback, review_error) = match score.as_ref() {
+        Ok(score) => match provider.review(&prepared.essay, score) {
+            Ok(feedback) => (Some(feedback), None),
+            Err(error) => (None, Some(error)),
+        },
+        Err(_) => (None, None),
+    };
+    finish_evaluation(conn, &prepared, score, feedback, review_error)
+}
+
+/// Creates the persisted session and returns an owned provider request.
+/// The caller must release its database lock before performing network I/O.
+pub fn prepare_evaluation(
+    conn: &Connection,
+    cmd: &StartEvaluationCommand,
+    provider_id: &str,
+    model: &str,
+) -> DbResult<PreparedEvaluation> {
     if cmd.idempotency_key.trim().is_empty() {
         return Err(DbError::Validation("idempotency_key required".into()));
     }
@@ -211,13 +249,21 @@ pub fn start_evaluation(
     );
     if let Ok(Some(eval_id)) = existing_eval {
         if let Some(session) = load_session_by_evaluation(conn, &eval_id)? {
-            let evaluation = load_evaluation_result(conn, &eval_id)?
-                .unwrap_or_else(|| empty_eval(EvaluationStatus::Running, EvaluationStage::Preparing));
+            let evaluation = load_evaluation_result(conn, &eval_id)?.unwrap_or_else(|| {
+                empty_eval(EvaluationStatus::Running, EvaluationStage::Preparing)
+            });
             let events = list_events(conn, &eval_id, 0)?;
-            return Ok(EvaluationRunResult {
-                session,
-                evaluation,
-                events,
+            return Ok(PreparedEvaluation {
+                evaluation_id: eval_id,
+                session_id: session.id.clone(),
+                essay: String::new(),
+                prompt: None,
+                task_type: None,
+                existing: Some(EvaluationRunResult {
+                    session,
+                    evaluation,
+                    events,
+                }),
             });
         }
     }
@@ -246,8 +292,8 @@ pub fn start_evaluation(
             cmd.attempt_id,
             status_str(EvaluationStatus::Queued),
             stage_str(EvaluationStage::Preparing),
-            provider.id(),
-            provider.model(),
+            provider_id,
+            model,
             "rubric-v1",
             "prompt-v1",
             now,
@@ -276,8 +322,8 @@ pub fn start_evaluation(
             stage_str(EvaluationStage::Preparing),
             revision as i64,
             cmd.retry_of,
-            provider.id(),
-            provider.model(),
+            provider_id,
+            model,
             now,
         ],
     )?;
@@ -285,7 +331,11 @@ pub fn start_evaluation(
     // Mark attempt reviewing
     tx.execute(
         "UPDATE attempts SET status = ?1, updated_at = ?2 WHERE id = ?3",
-        params![status_attempt(AttemptStatus::Reviewing), now, cmd.attempt_id],
+        params![
+            status_attempt(AttemptStatus::Reviewing),
+            now,
+            cmd.attempt_id
+        ],
     )?;
 
     tx.execute(
@@ -302,8 +352,73 @@ pub fn start_evaluation(
 
     tx.commit()?;
 
-    // Run state machine (synchronous for Phase 5; Channel emits via event rows).
-    run_state_machine(conn, &evaluation_id, &session_id, provider, &draft.content_text, draft.prompt_snapshot.as_deref(), parse_task(cmd.task_type.as_deref()))
+    Ok(PreparedEvaluation {
+        evaluation_id,
+        session_id,
+        essay: draft.content_text,
+        prompt: draft.prompt_snapshot,
+        task_type: parse_task(cmd.task_type.as_deref()),
+        existing: None,
+    })
+}
+
+pub fn finish_evaluation(
+    conn: &Connection,
+    prepared: &PreparedEvaluation,
+    score: Result<WritingScoreV4, ProviderError>,
+    feedback: Option<WritingFeedbackV4>,
+    review_error: Option<ProviderError>,
+) -> DbResult<EvaluationRunResult> {
+    let provider = PreparedProvider {
+        score,
+        feedback,
+        review_error,
+    };
+    run_state_machine(
+        conn,
+        &prepared.evaluation_id,
+        &prepared.session_id,
+        &provider,
+        &prepared.essay,
+        prepared.prompt.as_deref(),
+        prepared.task_type,
+    )
+}
+
+struct PreparedProvider {
+    score: Result<WritingScoreV4, ProviderError>,
+    feedback: Option<WritingFeedbackV4>,
+    review_error: Option<ProviderError>,
+}
+
+impl WritingProvider for PreparedProvider {
+    fn id(&self) -> &str {
+        "prepared"
+    }
+    fn model(&self) -> &str {
+        "prepared"
+    }
+    fn score(
+        &self,
+        _essay: &str,
+        _prompt: Option<&str>,
+        _task_type: Option<WritingTaskType>,
+    ) -> Result<WritingScoreV4, ProviderError> {
+        self.score.clone()
+    }
+    fn review(
+        &self,
+        _essay: &str,
+        _score: &WritingScoreV4,
+    ) -> Result<WritingFeedbackV4, ProviderError> {
+        if let Some(error) = &self.review_error {
+            return Err(error.clone());
+        }
+        self.feedback.clone().ok_or_else(|| ProviderError {
+            message: "provider returned no feedback".into(),
+            retryable: false,
+        })
+    }
 }
 
 fn run_state_machine(
@@ -324,7 +439,15 @@ fn run_state_machine(
     }
     let mut evaluation = empty_eval(EvaluationStatus::Running, EvaluationStage::Preparing);
     evaluation.task_type = task_type;
-    persist_stage(conn, evaluation_id, session_id, EvaluationStatus::Running, EvaluationStage::Preparing, revision, &evaluation)?;
+    persist_stage(
+        conn,
+        evaluation_id,
+        session_id,
+        EvaluationStatus::Running,
+        EvaluationStage::Preparing,
+        revision,
+        &evaluation,
+    )?;
     events.push(append_event(
         conn,
         evaluation_id,
@@ -333,14 +456,28 @@ fn run_state_machine(
         Some(EvaluationStage::Preparing),
         json!({ "message": "preparing" }),
     )?);
-    save_checkpoint(conn, evaluation_id, EvaluationStage::Preparing, revision, &evaluation)?;
+    save_checkpoint(
+        conn,
+        evaluation_id,
+        EvaluationStage::Preparing,
+        revision,
+        &evaluation,
+    )?;
 
     // Scoring
     if is_cancel_requested(conn, session_id)? {
         return finalize_cancelled(conn, evaluation_id, session_id, events);
     }
     evaluation.stage = EvaluationStage::Scoring;
-    persist_stage(conn, evaluation_id, session_id, EvaluationStatus::Running, EvaluationStage::Scoring, revision, &evaluation)?;
+    persist_stage(
+        conn,
+        evaluation_id,
+        session_id,
+        EvaluationStatus::Running,
+        EvaluationStage::Scoring,
+        revision,
+        &evaluation,
+    )?;
     events.push(append_event(
         conn,
         evaluation_id,
@@ -358,8 +495,22 @@ fn run_state_machine(
     };
     evaluation.score = Some(score.clone());
     revision += 1;
-    persist_stage(conn, evaluation_id, session_id, EvaluationStatus::Running, EvaluationStage::Scoring, revision, &evaluation)?;
-    save_checkpoint(conn, evaluation_id, EvaluationStage::Scoring, revision, &evaluation)?;
+    persist_stage(
+        conn,
+        evaluation_id,
+        session_id,
+        EvaluationStatus::Running,
+        EvaluationStage::Scoring,
+        revision,
+        &evaluation,
+    )?;
+    save_checkpoint(
+        conn,
+        evaluation_id,
+        EvaluationStage::Scoring,
+        revision,
+        &evaluation,
+    )?;
     events.push(append_event(
         conn,
         evaluation_id,
@@ -372,10 +523,24 @@ fn run_state_machine(
     // Reviewing
     if is_cancel_requested(conn, session_id)? {
         // Keep score checkpoint; mark interrupted/cancelled without deleting inputs
-        return finalize_cancelled_with_partial(conn, evaluation_id, session_id, evaluation, events);
+        return finalize_cancelled_with_partial(
+            conn,
+            evaluation_id,
+            session_id,
+            evaluation,
+            events,
+        );
     }
     evaluation.stage = EvaluationStage::Reviewing;
-    persist_stage(conn, evaluation_id, session_id, EvaluationStatus::Running, EvaluationStage::Reviewing, revision, &evaluation)?;
+    persist_stage(
+        conn,
+        evaluation_id,
+        session_id,
+        EvaluationStatus::Running,
+        EvaluationStage::Reviewing,
+        revision,
+        &evaluation,
+    )?;
     events.push(append_event(
         conn,
         evaluation_id,
@@ -398,7 +563,13 @@ fn run_state_machine(
                 missing: vec!["feedback".into(), "sentences".into()],
             });
             revision += 1;
-            save_checkpoint(conn, evaluation_id, EvaluationStage::Reviewing, revision, &evaluation)?;
+            save_checkpoint(
+                conn,
+                evaluation_id,
+                EvaluationStage::Reviewing,
+                revision,
+                &evaluation,
+            )?;
             events.push(append_event(
                 conn,
                 evaluation_id,
@@ -411,7 +582,13 @@ fn run_state_machine(
         }
     }
     revision += 1;
-    save_checkpoint(conn, evaluation_id, EvaluationStage::Reviewing, revision, &evaluation)?;
+    save_checkpoint(
+        conn,
+        evaluation_id,
+        EvaluationStage::Reviewing,
+        revision,
+        &evaluation,
+    )?;
     events.push(append_event(
         conn,
         evaluation_id,
@@ -425,7 +602,13 @@ fn run_state_machine(
     evaluation.stage = EvaluationStage::Finalizing;
     evaluation.status = EvaluationStatus::Completed;
     revision += 1;
-    save_checkpoint(conn, evaluation_id, EvaluationStage::Finalizing, revision, &evaluation)?;
+    save_checkpoint(
+        conn,
+        evaluation_id,
+        EvaluationStage::Finalizing,
+        revision,
+        &evaluation,
+    )?;
     events.push(append_event(
         conn,
         evaluation_id,
@@ -453,7 +636,8 @@ fn finalize_completed(
         evaluation.status = EvaluationStatus::Completed;
     }
     evaluation.stage = EvaluationStage::Finalizing;
-    let result_json = serde_json::to_string(&evaluation).map_err(|e| DbError::Message(e.to_string()))?;
+    let result_json =
+        serde_json::to_string(&evaluation).map_err(|e| DbError::Message(e.to_string()))?;
     let degradation_json = evaluation
         .degradation
         .as_ref()
@@ -525,7 +709,11 @@ fn finalize_failed(
 ) -> DbResult<EvaluationRunResult> {
     let now = chrono::Utc::now().to_rfc3339();
     evaluation.status = EvaluationStatus::Failed;
-    evaluation.error = Some(ErrorEnvelope::new("provider.failed", err.message.clone(), err.retryable));
+    evaluation.error = Some(ErrorEnvelope::new(
+        "provider.failed",
+        err.message.clone(),
+        err.retryable,
+    ));
     let result_json = serde_json::to_string(&evaluation).unwrap_or_else(|_| "{}".into());
     let error_json = serde_json::to_string(evaluation.error.as_ref().unwrap()).unwrap();
     conn.execute(
@@ -605,7 +793,11 @@ pub fn request_cancel(conn: &Connection, evaluation_id: &str) -> DbResult<bool> 
     Ok(n > 0)
 }
 
-pub fn list_events(conn: &Connection, evaluation_id: &str, after_seq: u32) -> DbResult<Vec<EvaluationEvent>> {
+pub fn list_events(
+    conn: &Connection,
+    evaluation_id: &str,
+    after_seq: u32,
+) -> DbResult<Vec<EvaluationEvent>> {
     let mut stmt = conn.prepare(
         "SELECT evaluation_id, sequence, revision, event_type, stage, payload_json, created_at
          FROM evaluation_events
@@ -751,7 +943,8 @@ fn persist_stage(
     evaluation: &WritingEvaluationV4,
 ) -> DbResult<()> {
     let now = chrono::Utc::now().to_rfc3339();
-    let result_json = serde_json::to_string(evaluation).map_err(|e| DbError::Message(e.to_string()))?;
+    let result_json =
+        serde_json::to_string(evaluation).map_err(|e| DbError::Message(e.to_string()))?;
     conn.execute(
         "UPDATE writing_evaluations SET status = ?1, stage = ?2, result_json = ?3, updated_at = ?4 WHERE id = ?5",
         params![status_str(status), stage_str(stage), result_json, now, evaluation_id],
@@ -925,4 +1118,3 @@ fn parse_stage(raw: &str) -> Option<EvaluationStage> {
 fn parse_task(raw: Option<&str>) -> Option<WritingTaskType> {
     raw.and_then(WritingTaskType::parse_loose)
 }
-

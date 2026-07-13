@@ -6,7 +6,7 @@
 use rusqlite::{params, Connection};
 use serde_json::Value;
 
-use ielts_domain::dto::{SecretRef, SettingEntry};
+use ielts_domain::dto::{AiConfigDto, SecretRef, SettingEntry};
 
 use crate::sqlite::{DbError, DbResult};
 
@@ -15,6 +15,8 @@ pub const NS_PRACTICE: &str = "practice";
 pub const NS_AI: &str = "ai";
 pub const NS_SYSTEM: &str = "system";
 pub const NS_SECRET_REFS: &str = "secret_refs";
+const AI_CONFIG_PREFIX: &str = "config:";
+const AI_DEFAULT_ID: &str = "defaultConfigId";
 
 /// Preferences that historically lived in localStorage and must migrate.
 pub const LEGACY_UI_KEYS: &[&str] = &[
@@ -26,7 +28,11 @@ pub const LEGACY_UI_KEYS: &[&str] = &[
     "history_page_size",
 ];
 
-pub fn get_setting(conn: &Connection, namespace: &str, key: &str) -> DbResult<Option<SettingEntry>> {
+pub fn get_setting(
+    conn: &Connection,
+    namespace: &str,
+    key: &str,
+) -> DbResult<Option<SettingEntry>> {
     let mut stmt = conn.prepare(
         "SELECT namespace, key, value_json, updated_at FROM settings WHERE namespace = ?1 AND key = ?2",
     )?;
@@ -46,10 +52,7 @@ pub fn get_setting(conn: &Connection, namespace: &str, key: &str) -> DbResult<Op
     }
 }
 
-pub fn list_settings(
-    conn: &Connection,
-    namespace: Option<&str>,
-) -> DbResult<Vec<SettingEntry>> {
+pub fn list_settings(conn: &Connection, namespace: Option<&str>) -> DbResult<Vec<SettingEntry>> {
     let mut out = Vec::new();
     if let Some(ns) = namespace {
         let mut stmt = conn.prepare(
@@ -89,8 +92,7 @@ pub fn upsert_setting(
         ));
     }
     let now = chrono::Utc::now().to_rfc3339();
-    let value_json =
-        serde_json::to_string(value).map_err(|e| DbError::Message(e.to_string()))?;
+    let value_json = serde_json::to_string(value).map_err(|e| DbError::Message(e.to_string()))?;
     conn.execute(
         "INSERT INTO settings (namespace, key, value_json, updated_at)
          VALUES (?1, ?2, ?3, ?4)
@@ -115,6 +117,89 @@ pub fn delete_setting(conn: &Connection, namespace: &str, key: &str) -> DbResult
     Ok(n > 0)
 }
 
+pub fn list_ai_configs(conn: &Connection) -> DbResult<Vec<AiConfigDto>> {
+    let default_id = get_setting(conn, NS_AI, AI_DEFAULT_ID)?
+        .and_then(|entry| entry.value.as_str().map(str::to_owned));
+    let refs = list_secret_refs(conn)?;
+    let mut configs = Vec::new();
+    for entry in list_settings(conn, Some(NS_AI))? {
+        if !entry.key.starts_with(AI_CONFIG_PREFIX) {
+            continue;
+        }
+        let mut config: AiConfigDto = serde_json::from_value(entry.value)
+            .map_err(|e| DbError::Validation(format!("AI config json: {e}")))?;
+        config.is_default = default_id.as_deref() == Some(config.id.as_str());
+        config.has_secret = refs
+            .iter()
+            .any(|item| item.name == ai_secret_name(&config.id));
+        configs.push(config);
+    }
+    configs.sort_by(|a, b| a.config_name.cmp(&b.config_name).then(a.id.cmp(&b.id)));
+    Ok(configs)
+}
+
+pub fn upsert_ai_config(conn: &Connection, config: &AiConfigDto) -> DbResult<()> {
+    let mut stored = config.clone();
+    stored.is_default = false;
+    stored.has_secret = false;
+    let value = serde_json::to_value(stored).map_err(|e| DbError::Message(e.to_string()))?;
+    upsert_setting(
+        conn,
+        NS_AI,
+        &format!("{AI_CONFIG_PREFIX}{}", config.id),
+        &value,
+    )?;
+    Ok(())
+}
+
+pub fn delete_ai_config(conn: &Connection, id: &str) -> DbResult<bool> {
+    delete_setting(conn, NS_AI, &format!("{AI_CONFIG_PREFIX}{id}"))
+}
+
+pub fn set_default_ai_config(conn: &Connection, config: Option<&AiConfigDto>) -> DbResult<()> {
+    match config {
+        Some(config) => {
+            upsert_setting(
+                conn,
+                NS_AI,
+                AI_DEFAULT_ID,
+                &Value::String(config.id.clone()),
+            )?;
+            write_ai_runtime_value(conn, "provider", &Value::String("openai-compatible".into()))?;
+            write_ai_runtime_value(conn, "baseUrl", &Value::String(config.base_url.clone()))?;
+            write_ai_runtime_value(conn, "model", &Value::String(config.default_model.clone()))?;
+            write_ai_runtime_value(
+                conn,
+                "secretName",
+                &Value::String(ai_secret_name(&config.id)),
+            )?;
+        }
+        None => {
+            delete_setting(conn, NS_AI, AI_DEFAULT_ID)?;
+            write_ai_runtime_value(conn, "provider", &Value::String("deterministic".into()))?;
+            for key in ["baseUrl", "model", "secretName"] {
+                delete_setting(conn, NS_AI, key)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn ai_secret_name(id: &str) -> String {
+    format!("ai.config.{id}")
+}
+
+fn write_ai_runtime_value(conn: &Connection, key: &str, value: &Value) -> DbResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let value_json = serde_json::to_string(value).map_err(|e| DbError::Message(e.to_string()))?;
+    conn.execute(
+        "INSERT INTO settings (namespace, key, value_json, updated_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(namespace, key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at",
+        params![NS_AI, key, value_json, now],
+    )?;
+    Ok(())
+}
+
 /// Import a flat localStorage map into ui/practice namespaces.
 pub fn migrate_local_storage_prefs(
     conn: &Connection,
@@ -130,7 +215,9 @@ pub fn migrate_local_storage_prefs(
             || key.starts_with("theme")
         {
             NS_UI
-        } else if key.starts_with("practice") || key.starts_with("reading") || key.starts_with("writing")
+        } else if key.starts_with("practice")
+            || key.starts_with("reading")
+            || key.starts_with("writing")
         {
             NS_PRACTICE
         } else {
@@ -237,4 +324,81 @@ fn looks_like_secret_payload(namespace: &str, key: &str, value: &Value) -> bool 
         return obj.keys().any(|k| key_looks_like_secret(k));
     }
     false
+}
+
+#[cfg(test)]
+mod ai_config_tests {
+    use super::*;
+    use ielts_domain::dto::AiConfigDto;
+
+    fn connection() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (
+                namespace TEXT NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL, PRIMARY KEY(namespace, key)
+            );",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn config(id: &str) -> AiConfigDto {
+        AiConfigDto {
+            id: id.into(),
+            config_name: "OpenRouter".into(),
+            provider: "openrouter".into(),
+            base_url: "https://openrouter.ai/api/v1".into(),
+            default_model: "openai/gpt-4.1-mini".into(),
+            is_default: false,
+            is_enabled: true,
+            has_secret: true,
+        }
+    }
+
+    #[test]
+    fn metadata_never_persists_secret_material() {
+        let conn = connection();
+        upsert_ai_config(&conn, &config("primary")).unwrap();
+        let raw: String = conn
+            .query_row(
+                "SELECT value_json FROM settings WHERE namespace='ai' AND key='config:primary'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!raw.contains("apiKey"));
+        assert!(!raw.contains("secretName"));
+        assert!(raw.contains("\"hasSecret\":false"));
+    }
+
+    #[test]
+    fn default_config_drives_the_single_runtime_settings() {
+        let conn = connection();
+        let value = config("primary");
+        upsert_ai_config(&conn, &value).unwrap();
+        set_default_ai_config(&conn, Some(&value)).unwrap();
+        assert_eq!(
+            get_setting(&conn, NS_AI, "provider")
+                .unwrap()
+                .unwrap()
+                .value,
+            Value::String("openai-compatible".into())
+        );
+        assert_eq!(
+            get_setting(&conn, NS_AI, "baseUrl").unwrap().unwrap().value,
+            Value::String(value.base_url)
+        );
+        assert_eq!(
+            get_setting(&conn, NS_AI, "model").unwrap().unwrap().value,
+            Value::String(value.default_model)
+        );
+        assert_eq!(
+            get_setting(&conn, NS_AI, "secretName")
+                .unwrap()
+                .unwrap()
+                .value,
+            Value::String("ai.config.primary".into())
+        );
+    }
 }

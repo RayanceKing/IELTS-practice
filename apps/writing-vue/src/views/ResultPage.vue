@@ -242,7 +242,7 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { essays as essaysApi } from '@/api/client.js'
 import {
   BAND_RATIONALE_LABELS,
@@ -259,7 +259,6 @@ const props = defineProps({
 })
 
 const router = useRouter()
-const route = useRoute()
 
 const viewMode = ref('full')
 const expandedSentences = ref(new Set([0, 1, 2]))
@@ -310,12 +309,11 @@ onMounted(() => {
 })
 
 async function loadResult() {
-  const essayId = route.query.essayId ? Number(route.query.essayId) : null
-
-  if (essayId) {
-    try {
-      const detail = await essaysApi.getById(essayId)
-      const evaluationView = buildEvaluationView(detail.evaluation_json, {
+  try {
+      const detail = await essaysApi.getById(props.sessionId)
+      if (!detail) throw new Error('writing attempt not found')
+      const evaluation = detail.evaluation || detail.evaluation_json || null
+      const evaluationView = buildEvaluationView(evaluation?.result || evaluation?.result_json || evaluation, {
         score: {
           total_score: detail.total_score,
           task_achievement: detail.task_achievement,
@@ -334,19 +332,8 @@ async function loadResult() {
       essayWordCount.value = detail.word_count || 0
       applyEvaluationView(evaluationView)
       return
-    } catch (error) {
-      console.warn('从数据库加载结果失败，降级读取 sessionStorage', error)
-    }
-  }
-
-  const stored = sessionStorage.getItem(`evaluation_${props.sessionId}`)
-  if (stored) {
-    try {
-      applyEvaluationView(buildEvaluationView(JSON.parse(stored)))
-      return
-    } catch (error) {
-      console.warn('sessionStorage 结果解析失败，返回写作页', error)
-    }
+  } catch (error) {
+    console.warn('从 SQLite 加载结果失败，返回写作页', error)
   }
 
   router.replace({ name: 'Compose' })
@@ -431,7 +418,6 @@ function collapseAll() {
 }
 
 function writeNew() {
-  sessionStorage.removeItem(`evaluation_${props.sessionId}`)
   router.push({ name: 'Compose' })
 }
 </script>

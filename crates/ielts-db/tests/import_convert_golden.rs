@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::PathBuf;
 
-use ielts_db::import::{assert_no_legacy_aliases, evaluation_v3_to_v4, reading_archive_to_attempts};
-use ielts_domain::domain::{
-    Activity, AttemptMode, AttemptStatus, EvaluationStatus, ScoreScale,
+use ielts_db::import::{
+    assert_no_legacy_aliases, evaluation_v3_to_v4, reading_archive_to_attempts,
 };
+use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, EvaluationStatus, ScoreScale};
 use ielts_domain::view::{history_item_from_attempt, writing_result_from_evaluation};
 use serde_json::Value;
 
@@ -88,9 +88,8 @@ fn evaluation_v3_failed_has_error_no_score() {
 
 #[test]
 fn reading_archive_to_attempt_preserves_title_score_answers_marks() {
-    let archive = load_json(
-        "tests/fixtures/legacy-data/reading-archive/reading-archive-v1-sample.json",
-    );
+    let archive =
+        load_json("tests/fixtures/legacy-data/reading-archive/reading-archive-v1-sample.json");
     let attempts = reading_archive_to_attempts(&archive).expect("convert archive");
     assert_eq!(attempts.len(), 1);
     let attempt = &attempts[0];

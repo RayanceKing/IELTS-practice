@@ -22,8 +22,7 @@ pub fn evaluation_v3_to_v4(raw: &Value) -> DomainResult<WritingEvaluationV4> {
     }
 
     let failed = matches_str(raw.get("status"), &["failed", "error"])
-        || raw.get("error").map(|e| !e.is_null()).unwrap_or(false)
-            && raw_score_missing(raw);
+        || raw.get("error").map(|e| !e.is_null()).unwrap_or(false) && raw_score_missing(raw);
 
     let degraded = bool_flag(raw, "review_degraded")
         || bool_flag_path(raw, &["review", "review_degraded"])
@@ -53,18 +52,13 @@ pub fn evaluation_v3_to_v4(raw: &Value) -> DomainResult<WritingEvaluationV4> {
                             .and_then(|m| m.as_str())
                             .unwrap_or("evaluation failed")
                             .to_string(),
-                        retryable: e
-                            .get("retryable")
-                            .and_then(|r| r.as_bool())
-                            .unwrap_or(true),
+                        retryable: e.get("retryable").and_then(|r| r.as_bool()).unwrap_or(true),
                         context: None,
                         cause_id: None,
                     })
                 }
             })
-            .unwrap_or_else(|| {
-                ErrorEnvelope::new("evaluation.failed", "evaluation failed", true)
-            });
+            .unwrap_or_else(|| ErrorEnvelope::new("evaluation.failed", "evaluation failed", true));
 
         return Ok(WritingEvaluationV4 {
             schema_version: WritingEvaluationV4::SCHEMA_VERSION,
@@ -98,10 +92,7 @@ pub fn evaluation_v3_to_v4(raw: &Value) -> DomainResult<WritingEvaluationV4> {
         Some(EvaluationDegradation {
             stage: EvaluationStage::Reviewing,
             reason: "stage-2 review degraded; scores and plan retained".into(),
-            missing: vec![
-                "feedback.paragraphs".into(),
-                "feedback.sentences".into(),
-            ],
+            missing: vec!["feedback.paragraphs".into(), "feedback.sentences".into()],
         })
     } else {
         None
@@ -340,8 +331,7 @@ fn matches_str(value: Option<&Value>, options: &[&str]) -> bool {
 
 /// Guard: v4 JSON must not contain known legacy alias keys at the top level.
 pub fn assert_no_legacy_aliases(v4: &WritingEvaluationV4) -> DomainResult<()> {
-    let value = serde_json::to_value(v4)
-        .map_err(|e| DomainError::InvalidPayload(e.to_string()))?;
+    let value = serde_json::to_value(v4).map_err(|e| DomainError::InvalidPayload(e.to_string()))?;
     let obj = value
         .as_object()
         .ok_or_else(|| DomainError::InvalidPayload("v4 must serialize to object".into()))?;

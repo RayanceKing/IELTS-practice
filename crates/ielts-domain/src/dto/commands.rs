@@ -11,7 +11,11 @@ use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct CommandResponse<T> {
     pub ok: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,7 +44,11 @@ impl<T> CommandResponse<T> {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct ListHistoryQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity: Option<Activity>,
@@ -72,7 +80,11 @@ fn default_offset() -> u32 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct ListHistoryPage {
     pub items: Vec<crate::HistoryListItemVm>,
     pub total: u32,
@@ -84,7 +96,11 @@ pub struct ListHistoryPage {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct HistoryDetailResponse {
     pub summary: crate::HistoryListItemVm,
     pub attempt: AttemptRecord,
@@ -94,7 +110,11 @@ pub struct HistoryDetailResponse {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub enum HistoryExportFormat {
     Csv,
     Markdown,
@@ -103,7 +123,11 @@ pub enum HistoryExportFormat {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct ExportHistoryCommand {
     pub format: HistoryExportFormat,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -112,7 +136,11 @@ pub struct ExportHistoryCommand {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct ExportHistoryResult {
     pub format: HistoryExportFormat,
     pub body: String,
@@ -121,7 +149,11 @@ pub struct ExportHistoryResult {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct SettingEntry {
     pub namespace: String,
     pub key: String,
@@ -131,7 +163,11 @@ pub struct SettingEntry {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct UpsertSettingCommand {
     pub namespace: String,
     pub key: String,
@@ -140,7 +176,11 @@ pub struct UpsertSettingCommand {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct SecretRef {
     /// Logical name, e.g. "writing.openai.api_key"
     pub name: String,
@@ -151,7 +191,11 @@ pub struct SecretRef {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct SetSecretCommand {
     pub name: String,
     pub secret: String,
@@ -159,7 +203,44 @@ pub struct SetSecretCommand {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+pub struct AiConfigDto {
+    pub id: String,
+    pub config_name: String,
+    pub provider: String,
+    pub base_url: String,
+    pub default_model: String,
+    pub is_default: bool,
+    pub is_enabled: bool,
+    pub has_secret: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiUpsertConfigCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub config_name: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    pub default_model: String,
+    #[serde(default = "default_true")]
+    pub is_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct BackupManifest {
     pub schema_version: u32,
     pub created_at: String,
@@ -173,7 +254,11 @@ pub struct BackupManifest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct BackupPackage {
     pub manifest: BackupManifest,
     pub attempts: Vec<AttemptRecord>,
@@ -184,7 +269,11 @@ pub struct BackupPackage {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct ImportBackupReport {
     pub dry_run: bool,
     pub ok: bool,
@@ -197,7 +286,11 @@ pub struct ImportBackupReport {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct SaveDraftCommand {
     pub attempt_id: String,
     pub activity: Activity,
@@ -214,7 +307,11 @@ pub struct SaveDraftCommand {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct SubmitAttemptCommand {
     pub attempt_id: String,
     pub idempotency_key: String,
@@ -222,7 +319,11 @@ pub struct SubmitAttemptCommand {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct GetAttemptResponse {
     pub attempt: AttemptRecord,
     #[serde(default, skip_serializing_if = "Option::is_none")]

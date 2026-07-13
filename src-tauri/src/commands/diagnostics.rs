@@ -1,5 +1,6 @@
 use serde::Serialize;
 use tauri::State;
+use tauri_plugin_updater::UpdaterExt;
 
 use crate::app::state::AppPaths;
 
@@ -24,6 +25,49 @@ pub struct StartupDiagnostics {
     pub legacy_data_dirs: Vec<String>,
     pub fastify_enabled: bool,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdaterStatus {
+    pub configured: bool,
+    pub update_available: bool,
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub message: String,
+}
+
+#[tauri::command]
+pub async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdaterStatus, String> {
+    let config: serde_json::Value = serde_json::from_str(include_str!("../../tauri.conf.json"))
+        .map_err(|error| format!("invalid updater configuration: {error}"))?;
+    let updater = &config["plugins"]["updater"];
+    let configured = updater["active"].as_bool().unwrap_or(false)
+        && updater["endpoints"].as_array().is_some_and(|items| !items.is_empty())
+        && updater["pubkey"].as_str().is_some_and(|key| !key.trim().is_empty());
+    if !configured {
+        return Ok(UpdaterStatus {
+            configured,
+            update_available: false,
+            current_version: env!("CARGO_PKG_VERSION").into(),
+            latest_version: None,
+            message: "自动更新尚未配置发布端点和签名公钥。".into(),
+        });
+    }
+
+    let update = app
+        .updater()
+        .map_err(|error| error.to_string())?
+        .check()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(UpdaterStatus {
+        configured,
+        update_available: update.is_some(),
+        current_version: env!("CARGO_PKG_VERSION").into(),
+        latest_version: update.map(|item| item.version),
+        message: "更新检查完成。".into(),
+    })
 }
 
 #[tauri::command]

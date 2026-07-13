@@ -11,7 +11,11 @@ use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub struct HistoryListItemVm {
     pub id: String,
     pub activity: Activity,
@@ -30,7 +34,11 @@ pub struct HistoryListItemVm {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub struct WritingResultVm {
     pub attempt_id: String,
     pub title: String,
@@ -47,15 +55,16 @@ pub struct WritingResultVm {
 }
 
 pub fn history_item_from_attempt(attempt: &AttemptRecord) -> HistoryListItemVm {
-    let (score_label, score_display) = match (attempt.activity, attempt.score_value, attempt.score_scale) {
-        (Activity::Reading, Some(v), _) => {
-            let pct = (v * 100.0).round();
-            ("Accuracy".to_string(), format!("{pct:.0}%"))
-        }
-        (Activity::Writing, Some(v), _) => ("Overall Band".to_string(), format!("{v:.1}")),
-        (Activity::Reading, None, _) => ("Accuracy".to_string(), "—".to_string()),
-        (Activity::Writing, None, _) => ("Overall Band".to_string(), "—".to_string()),
-    };
+    let (score_label, score_display) =
+        match (attempt.activity, attempt.score_value, attempt.score_scale) {
+            (Activity::Reading, Some(v), _) => {
+                let pct = (v * 100.0).round();
+                ("Accuracy".to_string(), format!("{pct:.0}%"))
+            }
+            (Activity::Writing, Some(v), _) => ("Overall Band".to_string(), format!("{v:.1}")),
+            (Activity::Reading, None, _) => ("Accuracy".to_string(), "—".to_string()),
+            (Activity::Writing, None, _) => ("Overall Band".to_string(), "—".to_string()),
+        };
 
     HistoryListItemVm {
         id: attempt.id.clone(),
@@ -83,13 +92,12 @@ pub fn writing_result_from_evaluation(
     WritingResultVm {
         attempt_id: attempt_id.into(),
         title: title.into(),
-        task_type: evaluation.task_type.map(|t| format!("{t:?}").to_ascii_lowercase()),
+        task_type: evaluation
+            .task_type
+            .map(|t| format!("{t:?}").to_ascii_lowercase()),
         status: evaluation.status,
         score: evaluation.score.clone(),
-        overall_feedback: evaluation
-            .feedback
-            .as_ref()
-            .and_then(|f| f.overall.clone()),
+        overall_feedback: evaluation.feedback.as_ref().and_then(|f| f.overall.clone()),
         plan: evaluation
             .feedback
             .as_ref()
@@ -107,10 +115,7 @@ pub fn writing_result_from_evaluation(
             .unwrap_or(0),
         degraded: evaluation.degradation.is_some()
             || matches!(evaluation.status, EvaluationStatus::Degraded),
-        degradation_reason: evaluation
-            .degradation
-            .as_ref()
-            .map(|d| d.reason.clone()),
+        degradation_reason: evaluation.degradation.as_ref().map(|d| d.reason.clone()),
         error_message: evaluation.error.as_ref().map(|e| e.message.clone()),
     }
 }

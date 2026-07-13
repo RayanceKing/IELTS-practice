@@ -9,9 +9,9 @@ use ielts_db::{
     advance_endless, cancel_suite, create_endless_session, create_memorize_session,
     create_suite_session, finish_memorize_session, get_endless_session, get_suite_session,
     submit_endless_passage, submit_suite_passage, AdvanceEndlessCommand, CreateEndlessCommand,
-    CreateMemorizeCommand, CreateSuiteCommand, EndlessSession, MemorizeSession, ReadingSuiteSession,
-    SubmitEndlessCommand, SubmitEndlessResult, SubmitSuitePassageCommand, SubmitSuitePassageResult,
-    TimerState,
+    CreateMemorizeCommand, CreateSuiteCommand, EndlessSession, MemorizeSession,
+    ReadingSuiteSession, SubmitEndlessCommand, SubmitEndlessResult, SubmitSuitePassageCommand,
+    SubmitSuitePassageResult, TimerState,
 };
 
 fn map_err(err: ielts_db::DbError) -> ErrorEnvelope {
@@ -55,7 +55,10 @@ pub fn suite_submit_passage(
 }
 
 #[tauri::command]
-pub fn suite_cancel(db: State<'_, AppDb>, suite_id: String) -> CommandResponse<ReadingSuiteSession> {
+pub fn suite_cancel(
+    db: State<'_, AppDb>,
+    suite_id: String,
+) -> CommandResponse<ReadingSuiteSession> {
     match db.with_conn(|conn| cancel_suite(conn, &suite_id)) {
         Ok(v) => CommandResponse::success(v),
         Err(e) => CommandResponse::failure(map_err(e)),

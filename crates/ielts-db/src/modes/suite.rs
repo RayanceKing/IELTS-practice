@@ -8,9 +8,7 @@ use uuid::Uuid;
 use ielts_domain::domain::{AttemptMode, SuiteFlowMode, SuiteStatus};
 
 use crate::modes::timer::{TimerMode, TimerState};
-use crate::reading::attempt::{
-    submit_reading_attempt, ReadingSubmitCommand, ReadingSubmitResult,
-};
+use crate::reading::attempt::{submit_reading_attempt, ReadingSubmitCommand, ReadingSubmitResult};
 use crate::sqlite::{DbError, DbResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -232,22 +230,20 @@ fn recompute_aggregate(sequence: &[SuitePassageEntry]) -> SuiteAggregate {
         }
         submitted += 1;
         if let Some(score) = &entry.score_info {
-            correct += score
-                .get("correct")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
+            correct += score.get("correct").and_then(|v| v.as_f64()).unwrap_or(0.0);
             total_q += score
                 .get("totalQuestions")
                 .or_else(|| score.get("total"))
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
-            duration += score
-                .get("duration")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            duration += score.get("duration").and_then(|v| v.as_u64()).unwrap_or(0);
         }
     }
-    let accuracy = if total_q > 0.0 { correct / total_q } else { 0.0 };
+    let accuracy = if total_q > 0.0 {
+        correct / total_q
+    } else {
+        0.0
+    };
     SuiteAggregate {
         submitted_passages: submitted,
         total_passages: sequence.len() as u32,
@@ -303,10 +299,7 @@ pub fn create_suite_session(
                 index: i as u32,
                 asset_id: seed.asset_id.clone(),
                 exam_id: seed.asset_id.clone(),
-                title: seed
-                    .title
-                    .clone()
-                    .unwrap_or_else(|| seed.asset_id.clone()),
+                title: seed.title.clone().unwrap_or_else(|| seed.asset_id.clone()),
                 category: cat,
                 status: if i == 0 {
                     PassageStatus::Active
@@ -374,7 +367,8 @@ pub fn submit_suite_passage(
 
     // Simulation/stationary: must submit current index only.
     // Classic still advances from current_index for aggregate correctness.
-    if session.flow_mode != SuiteFlowMode::Classic && passage_index as u32 != session.current_index {
+    if session.flow_mode != SuiteFlowMode::Classic && passage_index as u32 != session.current_index
+    {
         return Err(DbError::Validation(
             "submit the active suite passage before moving on".into(),
         ));
@@ -468,7 +462,8 @@ pub fn cancel_suite(conn: &Connection, suite_id: &str) -> DbResult<ReadingSuiteS
 }
 
 fn persist_suite(conn: &Connection, session: &ReadingSuiteSession) -> DbResult<()> {
-    let timer_json = serde_json::to_string(&session.timer).map_err(|e| DbError::Message(e.to_string()))?;
+    let timer_json =
+        serde_json::to_string(&session.timer).map_err(|e| DbError::Message(e.to_string()))?;
     let agg_json =
         serde_json::to_string(&session.aggregate).map_err(|e| DbError::Message(e.to_string()))?;
     conn.execute(
@@ -505,10 +500,7 @@ fn persist_suite(conn: &Connection, session: &ReadingSuiteSession) -> DbResult<(
         params![session.session_id],
     )?;
     for entry in &session.sequence {
-        let score_json = entry
-            .score_info
-            .as_ref()
-            .map(|v| v.to_string());
+        let score_json = entry.score_info.as_ref().map(|v| v.to_string());
         conn.execute(
             "INSERT INTO reading_suite_items (
                 suite_id, item_index, asset_id, attempt_id, status, title, category, submitted_at, score_json

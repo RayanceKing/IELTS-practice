@@ -4,6 +4,7 @@
 
 import {
   listReadingAssets,
+  getReadingAssetPayload,
   saveReadingDraft,
   submitReadingAttempt,
   newKey as readingKey
@@ -22,9 +23,7 @@ import {
 } from '@/api/history-repository.js'
 import {
   ensureCoachThread,
-  appendCoachMessage,
-  listCoachMessages,
-  recordCoachFailure
+  listCoachMessages
 } from '@/api/enrichment-repository.js'
 import { invokeCommand, unwrapCommandResponse } from '@/api/tauri-bridge.js'
 
@@ -60,19 +59,20 @@ export const practiceAssets = {
   },
 
   async get(activity, assetId, options = {}) {
+    const normalizedAssetId = String(assetId || '').trim()
     const { items } = await listReadingAssets()
-    const meta = (items || []).find((item) => String(item.id) === String(assetId)) || null
-    // Full payload load is not yet a dedicated command; return index entry.
-    // Callers that need answerKey must supply payload at submit time or import assets.
+    const meta = (items || []).find((item) => String(item.id) === normalizedAssetId) || null
     if (!meta) {
       const err = new Error(`asset not found: ${assetId}`)
       err.code = 'not_found'
       throw err
     }
+    const payload = await getReadingAssetPayload(normalizedAssetId)
     return {
       ...meta,
       activity: activity || 'reading',
-      refresh: !!options.refresh
+      refresh: !!options.refresh,
+      payload
     }
   }
 }
@@ -222,35 +222,49 @@ export const practiceCoach = {
     }
 
     const userText = payload?.question || payload?.message || payload?.text || ''
-    if (userText) {
-      await appendCoachMessage({
-        threadId,
-        role: 'user',
-        content: userText
-      })
+    if (!String(userText).trim()) {
+      const error = new Error('阅读教练问题不能为空')
+      error.code = 'coach.empty_question'
+      throw error
     }
 
-    // No LLM stream on product path yet — surface explicit thread state.
-    const { items } = await listCoachMessages(threadId, 0, 100)
-    if (typeof options.onEvent === 'function') {
-      try {
-        options.onEvent({
-          event: 'complete',
-          data: {
-            threadId,
-            messages: items,
-            message: 'Coach stream not wired to LLM provider on Tauri path yet'
-          }
-        })
-      } catch (_) {
-        // ignore listener errors
-      }
+    const notify = (event, data = {}) => {
+      if (typeof options.onEvent !== 'function') return
+      options.onEvent({ event, data })
     }
-    return {
-      threadId,
-      messages: items,
-      degraded: true,
-      message: 'Coach stream not wired to LLM provider on Tauri path yet'
+
+    notify('start', { threadId })
+    try {
+      notify('generation_start', { threadId })
+      const response = await invokeCommand('coach_run', {
+        cmd: {
+          threadId,
+          content: String(userText).trim(),
+          questionContext: {
+            ...payload,
+            activity: activity || 'reading',
+            sessionId: sessionId || null
+          }
+        }
+      })
+      const result = unwrapCommandResponse(response, 'coach_run') || {}
+      const answer = String(result.assistantMessage?.content || '').trim()
+      if (!answer) {
+        const error = new Error('阅读教练未返回有效回答')
+        error.code = 'invalid_response_format'
+        throw error
+      }
+      const { items } = await listCoachMessages(threadId, 0, 100)
+      notify('generation_complete', { threadId })
+      notify('complete', { ...result, threadId, messages: items, answer })
+      return { ...result, threadId, messages: items, answer, degraded: false }
+    } catch (error) {
+      notify('error', {
+        threadId,
+        code: error?.code || 'coach.error',
+        message: error?.message || '阅读教练请求失败'
+      })
+      throw error
     }
   }
 }

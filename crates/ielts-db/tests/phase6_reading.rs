@@ -4,9 +4,9 @@ use serde_json::json;
 use tempfile::tempdir;
 
 use ielts_db::{
-    compare_answer, migrate, open_connection, patch_reading_answer, save_reading_draft,
-    score_attempt, submit_reading_attempt, DbOpenOptions, MatchMode, ReadingDraftCommand,
-    ReadingSubmitCommand,
+    compare_answer, import_asset_payload_file, load_practice_asset_payload, migrate,
+    open_connection, patch_reading_answer, save_reading_draft, score_attempt,
+    submit_reading_attempt, DbOpenOptions, MatchMode, ReadingDraftCommand, ReadingSubmitCommand,
 };
 
 fn open_db() -> (tempfile::TempDir, rusqlite::Connection) {
@@ -14,6 +14,30 @@ fn open_db() -> (tempfile::TempDir, rusqlite::Connection) {
     let mut conn = open_connection(&DbOpenOptions::create(dir.path().join("v2.db"))).unwrap();
     migrate(&mut conn).unwrap();
     (dir, conn)
+}
+
+#[test]
+fn complete_asset_payload_is_loaded_and_verified() {
+    let (dir, conn) = open_db();
+    let path = dir.path().join("p1-demo.json");
+    std::fs::write(&path, serde_json::to_vec(&sample_payload()).unwrap()).unwrap();
+    import_asset_payload_file(&conn, &path).unwrap();
+
+    let loaded = load_practice_asset_payload(&conn, "p1-demo").unwrap();
+    assert_eq!(loaded.asset.id, "p1-demo");
+    assert_eq!(loaded.asset.content_ref.as_deref(), path.to_str());
+    assert_eq!(loaded.payload["questionCount"], 4);
+
+    std::fs::write(&path, br#"{"examId":"p1-demo","questionCount":99}"#).unwrap();
+    let err = load_practice_asset_payload(&conn, "p1-demo").unwrap_err();
+    assert!(err.to_string().contains("fingerprint mismatch"));
+}
+
+#[test]
+fn complete_asset_payload_rejects_missing_index_entry() {
+    let (_dir, conn) = open_db();
+    let err = load_practice_asset_payload(&conn, "missing").unwrap_err();
+    assert!(err.to_string().contains("asset not found"));
 }
 
 fn sample_payload() -> serde_json::Value {
@@ -49,11 +73,7 @@ fn scoring_parity_aliases_and_modes() {
     assert_eq!(ok, Some(true));
     assert_eq!(mode, MatchMode::Alternatives);
 
-    let (ok, _, _, mode) = compare_answer(
-        &json!(["D", "A"]),
-        &json!(["A", "D"]),
-        Some("checkbox"),
-    );
+    let (ok, _, _, mode) = compare_answer(&json!(["D", "A"]), &json!(["A", "D"]), Some("checkbox"));
     assert_eq!(ok, Some(true));
     assert_eq!(mode, MatchMode::Set);
 }
@@ -100,7 +120,10 @@ fn draft_patch_and_idempotent_submit() {
 
     assert!(!result.idempotent_replay);
     assert!(result.score.accuracy > 0.9);
-    assert_eq!(result.attempt.status, ielts_domain::AttemptStatus::Completed);
+    assert_eq!(
+        result.attempt.status,
+        ielts_domain::AttemptStatus::Completed
+    );
     assert!(result.attempt.answers.iter().any(|a| a.marked));
 
     let replay = submit_reading_attempt(
@@ -122,7 +145,9 @@ fn draft_patch_and_idempotent_submit() {
 
     // only one history row
     let n: i64 = conn
-        .query_row("SELECT COUNT(*) FROM attempts WHERE id = 'r-1'", [], |r| r.get(0))
+        .query_row("SELECT COUNT(*) FROM attempts WHERE id = 'r-1'", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(n, 1);
 }

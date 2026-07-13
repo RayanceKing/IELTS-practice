@@ -15,4 +15,9 @@
 ## Known issues
 
 - Code signing / updater endpoints require secrets not shipped in-repo.
+- Real AI, packaged resource parity, complete accessibility/visual evidence and updater rollback are not yet release-accepted.
 - Legacy Electron packages are no longer built from this tree.
+
+## Verification policy
+
+The release workflow must pass the static shipping suite and packaged Tauri WebView flow before platform builds. Each platform artifact includes a SHA-256 bundle manifest; an empty bundle fails the release.

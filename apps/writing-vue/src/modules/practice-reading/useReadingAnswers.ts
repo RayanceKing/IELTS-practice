@@ -1,17 +1,44 @@
-import { computed, reactive, unref } from 'vue'
+import { computed, reactive, unref, type MaybeRefOrGetter } from 'vue'
 
-function resolvePayload(source) {
+export type ReadingAnswerValue = string | string[]
+
+interface ReadingPayload {
+  questionOrder?: string[]
+  answerKey?: Record<string, unknown>
+}
+
+interface AnswerMutationOptions {
+  track?: boolean
+  syncNative?: boolean
+}
+
+interface ReadingAnswersOptions {
+  payloadSource?: MaybeRefOrGetter<ReadingPayload | null | undefined>
+  readOnlySource?: MaybeRefOrGetter<boolean | undefined>
+  onTrack?: (questionId: string, previousFingerprint: string, nextFingerprint: string) => void
+  onSyncNative?: (questionId: string) => void
+  onMutate?: (questionId: string, value: ReadingAnswerValue, metadata: {
+    changed: boolean
+    previousFingerprint: string
+    nextFingerprint: string
+    options: AnswerMutationOptions
+  }) => void
+}
+
+interface InitializeAnswerOptions { prefillAnswerKey?: boolean }
+
+function resolvePayload(source?: MaybeRefOrGetter<ReadingPayload | null | undefined>) {
   if (typeof source === 'function') {
     return source()
   }
   return unref(source)
 }
 
-function getQuestionOrder(readingPayload) {
+function getQuestionOrder(readingPayload?: ReadingPayload | null): string[] {
   return Array.isArray(readingPayload?.questionOrder) ? readingPayload.questionOrder : []
 }
 
-export function cloneAnswerValue(value) {
+export function cloneAnswerValue(value: unknown): ReadingAnswerValue {
   if (Array.isArray(value)) {
     return value.map((entry) => String(entry || '').trim()).filter(Boolean)
   }
@@ -21,15 +48,15 @@ export function cloneAnswerValue(value) {
   return String(value).trim()
 }
 
-export function getAnswerFingerprint(value) {
+export function getAnswerFingerprint(value: unknown): string {
   if (Array.isArray(value)) {
     return value.map((entry) => String(entry || '').trim()).filter(Boolean).sort().join('|')
   }
   return String(value || '').trim()
 }
 
-export function useReadingAnswers(options = {}) {
-  const answers = reactive({})
+export function useReadingAnswers(options: ReadingAnswersOptions = {}) {
+  const answers = reactive<Record<string, ReadingAnswerValue>>({})
   const readingPayload = computed(() => resolvePayload(options.payloadSource))
   const questionOrder = computed(() => getQuestionOrder(readingPayload.value))
   const answeredCount = computed(() => questionOrder.value.filter((questionId) => hasAnswer(questionId)).length)
@@ -40,34 +67,35 @@ export function useReadingAnswers(options = {}) {
     })
   }
 
-  function initializeAnswers(payload = readingPayload.value, initOptions = {}) {
+  function initializeAnswers(payload = readingPayload.value, initOptions: InitializeAnswerOptions = {}) {
     clearAnswers()
     const order = getQuestionOrder(payload)
     order.forEach((questionId) => {
       answers[questionId] = ''
     })
-    if (initOptions.prefillAnswerKey && payload?.answerKey && typeof payload.answerKey === 'object') {
+    const answerKey = payload?.answerKey
+    if (initOptions.prefillAnswerKey && answerKey) {
       order.forEach((questionId) => {
-        answers[questionId] = cloneAnswerValue(payload.answerKey[questionId])
+        answers[questionId] = cloneAnswerValue(answerKey[questionId])
       })
     }
   }
 
-  function hasQuestion(questionId) {
+  function hasQuestion(questionId: string) {
     return questionOrder.value.includes(questionId)
   }
 
-  function getAnswerValue(questionId) {
+  function getAnswerValue(questionId: string) {
     const value = getRawAnswer(questionId)
     return Array.isArray(value) ? value.join(', ') : String(value || '')
   }
 
-  function hasAnswer(questionId) {
+  function hasAnswer(questionId: string) {
     const value = getRawAnswer(questionId)
     return Array.isArray(value) ? value.length > 0 : String(value || '').trim().length > 0
   }
 
-  function isOptionSelected(questionId, optionValue) {
+  function isOptionSelected(questionId: string, optionValue: unknown) {
     const value = getRawAnswer(questionId)
     const normalizedOption = String(optionValue || '').trim()
     return Array.isArray(value)
@@ -75,11 +103,11 @@ export function useReadingAnswers(options = {}) {
       : String(value || '').trim() === normalizedOption
   }
 
-  function getRawAnswer(questionId) {
+  function getRawAnswer(questionId: string): ReadingAnswerValue {
     return cloneAnswerValue(answers[String(questionId || '').trim()])
   }
 
-  function assignAnswer(questionId, value, assignOptions = {}) {
+  function assignAnswer(questionId: string, value: unknown, assignOptions: AnswerMutationOptions = {}) {
     const normalizedQuestionId = String(questionId || '').trim()
     if (!normalizedQuestionId || !hasQuestion(normalizedQuestionId)) {
       return false
@@ -104,14 +132,14 @@ export function useReadingAnswers(options = {}) {
     return true
   }
 
-  function setAnswer(questionId, value, setOptions = {}) {
+  function setAnswer(questionId: string, value: unknown, setOptions: AnswerMutationOptions = {}) {
     if (unref(options.readOnlySource)) {
       return false
     }
     return assignAnswer(questionId, value, { ...setOptions, track: true })
   }
 
-  function toggleAnswerOption(questionId, optionValue, checked, toggleOptions = {}) {
+  function toggleAnswerOption(questionId: string, optionValue: unknown, checked: boolean, toggleOptions: AnswerMutationOptions = {}) {
     if (unref(options.readOnlySource)) {
       return false
     }

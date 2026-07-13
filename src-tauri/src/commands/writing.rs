@@ -4,12 +4,16 @@ use ielts_domain::dto::{CommandResponse, SaveDraftCommand, SubmitAttemptCommand}
 use ielts_domain::ErrorEnvelope;
 use tauri::State;
 
-use crate::app::state::AppDb;
+use crate::app::state::{AppDb, AppVault};
+use crate::commands::ai::{load_provider_config, load_runtime};
 use ielts_db::{
-    get_writing_draft, list_events, load_evaluation_for_attempt, request_cancel, save_writing_draft,
-    start_evaluation, submit_writing_attempt, DeterministicProvider, EvaluationEvent,
-    EvaluationRunResult, StartEvaluationCommand, WritingDraft,
+    finish_evaluation, get_writing_draft, list_events, load_evaluation_for_attempt,
+    prepare_evaluation, request_cancel, save_writing_draft, start_evaluation,
+    submit_writing_attempt, DeterministicProvider, EvaluationEvent, EvaluationRunResult,
+    StartEvaluationCommand, WritingDraft,
 };
+
+mod openai_provider;
 
 fn map_err(err: ielts_db::DbError) -> ErrorEnvelope {
     ErrorEnvelope {
@@ -55,16 +59,59 @@ pub fn writing_submit_attempt(
 }
 
 #[tauri::command]
-pub fn writing_start_evaluation(
+pub async fn writing_start_evaluation(
     db: State<'_, AppDb>,
+    vault: State<'_, AppVault>,
     cmd: StartEvaluationCommand,
-) -> CommandResponse<EvaluationRunResult> {
-    // Phase 5: deterministic local provider. Real AI providers land with secret vault wiring.
-    let provider = DeterministicProvider;
-    match db.with_conn(|conn| start_evaluation(conn, &cmd, &provider)) {
-        Ok(r) => CommandResponse::success(r),
-        Err(e) => CommandResponse::failure(map_err(e)),
+) -> Result<CommandResponse<EvaluationRunResult>, ErrorEnvelope> {
+    let config = match db.with_conn(load_provider_config) {
+        Ok(config) => config,
+        Err(error) => return Ok(CommandResponse::failure(map_err(error))),
+    };
+
+    if config.provider == "deterministic" {
+        return Ok(
+            match db.with_conn(|conn| start_evaluation(conn, &cmd, &DeterministicProvider)) {
+                Ok(result) => CommandResponse::success(result),
+                Err(error) => CommandResponse::failure(map_err(error)),
+            },
+        );
     }
+
+    let runtime = match load_runtime(&db, &vault) {
+        Ok(runtime) => runtime,
+        Err(error) => return Ok(CommandResponse::failure(map_err(error))),
+    };
+    let prepared = match db
+        .with_conn(|conn| prepare_evaluation(conn, &cmd, &config.provider, &config.model))
+    {
+        Ok(prepared) => prepared,
+        Err(error) => return Ok(CommandResponse::failure(map_err(error))),
+    };
+    if let Some(existing) = prepared.existing.clone() {
+        return Ok(CommandResponse::success(existing));
+    }
+
+    // No SQLite guard exists while this future performs network I/O.
+    let provider_result = openai_provider::evaluate(&runtime, &prepared).await;
+    let result = match provider_result {
+        Ok(output) => db.with_conn(|conn| {
+            finish_evaluation(
+                conn,
+                &prepared,
+                Ok(output.score),
+                Some(output.feedback),
+                None,
+            )
+        }),
+        Err(error) => {
+            db.with_conn(|conn| finish_evaluation(conn, &prepared, Err(error), None, None))
+        }
+    };
+    Ok(match result {
+        Ok(result) => CommandResponse::success(result),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    })
 }
 
 #[tauri::command]

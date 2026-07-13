@@ -153,31 +153,6 @@
       @show-achievements-tool="showAchievementsTool"
     />
 
-    <section id="vocab-view" :class="['view', { active: activeView === 'vocab' }]" data-view="vocab" :hidden="activeView !== 'vocab'">
-      <div class="vocab-view-shell" data-vocab-role="root"></div>
-    </section>
-
-    <div id="achievements-modal" class="theme-modal">
-      <div class="theme-modal-content achievements-modal-content">
-        <div class="theme-modal-header">
-          <h3>🏆 我的成就</h3>
-          <button
-            class="theme-modal-close"
-            type="button"
-            data-index-action="hide-achievements"
-            data-action="hide-achievements"
-            aria-label="关闭"
-            @click="hideAchievementsTool"
-          >
-            ×
-          </button>
-        </div>
-        <div class="theme-modal-body">
-          <div class="achievements-grid" id="achievements-list"></div>
-        </div>
-      </div>
-    </div>
-
     <ReadingSuiteSelector
       :suite-mode-selector-open="suiteModeSelectorOpen"
       :suite-flow-options="suiteFlowOptions"
@@ -190,67 +165,24 @@
 
     <div
       id="fullscreen-clock-overlay"
-      class="clock-overlay is-hidden"
+      :class="['clock-overlay', { 'is-hidden': !clockOpen }]"
       role="dialog"
       aria-modal="true"
       aria-label="全屏时钟"
     >
-      <div class="clock-overlay-inner controls-hidden" data-clock-role="overlay-inner">
-        <button
-          class="clock-action-btn clock-fullscreen-btn"
-          type="button"
-          data-action="toggle-clock-fullscreen"
-          aria-label="切换全屏模式"
-          aria-pressed="false"
-        >
-          <svg class="fullscreen-icon icon-enter" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-            <polyline points="4 9 4 4 9 4"></polyline>
-            <line x1="4" y1="4" x2="10" y2="10"></line>
-            <polyline points="20 15 20 20 15 20"></polyline>
-            <line x1="20" y1="20" x2="14" y2="14"></line>
-          </svg>
-          <svg class="fullscreen-icon icon-exit" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-            <polyline points="15 9 20 9 20 4"></polyline>
-            <line x1="20" y1="4" x2="14" y2="10"></line>
-            <polyline points="9 15 4 15 4 20"></polyline>
-            <line x1="4" y1="20" x2="10" y2="14"></line>
-            <polyline points="20 15 20 20 15 20"></polyline>
-            <line x1="20" y1="20" x2="14" y2="14"></line>
-            <polyline points="4 9 4 4 9 4"></polyline>
-            <line x1="4" y1="4" x2="10" y2="10"></line>
-          </svg>
-        </button>
+      <div class="clock-overlay-inner" data-clock-role="overlay-inner">
         <button
           class="clock-action-btn clock-close-btn"
           type="button"
-          data-action="close-clock"
           aria-label="关闭时钟"
+          @click="closeClockTool"
         >
           <svg class="fullscreen-icon icon-close" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
             <line x1="8" y1="8" x2="16" y2="16"></line>
             <line x1="16" y1="8" x2="8" y2="16"></line>
           </svg>
         </button>
-        <div class="clock-view-stack" data-clock-role="view-stack">
-          <section class="clock-view is-active" data-clock-view="analog" aria-label="模拟指针时钟">
-            <canvas id="analog-clock-canvas" aria-hidden="true"></canvas>
-          </section>
-          <section class="clock-view" data-clock-view="flip" aria-label="翻页时钟">
-            <div class="flip-clock" id="flip-clock" aria-live="polite"></div>
-          </section>
-          <section class="clock-view" data-clock-view="digital" aria-label="数字时钟">
-            <div class="digital-clock" id="digital-clock" aria-live="polite"></div>
-          </section>
-          <section class="clock-view" data-clock-view="ambient" aria-label="低对比度数字时钟">
-            <div class="ambient-clock" id="ambient-clock" aria-live="polite"></div>
-          </section>
-        </div>
-        <div class="clock-pagination" data-clock-role="pagination" aria-hidden="true">
-          <button class="clock-dot is-active" type="button" data-target-view="analog" aria-label="切换到模拟指针时钟"></button>
-          <button class="clock-dot" type="button" data-target-view="flip" aria-label="切换到翻页时钟"></button>
-          <button class="clock-dot" type="button" data-target-view="digital" aria-label="切换到数字时钟"></button>
-          <button class="clock-dot" type="button" data-target-view="ambient" aria-label="切换到低对比度数字时钟"></button>
-        </div>
+        <time class="native-clock" :datetime="clockIso" aria-live="off">{{ clockText }}</time>
       </div>
     </div>
 
@@ -377,18 +309,8 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  hideLegacyAchievements,
-  mountLegacyVocabSessionView,
-  openLegacyClockOverlay,
-  openLegacyUpdateManager,
-  showLegacyAchievements,
-  startLegacyOnboardingTour,
-  switchLegacyBackgroundTheme
-} from '@/modules/legacy/legacyBridge'
-import { resolveLegacyAssetUrl } from '@/modules/legacy/legacyScriptLoader'
 import ReadingBrowsePanel from '@/modules/practice-reading/components/ReadingBrowsePanel.vue'
 import ReadingHistoryPanel from '@/modules/practice-reading/components/ReadingHistoryPanel.vue'
 import ReadingMoreToolsPanel from '@/modules/practice-reading/components/ReadingMoreToolsPanel.vue'
@@ -405,9 +327,11 @@ import { useReadingHistory } from '@/modules/practice-reading/useReadingHistory'
 import { useReadingLibrary } from '@/modules/practice-reading/useReadingLibrary'
 import { useReadingSuite } from '@/modules/practice-reading/useReadingSuite'
 import { historyPercentage, sortReadingHistory } from '@/modules/practice-reading/historyStats'
+import { useTauriPreferences } from '@/composables/useTauriPreferences.js'
 
 const router = useRouter()
 const route = useRoute()
+const preferences = useTauriPreferences()
 const { loadReadingAssets } = useReadingLibrary()
 const {
   loadReadingHistory,
@@ -551,6 +475,16 @@ const practiceTrendRange = ref('recent10')
 const activePracticeWidget = ref('heatmap')
 const practiceWidgetSelectorOpen = ref(false)
 const themeSwitcherOpen = ref(false)
+const clockOpen = ref(false)
+const clockNow = ref(new Date())
+let clockTimer = 0
+const clockText = computed(() => clockNow.value.toLocaleTimeString([], {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false
+}))
+const clockIso = computed(() => clockNow.value.toISOString())
 const backupListOpen = ref(false)
 const libraryConfigOpen = ref(false)
 const suiteModeSelectorOpen = ref(false)
@@ -733,13 +667,23 @@ const customSuitePickedByCategory = computed(() => customSuiteDraft.value?.picke
 const customSuiteCurrentCategory = computed(() => customSuiteCategories[customSuiteDraft.value?.stageIndex || 0] || 'P1')
 const customSuiteReady = computed(() => customSuiteCategories.every((category) => Boolean(customSuitePickedByCategory.value[category]?.id)))
 
-onMounted(() => {
+onMounted(async () => {
+  await preferences.hydrate()
+  browseRememberPosition.value = readBrowseRememberPosition()
+  readingBackups.value = readReadingBackups()
+  const suitePreference = resolveSuitePreference()
+  selectedSuiteFlowMode.value = suitePreference.flowMode
+  selectedSuiteFrequencyScope.value = suitePreference.frequencyScope
   syncViewFromRoute()
   loadReadingData()
   initLicenseModal()
   updateLiquidIndicator()
   updateSegmentedIndicators()
   scheduleBrowsePositionRestore()
+})
+
+onBeforeUnmount(() => {
+  if (clockTimer) window.clearInterval(clockTimer)
 })
 
 watch(() => route.query.view, () => {
@@ -824,10 +768,6 @@ async function loadHistory() {
 function syncViewFromRoute() {
   const rawView = Array.isArray(route.query.view) ? route.query.view[0] : route.query.view
   const view = rawView === 'records' ? 'practice' : rawView
-  if (view === 'vocab') {
-    activeView.value = 'vocab'
-    return
-  }
   if (legacyViews.some((item) => item.value === view)) {
     activeView.value = view
   }
@@ -861,11 +801,7 @@ function openGlobalSettings(event) {
 }
 
 function hasAcceptedLicense() {
-  try {
-    return window.localStorage?.getItem(LICENSE_STORAGE_KEY) === 'true'
-  } catch (_) {
-    return true
-  }
+  return preferences.get(LICENSE_STORAGE_KEY, 'false') === 'true'
 }
 
 function initLicenseModal() {
@@ -880,11 +816,7 @@ function initLicenseModal() {
 function acceptGplLicense(event) {
   event?.preventDefault?.()
   event?.stopImmediatePropagation?.()
-  try {
-    window.localStorage?.setItem(LICENSE_STORAGE_KEY, 'true')
-  } catch (error) {
-    console.warn('LocalStorage error:', error)
-  }
+  preferences.set(LICENSE_STORAGE_KEY, 'true')
   licenseModalVisible.value = false
 }
 
@@ -913,21 +845,15 @@ function readBrowseRememberPosition() {
 }
 
 function readBrowsePreferences() {
-  try {
-    const raw = localStorage.getItem('browse_view_preferences_v2')
-    const parsed = raw ? JSON.parse(raw) : null
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch (_) {}
-  return {}
+  const value = preferences.get('browse_view_preferences_v2', {})
+  return value && typeof value === 'object' ? value : {}
 }
 
 function writeBrowsePreferences(patch = {}) {
-  try {
-    localStorage.setItem('browse_view_preferences_v2', JSON.stringify({
-      ...readBrowsePreferences(),
-      ...(patch && typeof patch === 'object' ? patch : {})
-    }))
-  } catch (_) {}
+  preferences.set('browse_view_preferences_v2', {
+    ...readBrowsePreferences(),
+    ...(patch && typeof patch === 'object' ? patch : {})
+  })
 }
 
 function persistBrowsePreference() {
@@ -1136,61 +1062,27 @@ function startEndlessMode() {
   })
 }
 
-async function startOnboardingTour(event) {
+function openClockTool(event) {
   event?.preventDefault?.()
   event?.stopImmediatePropagation?.()
-  try {
-    await startLegacyOnboardingTour()
-  } catch (error) {
-    console.error('打开引导流程失败:', error)
-    showLocalMessage(error?.message ? `引导打开失败：${error.message}` : '引导打开失败，请稍后重试。')
-  }
+  clockNow.value = new Date()
+  if (clockTimer) window.clearInterval(clockTimer)
+  clockTimer = window.setInterval(() => { clockNow.value = new Date() }, 1000)
+  clockOpen.value = true
 }
 
-async function openUpdateManager(event) {
+function closeClockTool(event) {
   event?.preventDefault?.()
   event?.stopImmediatePropagation?.()
-  try {
-    await openLegacyUpdateManager()
-  } catch (error) {
-    console.error('打开更新管理失败:', error)
-    showLocalMessage(error?.message ? `更新检查打开失败：${error.message}` : '更新检查打开失败，请稍后重试。')
-  }
+  clockOpen.value = false
+  if (clockTimer) window.clearInterval(clockTimer)
+  clockTimer = 0
 }
 
-async function openClockTool(event) {
+function openVocabTool(event) {
   event?.preventDefault?.()
   event?.stopImmediatePropagation?.()
-  try {
-    await openLegacyClockOverlay()
-  } catch (error) {
-    console.error('打开全屏时钟失败:', error)
-    showLocalMessage(error?.message ? `全屏时钟打开失败：${error.message}` : '全屏时钟打开失败，请稍后重试。')
-  }
-}
-
-async function openVocabTool(event) {
-  event?.preventDefault?.()
-  event?.stopImmediatePropagation?.()
-  activeView.value = 'vocab'
-  await nextTick()
-  try {
-    await mountLegacyVocabSessionView('#vocab-view')
-  } catch (error) {
-    console.error('打开单词背诵失败:', error)
-    showLocalMessage(error?.message ? `单词背诵打开失败：${error.message}` : '单词背诵打开失败，请稍后重试。')
-  }
-}
-
-async function showAchievementsTool(event) {
-  event?.preventDefault?.()
-  event?.stopImmediatePropagation?.()
-  try {
-    await showLegacyAchievements()
-  } catch (error) {
-    console.error('打开成就面板失败:', error)
-    showLocalMessage(error?.message ? `成就面板打开失败：${error.message}` : '成就面板打开失败，请稍后重试。')
-  }
+  showLocalMessage('独立单词背诵已从桌面产品移除；阅读页划词与生词记录不受影响。')
 }
 
 function openReadingMemorize() {
@@ -1210,13 +1102,10 @@ function openReadingMemorize() {
   })
 }
 
-function hideAchievementsTool(event) {
+function showAchievementsTool(event) {
   event?.preventDefault?.()
   event?.stopImmediatePropagation?.()
-  if (hideLegacyAchievements()) {
-    return
-  }
-  document.getElementById('achievements-modal')?.classList.remove('show')
+  showLocalMessage('旧版成就装饰面板已移除。')
 }
 
 function openWritingEntry(event) {
@@ -1247,19 +1136,11 @@ function normalizeSuiteFrequencyScope(value) {
 }
 
 function readLocalStorageValue(key) {
-  try {
-    return window.localStorage?.getItem(key) || ''
-  } catch (_) {
-    return ''
-  }
+  return preferences.get(key, '')
 }
 
 function writeLocalStorageValue(key, value) {
-  try {
-    window.localStorage?.setItem(key, String(value))
-  } catch (_) {
-    // storage is best-effort in packaged and browser-test contexts.
-  }
+  preferences.set(key, String(value))
 }
 
 function resolveSuitePreference(overrides = {}) {
@@ -1649,15 +1530,10 @@ function normalizeReadingBackupEntry(entry) {
 }
 
 function readReadingBackups() {
-  try {
-    const raw = localStorage.getItem(READING_BACKUP_STORAGE_KEY)
-    const parsed = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed)
-      ? parsed.map(normalizeReadingBackupEntry).filter(Boolean)
-      : []
-  } catch (_) {
-    return []
-  }
+  const parsed = preferences.get(READING_BACKUP_STORAGE_KEY, [])
+  return Array.isArray(parsed)
+    ? parsed.map(normalizeReadingBackupEntry).filter(Boolean)
+    : []
 }
 
 function persistReadingBackups(backups) {
@@ -1665,12 +1541,7 @@ function persistReadingBackups(backups) {
     ? backups.map(normalizeReadingBackupEntry).filter(Boolean).slice(0, MAX_READING_BACKUPS)
     : []
   readingBackups.value = normalized
-  try {
-    localStorage.setItem(READING_BACKUP_STORAGE_KEY, JSON.stringify(normalized))
-  } catch (error) {
-    console.warn('保存阅读备份索引失败:', error)
-    showLocalMessage('本地备份索引保存失败，请使用导出文件备份。')
-  }
+  preferences.set(READING_BACKUP_STORAGE_KEY, normalized)
 }
 
 function formatBackupDate(backup) {
@@ -1924,7 +1795,7 @@ function viewPdf(asset) {
     showLocalMessage('此题暂未提供 PDF。')
     return
   }
-  const targetUrl = resolveLegacyAssetUrl(pdfPath)
+  const targetUrl = new URL(pdfPath, window.location.href).href
   const opened = window.open(
     targetUrl,
     `reading_pdf_${String(asset?.id || Date.now()).replace(/[^A-Za-z0-9_-]/g, '_')}`,
@@ -1959,12 +1830,10 @@ function applyBackgroundTheme(themeName) {
   const nextTheme = backgroundThemes.some((theme) => theme.value === themeName)
     ? themeName
     : 'misty-mountain'
-  if (!switchLegacyBackgroundTheme(nextTheme)) {
-    try {
-      localStorage.setItem('three_bg_theme', nextTheme)
-    } catch (_) {}
-    window.dispatchEvent(new CustomEvent('shui-bg-theme-change', { detail: { theme: nextTheme } }))
-  }
+  try {
+    localStorage.setItem('three_bg_theme', nextTheme)
+  } catch (_) {}
+  window.dispatchEvent(new CustomEvent('shui-bg-theme-change', { detail: { theme: nextTheme } }))
   themeSwitcherOpen.value = false
   const label = backgroundThemes.find((theme) => theme.value === nextTheme)?.title || nextTheme
   showLocalMessage(`主题已切换：${label}`)
@@ -3072,6 +2941,14 @@ function updateSegmentedIndicators() {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
+}
+
+.native-clock {
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: clamp(3rem, 12vw, 9rem);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 #license-modal .lm-title {

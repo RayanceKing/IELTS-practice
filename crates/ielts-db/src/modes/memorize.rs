@@ -101,7 +101,9 @@ pub fn finish_memorize_session(conn: &Connection, attempt_id: &str) -> DbResult<
         params![now, attempt_id],
     )?;
     if n == 0 {
-        return Err(DbError::Message(format!("memorize not found: {attempt_id}")));
+        return Err(DbError::Message(format!(
+            "memorize not found: {attempt_id}"
+        )));
     }
     // Return minimal record
     Ok(AttemptRecord {

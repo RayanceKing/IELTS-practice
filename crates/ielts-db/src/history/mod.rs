@@ -295,9 +295,7 @@ fn load_attempt(conn: &Connection, id: &str) -> DbResult<AttemptRecord> {
         Ok(ielts_domain::AttemptAnswer {
             question_id: row.get(0)?,
             answer,
-            is_correct: row
-                .get::<_, Option<i64>>(2)?
-                .map(|v| v != 0),
+            is_correct: row.get::<_, Option<i64>>(2)?.map(|v| v != 0),
             weight: row.get(3)?,
             question_kind: row.get(4)?,
             change_count: row.get::<_, i64>(5)? as u32,

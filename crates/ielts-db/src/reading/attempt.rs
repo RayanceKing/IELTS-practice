@@ -142,9 +142,10 @@ pub fn submit_reading_attempt(
             change_count: 0,
             visit_count: 0,
             elapsed_ms: 0,
-            marked: cmd.marked_questions.iter().any(|m| {
-                crate::reading::scoring::normalize_question_id(m) == c.question_id
-            }),
+            marked: cmd
+                .marked_questions
+                .iter()
+                .any(|m| crate::reading::scoring::normalize_question_id(m) == c.question_id),
             answered_at: Some(now.clone()),
         })
         .collect();
@@ -201,10 +202,7 @@ pub fn submit_reading_attempt(
     Ok(result)
 }
 
-fn lookup_submit_response(
-    conn: &Connection,
-    key: &str,
-) -> DbResult<Option<ReadingSubmitResult>> {
+fn lookup_submit_response(conn: &Connection, key: &str) -> DbResult<Option<ReadingSubmitResult>> {
     let mut stmt = conn.prepare(
         "SELECT response_json FROM attempt_idempotency WHERE scope = 'reading.submit' AND idempotency_key = ?1",
     )?;
@@ -281,7 +279,13 @@ pub fn patch_reading_answer(
             change_count = attempt_answers.change_count + 1,
             marked = excluded.marked,
             answered_at = excluded.answered_at",
-        params![attempt_id, qid, answer.to_string(), if marked { 1 } else { 0 }, now],
+        params![
+            attempt_id,
+            qid,
+            answer.to_string(),
+            if marked { 1 } else { 0 },
+            now
+        ],
     )?;
     // touch attempt
     conn.execute(

@@ -1,10 +1,12 @@
+pub mod ai;
 pub mod backup;
+mod coach_provider;
 pub mod diagnostics;
+pub mod enrichment;
 pub mod history;
+pub mod modes;
 pub mod paths;
+pub mod reading;
 pub mod routes;
 pub mod settings;
 pub mod writing;
-pub mod reading;
-pub mod modes;
-pub mod enrichment;

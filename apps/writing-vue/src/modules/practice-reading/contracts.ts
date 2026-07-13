@@ -7,11 +7,17 @@ export const READING_LIBRARY_SOURCE = Object.freeze({
   NAS_JS: 'nas-js'
 })
 
-export function normalizeReadingRecordId(value) {
+export interface ReadingSuitePayload {
+  flowMode?: string
+  frequencyScope?: string
+  sequence?: string[]
+}
+
+export function normalizeReadingRecordId(value: unknown): string {
   return String(value || '').trim()
 }
 
-export function normalizeReadingCoachEnabled(value, fallback = true) {
+export function normalizeReadingCoachEnabled(value: unknown, fallback = true): boolean {
   if (value === undefined || value === null || value === '') {
     return Boolean(fallback)
   }
@@ -31,9 +37,9 @@ export function normalizeReadingCoachEnabled(value, fallback = true) {
   return Boolean(fallback)
 }
 
-export function normalizeReadingSuitePayload(payload = {}) {
-  const source = payload && typeof payload === 'object' ? payload : {}
-  const normalized = {
+export function normalizeReadingSuitePayload(payload: ReadingSuitePayload = {}): ReadingSuitePayload {
+  const source = payload || {}
+  const normalized: ReadingSuitePayload = {
     flowMode: source.flowMode,
     frequencyScope: source.frequencyScope
   }

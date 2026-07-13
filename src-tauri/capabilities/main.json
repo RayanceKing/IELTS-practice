@@ -19,7 +19,6 @@
     "core:window:allow-set-focus",
     "core:app:allow-version",
     "core:app:allow-name",
-    "core:app:allow-tauri-version",
-    "log:default"
+    "core:app:allow-tauri-version"
   ]
 }

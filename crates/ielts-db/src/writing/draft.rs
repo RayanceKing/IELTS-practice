@@ -132,9 +132,7 @@ pub fn submit_writing_attempt(
         return Err(DbError::Validation("idempotency_key required".into()));
     }
 
-    if let Some(existing) =
-        lookup_idempotency(conn, "writing.submit", &cmd.idempotency_key)?
-    {
+    if let Some(existing) = lookup_idempotency(conn, "writing.submit", &cmd.idempotency_key)? {
         return load_attempt_minimal(conn, &existing.attempt_id);
     }
 
@@ -173,11 +171,7 @@ struct IdemRow {
     attempt_id: String,
 }
 
-fn lookup_idempotency(
-    conn: &Connection,
-    scope: &str,
-    key: &str,
-) -> DbResult<Option<IdemRow>> {
+fn lookup_idempotency(conn: &Connection, scope: &str, key: &str) -> DbResult<Option<IdemRow>> {
     let mut stmt = conn.prepare(
         "SELECT attempt_id FROM attempt_idempotency WHERE scope = ?1 AND idempotency_key = ?2",
     )?;

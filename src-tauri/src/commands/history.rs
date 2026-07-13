@@ -71,10 +71,7 @@ pub fn export_history(
 }
 
 #[tauri::command]
-pub fn delete_history_attempt(
-    db: State<'_, AppDb>,
-    attempt_id: String,
-) -> CommandResponse<bool> {
+pub fn delete_history_attempt(db: State<'_, AppDb>, attempt_id: String) -> CommandResponse<bool> {
     match db.with_conn(|conn| ielts_db::delete_attempt(conn, &attempt_id)) {
         Ok(ok) => CommandResponse::success(ok),
         Err(e) => CommandResponse::failure(map_db_err(e)),

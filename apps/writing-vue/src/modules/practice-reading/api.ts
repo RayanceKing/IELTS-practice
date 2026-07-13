@@ -8,14 +8,17 @@ import {
   normalizeReadingSuitePayload
 } from './contracts'
 
+interface RefreshOptions { refresh?: boolean }
+interface CoachOptions { onEvent?: (event: unknown) => void }
+
 export const readingLibraryApi = {
-  async listAssets(options = {}) {
+  async listAssets(options: RefreshOptions = {}) {
     return practiceAssets.listAll({ activity: READING_ACTIVITY }, {
       refresh: Boolean(options.refresh)
     })
   },
 
-  async getAsset(assetId, options = {}) {
+  async getAsset(assetId: string, options: RefreshOptions = {}) {
     return practiceAssets.get(READING_ACTIVITY, assetId, options)
   }
 }
@@ -25,7 +28,7 @@ export const readingHistoryApi = {
     return practiceHistory.listAll({ activity: READING_ACTIVITY })
   },
 
-  async delete(recordId) {
+  async delete(recordId: string) {
     return practiceHistory.delete(READING_ACTIVITY, normalizeReadingRecordId(recordId))
   },
 
@@ -37,7 +40,7 @@ export const readingHistoryApi = {
     return practiceHistory.exportArchive({ activity: READING_ACTIVITY })
   },
 
-  async importArchive(payload) {
+  async importArchive(payload: unknown) {
     return practiceHistory.importArchive(READING_ACTIVITY, payload)
   }
 }
@@ -49,8 +52,14 @@ export const readingSuiteApi = {
 }
 
 export const readingCoachApi = {
-  async query(payload, sessionId, options = {}) {
-    return practiceCoach.query(READING_ACTIVITY, payload, sessionId, options)
+  async query(payload: Record<string, unknown>, sessionId: string | null, options: CoachOptions = {}) {
+    const queryCoach = practiceCoach.query as (
+      activity: string,
+      request: Record<string, unknown>,
+      attemptId: string | null,
+      requestOptions: CoachOptions
+    ) => Promise<unknown>
+    return queryCoach(READING_ACTIVITY, payload, sessionId, options)
   }
 }
 
@@ -60,7 +69,7 @@ export const readingCoachSettingsApi = {
     return normalizeReadingCoachEnabled(value, true)
   },
 
-  async updateEnabled(enabled) {
+  async updateEnabled(enabled: unknown) {
     const normalized = normalizeReadingCoachEnabled(enabled, true)
     await settings.update({
       [READING_COACH_ENABLED_SETTING_KEY]: normalized
@@ -70,7 +79,7 @@ export const readingCoachSettingsApi = {
 }
 
 export const readingSessionApi = {
-  async getState(sessionId) {
+  async getState(sessionId: string) {
     return practiceSessions.getState(READING_ACTIVITY, normalizeReadingRecordId(sessionId))
   }
 }

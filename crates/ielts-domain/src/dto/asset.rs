@@ -8,7 +8,11 @@ use ts_rs::TS;
 /// Reading / writing asset metadata v2.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct PracticeAssetV2 {
     pub schema_version: u32,
     pub id: String,
@@ -35,4 +39,20 @@ pub struct PracticeAssetV2 {
 
 impl PracticeAssetV2 {
     pub const SCHEMA_VERSION: u32 = 2;
+}
+
+/// A canonical asset record paired with its complete versioned JSON payload.
+///
+/// Index commands intentionally return only metadata. Practice flows request this
+/// DTO when the learner opens one concrete asset.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct PracticeAssetV2Payload {
+    pub asset: PracticeAssetV2,
+    pub payload: serde_json::Value,
 }

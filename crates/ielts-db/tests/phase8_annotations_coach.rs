@@ -9,7 +9,7 @@ use ielts_db::{
     record_coach_failure, resolve_anchor, revalidate_annotations, review_vocab,
     submit_reading_attempt, upsert_annotation, upsert_vocab, AppendCoachMessageCommand,
     DbOpenOptions, DictionaryEntry, EnsureCoachThreadCommand, ImportDictionaryCommand,
-    RecordCoachFailureCommand, ReadingSubmitCommand, ReviewVocabCommand, TextAnchor,
+    ReadingSubmitCommand, RecordCoachFailureCommand, ReviewVocabCommand, TextAnchor,
     UpsertAnnotationCommand, UpsertVocabCommand,
 };
 
@@ -55,7 +55,8 @@ fn annotation_stable_anchor_and_mismatch() {
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].note_text.as_deref(), Some("key phrase"));
 
-    let checked = revalidate_annotations(&conn, "asset-1", "passage", "totally different text").unwrap();
+    let checked =
+        revalidate_annotations(&conn, "asset-1", "passage", "totally different text").unwrap();
     assert_eq!(checked[0].mismatch.as_deref(), Some("text_not_found"));
 }
 
@@ -186,6 +187,17 @@ fn coach_incremental_messages_failure_preserves_score() {
         },
     )
     .unwrap();
+
+    let failed_thread = ielts_db::get_thread(&conn, &thread.id).unwrap();
+    assert_eq!(failed_thread.status, "degraded");
+    assert_eq!(
+        failed_thread
+            .last_error
+            .as_ref()
+            .and_then(|v| v.get("code"))
+            .and_then(|v| v.as_str()),
+        Some("provider_timeout")
+    );
 
     let after = attempt_score_snapshot(&conn, "att-coach-1").unwrap();
     assert_eq!(before, after);

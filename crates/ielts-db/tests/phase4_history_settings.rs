@@ -11,8 +11,8 @@ use tempfile::tempdir;
 
 use ielts_db::{
     create_backup_package, export_history, get_history_detail, import_backup, list_history,
-    list_secret_refs, list_settings, migrate_local_storage_prefs, open_connection, put_secret_ref,
-    migrate, upsert_attempt, upsert_setting, write_backup_file, DbOpenOptions, SecretVault,
+    list_secret_refs, list_settings, migrate, migrate_local_storage_prefs, open_connection,
+    put_secret_ref, upsert_attempt, upsert_setting, write_backup_file, DbOpenOptions, SecretVault,
     NS_UI,
 };
 
@@ -22,7 +22,13 @@ fn open_v2(path: PathBuf) -> rusqlite::Connection {
     conn
 }
 
-fn sample_attempt(id: &str, activity: Activity, title: &str, score: f64, submitted: &str) -> AttemptRecord {
+fn sample_attempt(
+    id: &str,
+    activity: Activity,
+    title: &str,
+    score: f64,
+    submitted: &str,
+) -> AttemptRecord {
     AttemptRecord {
         schema_version: AttemptRecord::SCHEMA_VERSION,
         id: id.into(),
@@ -70,17 +76,35 @@ fn unified_history_pagination_and_filters() {
 
     upsert_attempt(
         &conn,
-        &sample_attempt("r1", Activity::Reading, "Tea History", 0.85, "2025-01-10T10:00:00Z"),
+        &sample_attempt(
+            "r1",
+            Activity::Reading,
+            "Tea History",
+            0.85,
+            "2025-01-10T10:00:00Z",
+        ),
     )
     .unwrap();
     upsert_attempt(
         &conn,
-        &sample_attempt("w1", Activity::Writing, "University Skills", 6.5, "2025-01-11T10:00:00Z"),
+        &sample_attempt(
+            "w1",
+            Activity::Writing,
+            "University Skills",
+            6.5,
+            "2025-01-11T10:00:00Z",
+        ),
     )
     .unwrap();
     upsert_attempt(
         &conn,
-        &sample_attempt("r2", Activity::Reading, "Ocean Currents", 0.6, "2025-01-12T10:00:00Z"),
+        &sample_attempt(
+            "r2",
+            Activity::Reading,
+            "Ocean Currents",
+            0.6,
+            "2025-01-12T10:00:00Z",
+        ),
     )
     .unwrap();
 
@@ -160,7 +184,10 @@ fn unified_history_pagination_and_filters() {
 
     let detail = get_history_detail(&conn, "w1").unwrap();
     assert_eq!(detail.summary.id, "w1");
-    assert_eq!(detail.attempt.title_snapshot.as_deref(), Some("University Skills"));
+    assert_eq!(
+        detail.attempt.title_snapshot.as_deref(),
+        Some("University Skills")
+    );
 
     let csv = export_history(&conn, HistoryExportFormat::Csv, None).unwrap();
     assert!(csv.body.contains("id,activity,title"));
@@ -206,7 +233,9 @@ fn settings_layers_and_reject_secrets() {
     let n = migrate_local_storage_prefs(&conn, &prefs).unwrap();
     assert_eq!(n, 2); // api_key skipped
     let theme = list_settings(&conn, Some(NS_UI)).unwrap();
-    assert!(theme.iter().any(|s| s.key == "theme" && s.value == json!("academic")));
+    assert!(theme
+        .iter()
+        .any(|s| s.key == "theme" && s.value == json!("academic")));
 }
 
 #[test]
@@ -215,7 +244,9 @@ fn secret_vault_and_sqlite_refs_only() {
     let conn = open_v2(dir.path().join("v2.db"));
     let vault = SecretVault::open(dir.path().join("secrets.vault")).unwrap();
 
-    let ref_id = vault.set_secret("writing.openai.api_key", "sk-test-1234567890").unwrap();
+    let ref_id = vault
+        .set_secret("writing.openai.api_key", "sk-test-1234567890")
+        .unwrap();
     put_secret_ref(&conn, "writing.openai.api_key", &ref_id).unwrap();
 
     let refs = list_secret_refs(&conn).unwrap();
@@ -228,6 +259,10 @@ fn secret_vault_and_sqlite_refs_only() {
 
     let loaded = vault.get_secret_by_ref(&ref_id).unwrap().unwrap();
     assert_eq!(loaded, "sk-test-1234567890");
+    let metadata = std::fs::read_to_string(vault.path()).unwrap();
+    assert!(!metadata.contains("sk-test-1234567890"));
+    assert!(!metadata.contains("c2stdGVzdC0xMjM0NTY3ODkw"));
+    assert!(vault.delete_secret("writing.openai.api_key").unwrap());
 }
 
 #[test]
@@ -257,10 +292,25 @@ fn backup_roundtrip_dry_run_and_restore() {
     assert!(dry.ok);
     assert!(dry.dry_run);
     assert_eq!(dry.attempt_imported, 1);
-    assert_eq!(list_history(&empty, &ListHistoryQuery {
-        activity: None, limit: 10, offset: 0, cursor: None, search: None,
-        start_date: None, end_date: None, min_score: None, max_score: None,
-    }).unwrap().total, 0);
+    assert_eq!(
+        list_history(
+            &empty,
+            &ListHistoryQuery {
+                activity: None,
+                limit: 10,
+                offset: 0,
+                cursor: None,
+                search: None,
+                start_date: None,
+                end_date: None,
+                min_score: None,
+                max_score: None,
+            }
+        )
+        .unwrap()
+        .total,
+        0
+    );
 
     let applied = import_backup(&empty, &package, false).unwrap();
     assert!(applied.ok, "{:?}", applied.errors);
@@ -268,10 +318,21 @@ fn backup_roundtrip_dry_run_and_restore() {
     assert_eq!(applied.settings_imported, 1);
     assert_eq!(applied.secret_refs_imported, 1);
 
-    let restored = list_history(&empty, &ListHistoryQuery {
-        activity: None, limit: 10, offset: 0, cursor: None, search: None,
-        start_date: None, end_date: None, min_score: None, max_score: None,
-    }).unwrap();
+    let restored = list_history(
+        &empty,
+        &ListHistoryQuery {
+            activity: None,
+            limit: 10,
+            offset: 0,
+            cursor: None,
+            search: None,
+            start_date: None,
+            end_date: None,
+            min_score: None,
+            max_score: None,
+        },
+    )
+    .unwrap();
     assert_eq!(restored.total, 1);
     assert_eq!(restored.items[0].id, "r1");
 }

@@ -8,7 +8,11 @@ use ts_rs::TS;
 /// Canonical writing evaluation result (v4). No legacy aliases allowed on write.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct WritingEvaluationV4 {
     pub schema_version: u32,
     pub status: EvaluationStatus,
@@ -33,7 +37,11 @@ impl WritingEvaluationV4 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct WritingScoreV4 {
     pub overall: f64,
     pub task_response: f64,
@@ -44,7 +52,11 @@ pub struct WritingScoreV4 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct WritingDiagnosisV4 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task: Option<serde_json::Value>,
@@ -54,7 +66,11 @@ pub struct WritingDiagnosisV4 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct WritingFeedbackV4 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overall: Option<String>,
@@ -70,7 +86,11 @@ pub struct WritingFeedbackV4 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct ParagraphFeedback {
     pub paragraph_index: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -81,7 +101,11 @@ pub struct ParagraphFeedback {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct SentenceFeedback {
     pub sentence: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -92,7 +116,11 @@ pub struct SentenceFeedback {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct EvaluationDegradation {
     pub stage: EvaluationStage,
     pub reason: String,
@@ -103,7 +131,11 @@ pub struct EvaluationDegradation {
 /// Persistence row for writing_evaluations (not the full AI raw dump).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
 pub struct WritingEvaluationRecord {
     pub id: String,
     pub attempt_id: String,

@@ -20,7 +20,12 @@ import {
 } from '@/api/writing-repository.js'
 import {
   listSettings,
-  upsertSetting
+  upsertSetting,
+  listAiConfigs,
+  upsertAiConfig,
+  deleteAiConfig,
+  setDefaultAiConfig,
+  testAiProvider
 } from '@/api/settings-repository.js'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 
@@ -82,14 +87,35 @@ async function writeKv(namespace, key, value) {
   return value
 }
 
-async function deleteKv(namespace, key) {
-  await upsertSetting(namespace, key, null)
+function normalizeAiConfig(item) {
+  return {
+    id: item.id,
+    config_name: item.configName,
+    provider: item.provider,
+    base_url: item.baseUrl,
+    default_model: item.defaultModel,
+    is_default: !!item.isDefault,
+    is_enabled: !!item.isEnabled,
+    has_secret: !!item.hasSecret
+  }
+}
+
+function toAiConfigCommand(data, id = null) {
+  const cmd = {
+    configName: data.config_name,
+    provider: data.provider,
+    baseUrl: data.base_url,
+    defaultModel: data.default_model,
+    isEnabled: data.is_enabled ?? data.enabled ?? true
+  }
+  if (id) cmd.id = id
+  if (data.api_key) cmd.apiKey = data.api_key
+  return cmd
 }
 
 export const configs = {
   async list() {
-    const items = await readKvList('provider_configs')
-    return items.filter((item) => item && item.id)
+    return (await listAiConfigs()).map(normalizeAiConfig)
   },
 
   async getDefault() {
@@ -98,23 +124,9 @@ export const configs = {
   },
 
   async create(data) {
-    const id = data.id || newId('cfg')
-    const entry = {
-      ...data,
-      id,
-      is_default: !!data.is_default,
-      enabled: data.enabled !== false
-    }
-    if (entry.is_default) {
-      const all = await this.list()
-      for (const item of all) {
-        if (item.is_default) {
-          await writeKv('provider_configs', item.id, { ...item, is_default: false })
-        }
-      }
-    }
-    await writeKv('provider_configs', id, entry)
-    return entry
+    const created = normalizeAiConfig(await upsertAiConfig(toAiConfigCommand(data)))
+    if (data.is_default) await setDefaultAiConfig(created.id)
+    return created
   },
 
   async update(id, updates) {
@@ -126,24 +138,17 @@ export const configs = {
       throw err
     }
     const next = { ...prev, ...updates, id }
-    if (next.is_default) {
-      for (const item of all) {
-        if (item.id !== id && item.is_default) {
-          await writeKv('provider_configs', item.id, { ...item, is_default: false })
-        }
-      }
-    }
-    await writeKv('provider_configs', id, next)
-    return next
+    const updated = normalizeAiConfig(await upsertAiConfig(toAiConfigCommand(next, id)))
+    if (updates.is_default) await setDefaultAiConfig(id)
+    return updated
   },
 
   async delete(id) {
-    await deleteKv('provider_configs', id)
-    return true
+    return deleteAiConfig(id)
   },
 
   async setDefault(id) {
-    return this.update(id, { is_default: true })
+    return setDefaultAiConfig(id)
   },
 
   async toggleEnabled(id) {
@@ -154,14 +159,11 @@ export const configs = {
       err.code = 'not_found'
       throw err
     }
-    return this.update(id, { enabled: !prev.enabled })
+    return this.update(id, { is_enabled: !prev.is_enabled })
   },
 
   async test() {
-    return {
-      ok: true,
-      message: 'Tauri 路径：provider 连通性测试占位（真实 LLM 待 secret vault 接线）'
-    }
+    return testAiProvider()
   }
 }
 
@@ -294,7 +296,7 @@ async function pollEvaluationEvents(attemptId, evaluationId) {
       console.warn('poll evaluation events failed', err)
     }
     if (!stopped) {
-      setTimeout(tick, 250)
+      setTimeout(tick, 1000)
     } else {
       activePolls.delete(evaluationId)
     }

@@ -25,9 +25,11 @@
 ## Known limits
 
 - Updater pubkey/endpoints inactive until release signing secrets are configured.
-- Some Vue pages still contain Electron fallback branches for local non-Tauri Vite dev; production shell is Tauri-only (`isTauriRuntime()` true).
-- Visual regression screenshots are manual for this cutover; CI covers Rust tests + multi-platform Tauri build.
-- Resource release scripts that previously assumed Electron packaging may need path updates for Tauri bundle outputs.
+- Real AI provider, packaged reading-resource parity and complete legacy asset removal are not yet accepted.
+- Visual regression, keyboard coverage and device P95 measurements remain release blockers.
+- CI now puts the static suite and packaged Windows Tauri WebView flow in the first shipping gate. A workflow definition is not proof of success; retain the uploaded reports from a passing run.
+- Release builds generate a SHA-256 bundle manifest and fail when the bundle is empty.
+- Windows/macOS code-signing, updater signing and rollback drills require external secrets and real devices. They remain incomplete until those runs pass.
 
 ## Developer commands
 
@@ -42,3 +44,10 @@ cargo tauri build
 ## Rollback
 
 Restore a pre-cutover tag/commit that still contains `electron/` + `server/` if emergency dual-runtime support is required. Prefer restoring user data from backup rather than re-enabling dual-write.
+
+## Required release evidence
+
+- `static-ci-report.json` with status `pass`.
+- `suite-practice-flow-report.json` with target `packaged-tauri-2` and status `passed`.
+- One non-empty `tauri-bundle-<platform>.json` manifest per release platform.
+- Platform signing/notarization logs and an updater install/rollback record. These cannot be produced without release secrets and devices.

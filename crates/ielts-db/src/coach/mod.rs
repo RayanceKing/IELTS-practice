@@ -81,6 +81,22 @@ pub struct RecordCoachFailureCommand {
     pub preserve_scores: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunCoachCommand {
+    pub thread_id: String,
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question_context: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoachRunResult {
+    pub user_message: CoachMessage,
+    pub assistant_message: CoachMessage,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -182,10 +198,7 @@ pub fn append_coach_message(
         "assistant" | "system" => cmd.role.trim().to_ascii_lowercase(),
         _ => "user".into(),
     };
-    let structured = cmd
-        .structured_payload
-        .as_ref()
-        .map(|v| v.to_string());
+    let structured = cmd.structured_payload.as_ref().map(|v| v.to_string());
     conn.execute(
         "INSERT INTO coach_messages (id, thread_id, role, content, structured_payload, status, created_at, sequence)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -256,22 +269,8 @@ pub fn record_coach_failure(
     cmd: &RecordCoachFailureCommand,
 ) -> DbResult<CoachThread> {
     let _ = cmd.preserve_scores; // documented invariant
-    let now = chrono::Utc::now().to_rfc3339();
-    let err_json =
-        serde_json::to_string(&cmd.error).map_err(|e| DbError::Message(e.to_string()))?;
-    let n = conn.execute(
-        "UPDATE coach_threads SET last_error_json = ?1, updated_at = ?2, status = 'degraded'
-         WHERE id = ?3",
-        params![err_json, now, cmd.thread_id],
-    )?;
-    if n == 0 {
-        return Err(DbError::Message(format!(
-            "coach thread not found: {}",
-            cmd.thread_id
-        )));
-    }
-    // append system failure message
-    let _ = append_coach_message(
+    let _ = get_thread(conn, &cmd.thread_id)?;
+    append_coach_message(
         conn,
         &AppendCoachMessageCommand {
             thread_id: cmd.thread_id.clone(),
@@ -285,8 +284,39 @@ pub fn record_coach_failure(
             structured_payload: Some(cmd.error.clone()),
             status: "failed".into(),
         },
-    );
+    )?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let err_json =
+        serde_json::to_string(&cmd.error).map_err(|e| DbError::Message(e.to_string()))?;
+    conn.execute(
+        "UPDATE coach_threads SET last_error_json = ?1, updated_at = ?2, status = 'degraded'
+         WHERE id = ?3",
+        params![err_json, now, cmd.thread_id],
+    )?;
     get_thread(conn, &cmd.thread_id)
+}
+
+pub fn complete_coach_run(
+    conn: &Connection,
+    thread_id: &str,
+    content: &str,
+    structured_payload: Option<Value>,
+) -> DbResult<CoachMessage> {
+    let message = append_coach_message(
+        conn,
+        &AppendCoachMessageCommand {
+            thread_id: thread_id.to_string(),
+            role: "assistant".into(),
+            content: content.to_string(),
+            structured_payload,
+            status: "completed".into(),
+        },
+    )?;
+    conn.execute(
+        "UPDATE coach_threads SET status = 'active', last_error_json = NULL WHERE id = ?1",
+        params![thread_id],
+    )?;
+    Ok(message)
 }
 
 /// Safety check used by tests: attempt score columns unchanged after coach failure.

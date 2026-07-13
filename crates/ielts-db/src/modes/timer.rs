@@ -90,8 +90,9 @@ impl TimerState {
         }
         if let Some(paused_at) = self.paused_at_ms {
             if now_ms > paused_at {
-                self.paused_offset_ms =
-                    self.paused_offset_ms.saturating_add((now_ms - paused_at) as u64);
+                self.paused_offset_ms = self
+                    .paused_offset_ms
+                    .saturating_add((now_ms - paused_at) as u64);
             }
         }
         self.paused_at_ms = None;

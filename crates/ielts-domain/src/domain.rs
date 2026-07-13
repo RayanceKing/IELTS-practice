@@ -7,7 +7,11 @@ use ts_rs::TS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum Activity {
     Reading,
     Writing,
@@ -15,7 +19,11 @@ pub enum Activity {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum AttemptMode {
     Single,
     Suite,
@@ -27,7 +35,11 @@ pub enum AttemptMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum AttemptStatus {
     Draft,
     Active,
@@ -41,7 +53,11 @@ pub enum AttemptStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum EvaluationStatus {
     Queued,
     Running,
@@ -53,7 +69,11 @@ pub enum EvaluationStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum EvaluationStage {
     Preparing,
     Scoring,
@@ -63,7 +83,11 @@ pub enum EvaluationStage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum SuiteStatus {
     Active,
     Completed,
@@ -73,7 +97,11 @@ pub enum SuiteStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum SuiteFlowMode {
     Simulation,
     Classic,
@@ -82,7 +110,11 @@ pub enum SuiteFlowMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum ScoreScale {
     Ratio,
     Band9,
@@ -90,7 +122,11 @@ pub enum ScoreScale {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum AssetSourceKind {
     Builtin,
     Imported,
@@ -99,7 +135,11 @@ pub enum AssetSourceKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum WritingTaskType {
     Task1,
     Task2,
@@ -117,7 +157,11 @@ impl WritingTaskType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum AnnotationKind {
     Highlight,
     Note,
@@ -125,7 +169,11 @@ pub enum AnnotationKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "ts-export", derive(TS), ts(export, export_to = "../../apps/writing-vue/src/types/generated/"))]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../apps/writing-vue/src/types/generated/")
+)]
 pub enum AnnotationScope {
     Passage,
     Question,

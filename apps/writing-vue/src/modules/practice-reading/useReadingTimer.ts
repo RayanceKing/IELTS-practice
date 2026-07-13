@@ -1,47 +1,71 @@
 import { computed, ref, unref, watch } from 'vue'
-import {
-  emitPracticeTimerStateChange,
-  installPracticeTimerBridge,
-  removePracticeTimerBridge
-} from '../legacy/legacyBridge'
+import { invokeCommand, unwrapCommandResponse } from '@/api/tauri-bridge.js'
 
-export function formatClock(seconds) {
+type TimerMode = 'elapsed' | 'countdown'
+
+type TimerState = {
+  source: 'local' | 'suite'
+  anchorMs: number
+  effectiveStartTimeMs: number
+  mode: TimerMode
+  limitSeconds: number | null
+  pausedOffsetMs: number
+  pausedAtMs: number | null
+  running: boolean
+}
+
+type ReadingTimerOptions = {
+  activeSuiteSessionId?: unknown
+  reviewMode?: unknown
+  suiteTimerSource?: unknown | (() => unknown)
+  onAutoSubmit?: () => void | Promise<void>
+}
+
+export function formatClock(seconds: unknown) {
   const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0))
   const minutes = Math.floor(totalSeconds / 60)
   const rest = totalSeconds % 60
   return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
 }
 
-export function normalizeSuiteTimerState(value) {
-  if (!value || typeof value !== 'object') {
-    return null
-  }
-  const anchorMs = Number(value.anchorMs ?? value.effectiveStartTimeMs)
-  if (!Number.isFinite(anchorMs) || anchorMs <= 0) {
-    return null
-  }
-  const mode = String(value.mode || '').trim().toLowerCase() === 'countdown' ? 'countdown' : 'elapsed'
-  const limitSeconds = value.limitSeconds == null ? null : Number(value.limitSeconds)
-  const pausedOffsetMs = value.pausedOffsetMs == null ? null : Number(value.pausedOffsetMs)
-  const pausedAtMs = value.pausedAtMs == null ? null : Number(value.pausedAtMs)
+export function normalizeSuiteTimerState(value: unknown): TimerState | null {
+  if (!value || typeof value !== 'object') return null
+  const input = value as Record<string, unknown>
+  const anchorMs = Number(input.anchorMs ?? input.effectiveStartTimeMs)
+  if (!Number.isFinite(anchorMs) || anchorMs <= 0) return null
+  const limitSeconds = input.limitSeconds == null ? null : Number(input.limitSeconds)
+  const pausedOffsetMs = input.pausedOffsetMs == null ? 0 : Number(input.pausedOffsetMs)
+  const pausedAtMs = input.pausedAtMs == null ? null : Number(input.pausedAtMs)
   return {
     source: 'suite',
     anchorMs: Math.floor(anchorMs),
     effectiveStartTimeMs: Math.floor(anchorMs),
-    mode,
+    mode: String(input.mode).toLowerCase() === 'countdown' ? 'countdown' : 'elapsed',
     limitSeconds: Number.isFinite(limitSeconds) && limitSeconds >= 0 ? Math.floor(limitSeconds) : null,
     pausedOffsetMs: Number.isFinite(pausedOffsetMs) && pausedOffsetMs >= 0 ? Math.floor(pausedOffsetMs) : 0,
     pausedAtMs: Number.isFinite(pausedAtMs) && pausedAtMs > 0 ? Math.floor(pausedAtMs) : null,
-    running: value.running !== false
+    running: input.running !== false
   }
 }
 
-export function useReadingTimer(options = {}) {
+async function measureTimer(timer: TimerState, nowMs: number) {
+  const response = await invokeCommand<number>('timer_elapsed_seconds', { timer, nowMs })
+  return Number(unwrapCommandResponse(response, 'timer_elapsed_seconds')) || 0
+}
+
+async function shouldAutoSubmit(timer: TimerState, nowMs: number) {
+  const response = await invokeCommand<boolean>('timer_should_auto_submit', { timer, nowMs })
+  return Boolean(unwrapCommandResponse(response, 'timer_should_auto_submit'))
+}
+
+export function useReadingTimer(options: ReadingTimerOptions = {}) {
   const elapsedSeconds = ref(0)
   const timerRunning = ref(false)
   const startedAt = ref('')
-  let practiceTimer = null
-  let practiceTimerBridgeOwner = null
+  const runtimeTimer = ref<TimerState | null>(null)
+  let practiceTimer: number | null = null
+  let tickPending = false
+  let autoSubmitTriggered = false
 
   const activeSuiteSessionId = computed(() => String(unref(options.activeSuiteSessionId) || '').trim())
   const reviewMode = computed(() => Boolean(unref(options.reviewMode)))
@@ -52,199 +76,137 @@ export function useReadingTimer(options = {}) {
     return normalizeSuiteTimerState(source)
   })
   const timerDisplaySeconds = computed(() => {
-    const timer = suiteTimerState.value
-    if (timer?.mode === 'countdown' && Number.isFinite(Number(timer.limitSeconds))) {
-      return Math.max(0, Math.floor(Number(timer.limitSeconds)) - Math.max(0, Math.round(Number(elapsedSeconds.value) || 0)))
+    const timer = runtimeTimer.value ?? suiteTimerState.value
+    if (timer?.mode === 'countdown' && timer.limitSeconds != null) {
+      return Math.max(0, timer.limitSeconds - Math.max(0, Math.floor(elapsedSeconds.value)))
     }
-    return Math.max(0, Math.round(Number(elapsedSeconds.value) || 0))
+    return Math.max(0, Math.floor(elapsedSeconds.value))
   })
   const formattedTimer = computed(() => formatClock(timerDisplaySeconds.value))
 
-  function resolveSuiteElapsedSeconds(referenceMs = Date.now()) {
-    const timer = suiteTimerState.value
-    if (!activeSuiteSessionId.value || !timer) {
-      return null
+  function createLocalTimer(anchorMs = Date.now()): TimerState {
+    return {
+      source: 'local', anchorMs, effectiveStartTimeMs: anchorMs, mode: 'elapsed',
+      limitSeconds: null, pausedOffsetMs: 0, pausedAtMs: anchorMs, running: false
     }
-    let elapsedMs = Math.max(0, referenceMs - timer.anchorMs - timer.pausedOffsetMs)
-    if (!timer.running && timer.pausedAtMs && referenceMs > timer.pausedAtMs) {
-      elapsedMs = Math.max(0, elapsedMs - (referenceMs - timer.pausedAtMs))
-    }
-    return Math.max(0, Math.floor(elapsedMs / 1000))
   }
 
   function applySuiteTimerState() {
     const timer = suiteTimerState.value
-    if (!activeSuiteSessionId.value || !timer) {
-      return
-    }
+    if (!activeSuiteSessionId.value || !timer) return
+    runtimeTimer.value = { ...timer }
     startedAt.value = new Date(timer.anchorMs).toISOString()
-    elapsedSeconds.value = resolveSuiteElapsedSeconds(Date.now()) ?? elapsedSeconds.value
+    timerRunning.value = timer.running && !reviewMode.value
+    void refreshFromRust()
   }
 
   function resolveTimerAnchorMs() {
-    const suiteTimer = suiteTimerState.value
-    if (activeSuiteSessionId.value && suiteTimer?.anchorMs) {
-      return suiteTimer.anchorMs
-    }
     const parsed = Date.parse(startedAt.value)
-    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : Date.now()
+    return runtimeTimer.value?.anchorMs || (Number.isFinite(parsed) && parsed > 0 ? parsed : Date.now())
   }
 
   function getPracticeTimerSnapshot() {
     const nowMs = Date.now()
-    const durationSeconds = Math.max(0, Math.round(Number(elapsedSeconds.value) || 0))
-    const effectiveStartTimeMs = Math.max(0, resolveTimerAnchorMs())
-    const elapsedMs = durationSeconds * 1000
-    const effectiveEndTimeMs = Math.max(effectiveStartTimeMs, effectiveStartTimeMs + elapsedMs)
-    const pausedOffsetMs = Math.max(0, nowMs - effectiveStartTimeMs - elapsedMs)
-    const running = Boolean(timerRunning.value && !reviewMode.value)
-    const suiteTimer = activeSuiteSessionId.value ? suiteTimerState.value : null
+    const timer = runtimeTimer.value ?? createLocalTimer(resolveTimerAnchorMs())
+    const durationSeconds = Math.max(0, Math.floor(elapsedSeconds.value))
     return {
-      running,
+      ...timer,
+      running: Boolean(timerRunning.value && !reviewMode.value),
       elapsedSeconds: durationSeconds,
       durationSeconds,
       displaySeconds: timerDisplaySeconds.value,
-      effectiveStartTimeMs,
-      effectiveEndTimeMs,
-      anchorMs: effectiveStartTimeMs,
-      mode: suiteTimer?.mode || 'elapsed',
-      limitSeconds: suiteTimer?.limitSeconds ?? null,
-      source: activeSuiteSessionId.value ? 'suite' : 'local',
+      effectiveEndTimeMs: Math.max(timer.anchorMs, timer.anchorMs + durationSeconds * 1000),
       actualEndTimeMs: nowMs,
-      pausedAtMs: running ? null : nowMs,
-      pausedOffsetMs
+      pausedAtMs: timerRunning.value ? null : (timer.pausedAtMs ?? nowMs)
     }
   }
 
-  function resolvePracticeTiming(minDurationSeconds = 0, timerSnapshot = null) {
-    const snapshot = timerSnapshot && typeof timerSnapshot === 'object'
-      ? timerSnapshot
-      : getPracticeTimerSnapshot()
-    const startTimeMsRaw = Number(snapshot.effectiveStartTimeMs)
-    const durationRaw = Number(snapshot.durationSeconds ?? snapshot.elapsedSeconds ?? elapsedSeconds.value)
-    const actualEndTimeMsRaw = Number(snapshot.actualEndTimeMs)
-    const effectiveEndTimeMsRaw = Number(snapshot.effectiveEndTimeMs)
-    const startTimeMs = Number.isFinite(startTimeMsRaw) && startTimeMsRaw > 0
-      ? Math.floor(startTimeMsRaw)
-      : resolveTimerAnchorMs()
-    const duration = Math.max(minDurationSeconds, Math.round(Number.isFinite(durationRaw) ? durationRaw : 0))
-    const endTimeMs = Number.isFinite(actualEndTimeMsRaw) && actualEndTimeMsRaw > 0
-      ? Math.floor(actualEndTimeMsRaw)
-      : Date.now()
-    const effectiveEndTimeMs = Number.isFinite(effectiveEndTimeMsRaw) && effectiveEndTimeMsRaw > 0
-      ? Math.max(startTimeMs, startTimeMs + duration * 1000, Math.floor(effectiveEndTimeMsRaw))
-      : Math.max(startTimeMs, startTimeMs + duration * 1000)
-    return {
-      duration,
-      startTimeMs,
-      endTimeMs,
-      effectiveEndTimeMs
-    }
+  function resolvePracticeTiming(minDurationSeconds = 0, timerSnapshot: Record<string, unknown> | null = null) {
+    const snapshot = timerSnapshot ?? getPracticeTimerSnapshot()
+    const startTimeMs = Math.max(1, Number(snapshot.effectiveStartTimeMs) || resolveTimerAnchorMs())
+    const duration = Math.max(minDurationSeconds, Math.floor(Number(snapshot.durationSeconds) || 0))
+    const endTimeMs = Math.max(startTimeMs, Number(snapshot.actualEndTimeMs) || Date.now())
+    const effectiveEndTimeMs = Math.max(startTimeMs + duration * 1000, Number(snapshot.effectiveEndTimeMs) || 0)
+    return { duration, startTimeMs, endTimeMs, effectiveEndTimeMs }
   }
 
-  function notifyPracticeTimerStateChange() {
-    if (!practiceTimerBridgeOwner) {
-      return
-    }
-    emitPracticeTimerStateChange(getPracticeTimerSnapshot)
-  }
-
-  function installTimerBridge() {
-    practiceTimerBridgeOwner = installPracticeTimerBridge({
-      getSnapshot: getPracticeTimerSnapshot,
-      pause: () => stopPracticeTimer(),
-      resume: () => {
-        if (!reviewMode.value) {
-          startPracticeTimer()
-        }
-      },
-      setRunning: (nextRunning) => {
-        if (nextRunning === false) {
-          stopPracticeTimer()
-        } else if (!reviewMode.value) {
-          startPracticeTimer()
-        }
+  async function refreshFromRust() {
+    const timer = runtimeTimer.value
+    if (!timer || tickPending) return
+    tickPending = true
+    try {
+      const nowMs = Date.now()
+      const [elapsed, expired] = await Promise.all([
+        measureTimer(timer, nowMs),
+        shouldAutoSubmit(timer, nowMs)
+      ])
+      elapsedSeconds.value = elapsed
+      if (expired && !autoSubmitTriggered && !reviewMode.value) {
+        autoSubmitTriggered = true
+        stopPracticeTimer()
+        await options.onAutoSubmit?.()
       }
-    })
-  }
-
-  function removeTimerBridge() {
-    if (!practiceTimerBridgeOwner) {
-      return
+    } finally {
+      tickPending = false
     }
-    removePracticeTimerBridge(practiceTimerBridgeOwner)
-    practiceTimerBridgeOwner = null
   }
 
   function startPracticeTimer() {
-    stopPracticeTimer()
+    if (reviewMode.value) return
+    if (practiceTimer != null) window.clearInterval(practiceTimer)
+    const nowMs = Date.now()
+    const timer = runtimeTimer.value ?? createLocalTimer(resolveTimerAnchorMs())
+    if (!timer.running) {
+      if (timer.pausedAtMs && nowMs > timer.pausedAtMs) timer.pausedOffsetMs += nowMs - timer.pausedAtMs
+      timer.pausedAtMs = null
+      timer.running = true
+    }
+    runtimeTimer.value = { ...timer }
     timerRunning.value = true
-    practiceTimer = window.setInterval(() => {
-      elapsedSeconds.value += 1
-    }, 1000)
-    notifyPracticeTimerStateChange()
+    void refreshFromRust()
+    practiceTimer = window.setInterval(() => void refreshFromRust(), 1000)
   }
 
   function stopPracticeTimer() {
-    if (practiceTimer) {
-      window.clearInterval(practiceTimer)
-      practiceTimer = null
-    }
+    if (practiceTimer != null) window.clearInterval(practiceTimer)
+    practiceTimer = null
+    const timer = runtimeTimer.value
+    if (timer?.running) runtimeTimer.value = { ...timer, running: false, pausedAtMs: Date.now() }
     timerRunning.value = false
-    notifyPracticeTimerStateChange()
+    void refreshFromRust()
   }
 
   function toggleTimer() {
-    if (reviewMode.value) {
-      return
-    }
-    if (timerRunning.value) {
-      stopPracticeTimer()
-    } else {
-      startPracticeTimer()
-    }
+    if (reviewMode.value) return
+    timerRunning.value ? stopPracticeTimer() : startPracticeTimer()
   }
 
   function resetPracticeTimerClock(startedAtIso = new Date().toISOString()) {
-    stopPracticeTimer()
+    if (practiceTimer != null) window.clearInterval(practiceTimer)
+    practiceTimer = null
+    const anchorMs = Date.parse(startedAtIso) || Date.now()
+    runtimeTimer.value = createLocalTimer(anchorMs)
     elapsedSeconds.value = 0
     timerRunning.value = false
-    startedAt.value = startedAtIso
-    notifyPracticeTimerStateChange()
+    startedAt.value = new Date(anchorMs).toISOString()
+    autoSubmitTriggered = false
   }
 
-  function setPracticeTimerElapsedSeconds(seconds) {
-    elapsedSeconds.value = Math.max(0, Number(seconds) || 0)
-    notifyPracticeTimerStateChange()
+  function setPracticeTimerElapsedSeconds(seconds: unknown) {
+    const elapsed = Math.max(0, Number(seconds) || 0)
+    const nowMs = Date.now()
+    const timer = runtimeTimer.value ?? createLocalTimer(nowMs - elapsed * 1000)
+    timer.anchorMs = nowMs - elapsed * 1000 - timer.pausedOffsetMs
+    timer.effectiveStartTimeMs = timer.anchorMs
+    runtimeTimer.value = { ...timer }
+    elapsedSeconds.value = elapsed
   }
 
-  watch(() => [
-    elapsedSeconds.value,
-    timerRunning.value,
-    startedAt.value,
-    activeSuiteSessionId.value,
-    suiteTimerState.value?.mode,
-    suiteTimerState.value?.limitSeconds
-  ], () => {
-    notifyPracticeTimerStateChange()
-  })
+  watch(reviewMode, (isReview) => { if (isReview) stopPracticeTimer() })
 
   return {
-    elapsedSeconds,
-    timerRunning,
-    startedAt,
-    suiteTimerState,
-    timerDisplaySeconds,
-    formattedTimer,
-    applySuiteTimerState,
-    getPracticeTimerSnapshot,
-    resolvePracticeTiming,
-    installPracticeTimerBridge: installTimerBridge,
-    removePracticeTimerBridge: removeTimerBridge,
-    startPracticeTimer,
-    stopPracticeTimer,
-    toggleTimer,
-    resetPracticeTimerClock,
-    setPracticeTimerElapsedSeconds
+    elapsedSeconds, timerRunning, startedAt, suiteTimerState, timerDisplaySeconds, formattedTimer,
+    applySuiteTimerState, getPracticeTimerSnapshot, resolvePracticeTiming, startPracticeTimer,
+    stopPracticeTimer, toggleTimer, resetPracticeTimerClock, setPracticeTimerElapsedSeconds
   }
 }

@@ -3,15 +3,27 @@ import { readingLibraryApi } from './api'
 import { normalizeReadingRecordId } from './contracts'
 import { createReadingAssetController } from './readingAssetCore.js'
 
-export function useReadingAsset(dependencies = {}) {
+interface ReadingAsset {
+  payload?: unknown
+  [key: string]: unknown
+}
+
+interface ReadingAssetApi {
+  getAsset: (assetId: string, options?: { refresh?: boolean }) => Promise<ReadingAsset>
+  listAssets: (options?: { refresh?: boolean }) => Promise<unknown>
+}
+
+interface ReadingAssetDependencies { api?: ReadingAssetApi }
+
+export function useReadingAsset(dependencies: ReadingAssetDependencies = {}) {
   const api = dependencies.api || readingLibraryApi
   const controller = createReadingAssetController(api, normalizeReadingRecordId)
-  const asset = ref(controller.state.asset)
+  const asset = ref<ReadingAsset | null>(controller.state.asset)
   const loading = ref(controller.state.loading)
   const error = ref(controller.state.error)
   const payload = computed(() => asset.value?.payload || null)
 
-  async function loadReadingAsset(assetId, options = {}) {
+  async function loadReadingAsset(assetId: string, options: { refresh?: boolean } = {}) {
     loading.value = true
     try {
       const data = await controller.loadReadingAsset(assetId, options)

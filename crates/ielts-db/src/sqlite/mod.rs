@@ -70,7 +70,9 @@ pub fn open_connection(opts: &DbOpenOptions) -> DbResult<Connection> {
     }
 
     let conn = Connection::open_with_flags(&opts.path, flags)?;
-    conn.busy_timeout(std::time::Duration::from_millis(opts.busy_timeout_ms as u64))?;
+    conn.busy_timeout(std::time::Duration::from_millis(
+        opts.busy_timeout_ms as u64,
+    ))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     if opts.enable_wal && !opts.read_only {
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;

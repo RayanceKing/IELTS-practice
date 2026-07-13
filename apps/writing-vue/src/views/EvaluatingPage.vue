@@ -85,6 +85,7 @@
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { evaluate, getErrorMessage } from '@/api/client.js'
+import { getDraft } from '@/api/writing-repository.js'
 import {
   EVALUATION_CONTRACT_VERSION,
   normalizeList,
@@ -118,8 +119,6 @@ const reviewData = ref({})
 const timelineLogs = ref([])
 const isRetrying = ref(false)
 let eventListenerId = null
-let lastPersistedCache = ''
-let cachePersistRetryAt = 0
 const seenEventSequences = new Set()
 let lastLogSignature = ''
 
@@ -179,15 +178,6 @@ const recentLogs = computed(() => timelineLogs.value.slice(-3))
 const currentStageLabel = computed(() => stageLabel(currentStage.value, stageMessage.value))
 
 const tempDraft = ref(null)
-
-onMounted(() => {
-  const cachedDraft = sessionStorage.getItem('temp_essay_' + props.sessionId)
-  if (cachedDraft) {
-    try {
-      tempDraft.value = JSON.parse(cachedDraft)
-    } catch(e) {}
-  }
-})
 
 const essayContentFull = computed(() => {
   return tempDraft.value?.content || (fullResult.value.input_context?.content || '')
@@ -281,7 +271,6 @@ function handleEvent(event) {
           status: 'degraded',
           message: typeof event.data?.message === 'string' ? event.data.message : ''
         }
-        persistCachedResult()
       }
       break
 
@@ -291,28 +280,24 @@ function handleEvent(event) {
       scoreData.value = event.data
       fullResult.value.score = event.data
       fullResult.value.scorecard = event.data
-      persistCachedResult()
       break
 
     case 'analysis':
       appendLog('analysis', '评分分析已生成', event)
       applyStage('scoring', '评分分析已生成，正在继续深度评审...')
       mergeAnalysis(event.data)
-      persistCachedResult()
       break
 
     case 'review':
       appendLog('review', event.data?.review_degraded ? '详解降级，仅保留评分结果' : '段落详解已生成', event)
       applyStage('reviewing', '正在输出段落和句级详解...')
       mergeReview(event.data)
-      persistCachedResult()
       break
 
     case 'sentence':
       appendLog('sentence', `句级诊断已更新（${sentences.value.length + 1}）`, event)
       mergeSentences(Array.isArray(event.data) ? event.data : [event.data])
       applyStage('reviewing', '正在输出段落和句级详解...')
-      persistCachedResult()
       break
 
     case 'feedback':
@@ -320,7 +305,6 @@ function handleEvent(event) {
       feedback.value = event.data
       fullResult.value.feedback = event.data
       fullResult.value.overall_feedback = event.data
-      persistCachedResult()
       break
 
     case 'complete':
@@ -352,7 +336,6 @@ function handleEvent(event) {
         fullResult.value.feedback = event.data.overall_feedback
         fullResult.value.overall_feedback = event.data.overall_feedback
       }
-      persistCachedResult()
       void navigateToResult()
       break
 
@@ -372,6 +355,15 @@ function handleEvent(event) {
 
 async function hydrateSessionState() {
   try {
+    const { draft } = await getDraft(props.sessionId)
+    if (draft) {
+      tempDraft.value = {
+        task_type: draft.taskType || draft.task_type || '',
+        topic_text: draft.promptSnapshot || draft.prompt_snapshot || '',
+        content: draft.contentText || draft.content_text || '',
+        word_count: draft.wordCount ?? draft.word_count ?? 0
+      }
+    }
     const state = await evaluate.getSessionState(props.sessionId)
     const events = Array.isArray(state?.events) ? state.events : []
     for (const event of events) {
@@ -465,12 +457,6 @@ async function handleRetry() {
       word_count: retryPayload.word_count
     })
 
-    try {
-      sessionStorage.setItem(`temp_essay_${result.sessionId}`, JSON.stringify(retryPayload))
-    } catch (cacheError) {
-      console.warn('重试会话草稿缓存写入失败', cacheError)
-    }
-
     appendLog('system', '新会话已创建，正在重启评分流程。')
     await router.replace({
       name: 'Evaluating',
@@ -499,7 +485,7 @@ async function navigateToResult() {
     await router.replace({
       name: 'Result',
       params: { sessionId: props.sessionId },
-      query: fullResult.value.essayId ? { essayId: String(fullResult.value.essayId) } : {}
+      query: {}
     })
   } catch (err) {
     hasNavigatedToResult.value = false
@@ -707,29 +693,6 @@ function appendLog(kind, message, event = null) {
   ].slice(-30)
 }
 
-function persistCachedResult() {
-  if (typeof sessionStorage === 'undefined') {
-    return
-  }
-
-  const now = Date.now()
-  if (cachePersistRetryAt > now) {
-    return
-  }
-
-  try {
-    const serialized = JSON.stringify(fullResult.value)
-    if (serialized === lastPersistedCache) {
-      return
-    }
-
-    sessionStorage.setItem(`evaluation_${props.sessionId}`, serialized)
-    lastPersistedCache = serialized
-  } catch (error) {
-    cachePersistRetryAt = now + 1000
-    console.warn('评测缓存写入失败，继续使用内存态结果', error)
-  }
-}
 </script>
 <style scoped>
 .evaluating-page {

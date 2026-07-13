@@ -16,12 +16,12 @@ pub struct BrowserImportReport {
     pub errors: Vec<String>,
 }
 
-pub fn import_browser_export_value(conn: &Connection, doc: &Value) -> DbResult<BrowserImportReport> {
+pub fn import_browser_export_value(
+    conn: &Connection,
+    doc: &Value,
+) -> DbResult<BrowserImportReport> {
     let mut report = BrowserImportReport::default();
-    let data = doc
-        .get("data")
-        .cloned()
-        .unwrap_or_else(|| doc.clone());
+    let data = doc.get("data").cloned().unwrap_or_else(|| doc.clone());
 
     if let Some(records) = data.get("practice_records").and_then(|v| v.as_array()) {
         for record in records {
@@ -80,10 +80,7 @@ fn import_practice_record(conn: &Connection, raw: &Value) -> DbResult<()> {
         .get("examId")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    let duration = raw
-        .get("duration")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let duration = raw.get("duration").and_then(|v| v.as_u64()).unwrap_or(0);
     let correct = raw.get("correctAnswers").and_then(|v| v.as_f64());
     let total = raw
         .get("totalQuestions")
@@ -107,10 +104,7 @@ fn import_practice_record(conn: &Connection, raw: &Value) -> DbResult<()> {
     }
 
     let mut answers = Vec::new();
-    if let Some(map) = raw
-        .pointer("/realData/answers")
-        .and_then(|v| v.as_object())
-    {
+    if let Some(map) = raw.pointer("/realData/answers").and_then(|v| v.as_object()) {
         for (qid, value) in map {
             answers.push(ielts_domain::AttemptAnswer {
                 question_id: qid.clone(),
@@ -130,13 +124,7 @@ fn import_practice_record(conn: &Connection, raw: &Value) -> DbResult<()> {
     let score_value = match activity {
         Activity::Reading => match (correct, total) {
             (Some(c), Some(t)) if t > 0 => Some(c / f64::from(t)),
-            _ => score.map(|s| {
-                if s > 1.0 {
-                    s / 100.0
-                } else {
-                    s
-                }
-            }),
+            _ => score.map(|s| if s > 1.0 { s / 100.0 } else { s }),
         },
         Activity::Writing => score,
     };

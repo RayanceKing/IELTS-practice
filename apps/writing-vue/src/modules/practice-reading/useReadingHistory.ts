@@ -5,7 +5,9 @@ export function useReadingHistory() {
   return useReadingHistoryWithDependencies()
 }
 
-export function useReadingHistoryWithDependencies(dependencies = {}) {
+interface ReadingHistoryDependencies { api?: typeof readingHistoryApi }
+
+export function useReadingHistoryWithDependencies(dependencies: ReadingHistoryDependencies = {}) {
   const api = dependencies.api || readingHistoryApi
   return createReadingHistoryClient(api)
 }

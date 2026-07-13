@@ -31,7 +31,10 @@ pub struct ShadowReport {
 
 /// Compare two history view-model lists (old service vs new DB projection).
 /// Differences are recorded only; callers must not affect user flows.
-pub fn compare_history_views(left: &[HistoryListItemVm], right: &[HistoryListItemVm]) -> ShadowReport {
+pub fn compare_history_views(
+    left: &[HistoryListItemVm],
+    right: &[HistoryListItemVm],
+) -> ShadowReport {
     let mut report = ShadowReport {
         left_count: left.len(),
         right_count: right.len(),

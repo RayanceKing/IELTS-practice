@@ -34,6 +34,31 @@ export async function listSecretRefs() {
   return unwrapCommandResponse(response, 'list_secret_refs') || []
 }
 
+export async function listAiConfigs() {
+  const response = await invokeCommand('ai_list_configs')
+  return unwrapCommandResponse(response, 'ai_list_configs') || []
+}
+
+export async function upsertAiConfig(cmd) {
+  const response = await invokeCommand('ai_upsert_config', { cmd })
+  return unwrapCommandResponse(response, 'ai_upsert_config')
+}
+
+export async function deleteAiConfig(id) {
+  const response = await invokeCommand('ai_delete_config', { id })
+  return unwrapCommandResponse(response, 'ai_delete_config')
+}
+
+export async function setDefaultAiConfig(id) {
+  const response = await invokeCommand('ai_set_default_config', { id })
+  return unwrapCommandResponse(response, 'ai_set_default_config')
+}
+
+export async function testAiProvider() {
+  const response = await invokeCommand('ai_test_provider')
+  return unwrapCommandResponse(response, 'ai_test_provider')
+}
+
 export async function createBackup(appVersion) {
   const response = await invokeCommand('create_backup', { appVersion: appVersion || null })
   return { source: 'tauri', manifest: unwrapCommandResponse(response, 'create_backup') }
@@ -50,6 +75,11 @@ export const settingsRepository = {
   migrateLocalPreferences,
   setSecret,
   listSecretRefs,
+  listAiConfigs,
+  upsertAiConfig,
+  deleteAiConfig,
+  setDefaultAiConfig,
+  testAiProvider,
   createBackup,
   importBackupPath,
   isTauriRuntime

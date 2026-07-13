@@ -8,13 +8,6 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import {
-  destroyLegacyShuiBackground,
-  ensureLegacyShuiBackgroundScripts,
-  installLegacyBackgroundThemeSwitcher,
-  removeLegacyBackgroundThemeSwitcher,
-  switchLegacyBackgroundTheme
-} from '@/modules/legacy/legacyBridge'
 
 const STORAGE_KEY = 'three_bg_theme'
 
@@ -37,8 +30,6 @@ const themes = {
 }
 
 const activeTheme = ref('misty-mountain')
-let mounted = false
-let legacyLoaderPromise = null
 
 function normalizeThemeName(themeName) {
   return Object.prototype.hasOwnProperty.call(themes, themeName)
@@ -69,48 +60,24 @@ function applyFallbackTheme(themeName) {
 function switchTheme(themeName) {
   const nextThemeName = normalizeThemeName(themeName)
   applyFallbackTheme(nextThemeName)
-  switchLegacyBackgroundTheme(nextThemeName, { skipIfMatches: switchTheme })
 }
 
 function handleThemeChange(event) {
   switchTheme(event?.detail?.theme || getStoredTheme())
 }
 
-function startLegacyBackground() {
-  if (!legacyLoaderPromise) {
-    legacyLoaderPromise = ensureLegacyShuiBackgroundScripts()
-      .catch((error) => {
-        console.warn('[SHUI Three Background] fallback applied:', error)
-        legacyLoaderPromise = null
-        document.body.classList.add('three-bg-fallback')
-      })
-  }
-  return legacyLoaderPromise.then(() => {
-    if (!mounted) return
-    const themeName = getStoredTheme()
-    applyFallbackTheme(themeName)
-    switchLegacyBackgroundTheme(themeName)
-  })
-}
-
 function destroy() {
-  mounted = false
   window.removeEventListener('shui-bg-theme-change', handleThemeChange)
-  removeLegacyBackgroundThemeSwitcher(switchTheme)
-  destroyLegacyShuiBackground()
-  document.body.classList.remove('hero-body', 'shui-gradient-active', 'three-bg-active', 'three-bg-fallback')
+  document.body.classList.remove('hero-body', 'shui-gradient-active')
   delete document.documentElement.dataset.shuiBgTheme
   document.documentElement.style.removeProperty('--shui-gradient-start')
   document.documentElement.style.removeProperty('--shui-gradient-end')
 }
 
 onMounted(() => {
-  mounted = true
   applyFallbackTheme(getStoredTheme())
   window.addEventListener('shui-bg-theme-change', handleThemeChange)
-  installLegacyBackgroundThemeSwitcher(switchTheme)
   document.body.classList.add('hero-body', 'shui-gradient-active')
-  startLegacyBackground()
 })
 
 onBeforeUnmount(destroy)
@@ -139,11 +106,6 @@ onBeforeUnmount(destroy)
   animation: bodyGradientRotation 120s ease-in-out infinite;
   transform: translateZ(0);
   backface-visibility: hidden;
-}
-
-body.three-bg-active #shui-three-bg {
-  background: transparent;
-  animation: none;
 }
 
 @keyframes bodyGradientRotation {

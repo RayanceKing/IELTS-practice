@@ -101,7 +101,10 @@ pub fn normalize_token(value: &str) -> String {
     if matches!(lowered.as_str(), "false" | "f" | "no" | "n") {
         return "false".into();
     }
-    if matches!(lowered.as_str(), "ng" | "notgiven" | "not-given" | "not given") {
+    if matches!(
+        lowered.as_str(),
+        "ng" | "notgiven" | "not-given" | "not given"
+    ) {
         return "not given".into();
     }
     if cleaned.len() == 1 && cleaned.chars().next().unwrap().is_ascii_alphabetic() {
@@ -375,22 +378,15 @@ mod tests {
 
     #[test]
     fn alternatives_match_any() {
-        let (ok, _, _, mode) = compare_answer(
-            &json!("B"),
-            &json!(["A", "B", "C"]),
-            None,
-        );
+        let (ok, _, _, mode) = compare_answer(&json!("B"), &json!(["A", "B", "C"]), None);
         assert_eq!(mode, MatchMode::Alternatives);
         assert_eq!(ok, Some(true));
     }
 
     #[test]
     fn set_match_checkbox() {
-        let (ok, _, _, mode) = compare_answer(
-            &json!(["A", "C"]),
-            &json!(["C", "A"]),
-            Some("checkbox"),
-        );
+        let (ok, _, _, mode) =
+            compare_answer(&json!(["A", "C"]), &json!(["C", "A"]), Some("checkbox"));
         assert_eq!(mode, MatchMode::Set);
         assert_eq!(ok, Some(true));
     }

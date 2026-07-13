@@ -25,7 +25,9 @@ fn migration_applies_and_is_idempotent() {
     verify_idempotent(&mut conn).expect("idempotent");
     checkpoint_wal(&conn).expect("checkpoint");
     let version: i64 = conn
-        .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))
+        .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(version, 5);
 }
@@ -35,9 +37,8 @@ fn import_reading_archive_and_shadow_match() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("v2.db");
     let conn = open_and_migrate(&db_path).unwrap();
-    let archive = repo_root().join(
-        "tests/fixtures/legacy-data/reading-archive/reading-archive-v1-sample.json",
-    );
+    let archive = repo_root()
+        .join("tests/fixtures/legacy-data/reading-archive/reading-archive-v1-sample.json");
     let report = import_reading_archive_file(&conn, &archive).unwrap();
     assert_eq!(report.imported, 1);
     assert_eq!(report.failed, 0);
@@ -58,8 +59,8 @@ fn import_browser_export_settings_and_records() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("v2.db");
     let conn = open_and_migrate(&db_path).unwrap();
-    let path = repo_root()
-        .join("tests/fixtures/legacy-data/browser-export/legacy-browser-export-v1.json");
+    let path =
+        repo_root().join("tests/fixtures/legacy-data/browser-export/legacy-browser-export-v1.json");
     let report = import_browser_export_file(&conn, &path).unwrap();
     assert_eq!(report.practice_records, 1);
     assert!(report.settings >= 2);
@@ -154,10 +155,12 @@ fn legacy_sqlite_scan_and_migrate() {
     assert_eq!(report.essays_imported, 1);
     assert_eq!(report.target_attempts, 2);
     assert!(report.errors.is_empty());
-    assert!(backup_dir
-        .read_dir()
+    assert!(backup_dir.read_dir().unwrap().any(|e| e
         .unwrap()
-        .any(|e| e.unwrap().path().extension().and_then(|x| x.to_str()) == Some("db")));
+        .path()
+        .extension()
+        .and_then(|x| x.to_str())
+        == Some("db")));
 
     // Old DB still has original rows (read-only migration source).
     let legacy = open_connection(&DbOpenOptions::read_only(legacy_path)).unwrap();

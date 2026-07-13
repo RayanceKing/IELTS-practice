@@ -184,7 +184,7 @@
         <h3 id="notes-panel-title">Notes</h3>
         <button id="close-note" type="button" @click="closeFloatingPanels">Close</button>
       </header>
-      <textarea v-model="notesText" aria-label="阅读笔记"></textarea>
+      <textarea ref="notesTextarea" v-model="notesText" aria-label="阅读笔记"></textarea>
     </div>
     <div class="overlay" v-show="settingsPanelOpen || notesPanelOpen" @click="closeFloatingPanels"></div>
 
@@ -416,19 +416,16 @@ import { useReadingCoach } from '@/modules/practice-reading/useReadingCoach'
 import { useReadingHighlights } from '@/modules/practice-reading/useReadingHighlights'
 import { useReadingTimer } from '@/modules/practice-reading/useReadingTimer'
 import { useReadingAttempt } from '@/modules/practice-reading/useReadingAttempt'
+import {
+  readingFontSizeOptions as fontSizeOptions,
+  readingThemeModeOptions as themeModeOptions,
+  useReadingUiPreferences
+} from '@/modules/practice-reading/useReadingUiPreferences'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 import { submitSuitePassage as tauriSubmitSuitePassage } from '@/api/modes-repository.js'
 
 const ENDLESS_STATE_KEY = 'practice_reading_endless_state_v1'
 const ENDLESS_COUNTDOWN_SEC = 5
-const READING_NOTES_STORAGE_PREFIX = 'practice_reading_notes_'
-const SUITE_AUTO_ADVANCE_STORAGE_KEY = 'suite_auto_advance_after_submit'
-const VOCAB_FALLBACK_STORAGE_KEY = 'exam_system_vocab_list_reading_highlights'
-const DICTIONARY_WORDLIST_SCRIPTS = [
-  'assets/wordlists/ecdict_reading.bundle.js',
-  'assets/wordlists/ielts_core.bundle.js'
-]
-const DICTIONARY_SERVICE_SCRIPT = 'js/core/dictionaryService.js'
 const EXPLANATION_SPLIT_KINDS = new Set([
   'single_choice',
   'multi_choice',
@@ -445,15 +442,6 @@ const coachSelectionActions = [
   { id: 'explain_selection', label: '解释选中' },
   { id: 'locate_evidence', label: '定位证据' },
   { id: 'find_paraphrases', label: '同义替换' }
-]
-const fontSizeOptions = [
-  { value: 'normal', label: 'A' },
-  { value: 'large', label: 'A', style: { fontSize: '1.1rem' } },
-  { value: 'xlarge', label: 'A', style: { fontSize: '1.25rem' } }
-]
-const themeModeOptions = [
-  { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' }
 ]
 
 const props = defineProps({
@@ -493,29 +481,44 @@ const interactionCount = ref(0)
 const currentDragPayload = ref(null)
 const endlessCountdown = ref(0)
 const endlessNextAssetId = ref('')
-const settingsPanelOpen = ref(false)
-const notesPanelOpen = ref(false)
-const notesText = ref('')
-const readingFontSize = ref('normal')
-const readingThemeMode = ref('light')
 const readingCoachEnabled = ref(true)
 const readingCoachSettingSaving = ref(false)
 const readingCoachSettingError = ref('')
-const suiteAutoAdvance = ref(true)
 const leftPanePercent = ref(50)
 const dividerDragging = ref(false)
 let endlessTimer = null
 let lastSelectionRange = null
 let currentHighlightNode = null
 let dividerPointerId = null
-let suppressReadingNotesPersist = false
-let reviewDictionaryRuntimePromise = null
-const runtimeScriptPromises = new Map()
 const activeQuestionVisit = {
   questionId: '',
   startedAtMs: 0
 }
 const activeQuestionId = ref('')
+
+const {
+  settingsPanelOpen,
+  notesPanelOpen,
+  notesTextarea,
+  notesText,
+  readingFontSize,
+  readingThemeMode,
+  suiteAutoAdvance,
+  readingPageClassList: preferencePageClassList,
+  readingPageStyle,
+  initializeReadingPreferences,
+  toggleSettingsPanel,
+  toggleNotesPanel,
+  closeFloatingPanels,
+  selectReadingFont,
+  selectReadingTheme,
+  setSuiteAutoAdvance,
+  loadReadingNotes,
+  clearReadingNotesDraft
+} = useReadingUiPreferences({
+  assetSource: () => asset.value,
+  onThemeChanged: () => syncDropzoneThemeStyles()
+})
 
 const activeSuiteSessionId = computed(() => {
   const fromProp = String(props.suiteSessionId || '').trim()
@@ -611,8 +614,6 @@ const {
   applySuiteTimerState,
   getPracticeTimerSnapshot,
   resolvePracticeTiming,
-  installPracticeTimerBridge,
-  removePracticeTimerBridge,
   startPracticeTimer,
   stopPracticeTimer,
   toggleTimer,
@@ -621,7 +622,8 @@ const {
 } = useReadingTimer({
   activeSuiteSessionId,
   reviewMode,
-  suiteTimerSource: () => suiteSession.value?.timer
+  suiteTimerSource: () => suiteSession.value?.timer,
+  onAutoSubmit: () => submitAnswers()
 })
 const {
   coachQuery,
@@ -681,6 +683,8 @@ const {
   keepSelectionToolbar,
   highlightSnapshot,
   dictionaryBubble,
+  lookupTermInDictionary,
+  saveTermToVocab,
   normalizeHighlightSnapshot: normalizeHighlightSnapshotState,
   resetHighlightUiState: resetHighlightUiStateFromComposable
 } = useReadingHighlights()
@@ -693,13 +697,9 @@ const canRecycleSubmittedAttempt = computed(() => Boolean(
   && !submitting.value
 ))
 const readingPageClassList = computed(() => ({
-  [`font-${readingFontSize.value}`]: true,
-  'dark-mode': readingThemeMode.value === 'dark',
+  ...preferencePageClassList.value,
   'reading-memorize-mode': isMemorizeMode.value,
   'reading-pane-resizing': dividerDragging.value
-}))
-const readingPageStyle = computed(() => ({
-  '--reading-font-scale': readingFontSize.value === 'xlarge' ? '1.18' : (readingFontSize.value === 'large' ? '1.08' : '1')
 }))
 const readingWorkspaceStyle = computed(() => ({
   '--reading-left-pane-width': `${leftPanePercent.value}%`
@@ -837,7 +837,6 @@ const analysisKindRows = computed(() => {
 
 onMounted(async () => {
   initializeReadingPreferences()
-  installPracticeTimerBridge()
   document.addEventListener('selectionchange', handleSelectionChange)
   document.addEventListener('click', handleDocumentClick, true)
   await loadReadingCoachPreference()
@@ -848,7 +847,6 @@ onBeforeUnmount(() => {
   flushActiveQuestionVisit()
   clearEndlessTimer()
   stopPracticeTimer()
-  removePracticeTimerBridge()
   document.removeEventListener('selectionchange', handleSelectionChange)
   document.removeEventListener('click', handleDocumentClick, true)
   removeDividerDragListeners()
@@ -920,9 +918,7 @@ async function loadAsset() {
   resetReadingCoachState()
   closeFloatingPanels()
   resetHighlightUiStateFromComposable()
-  suppressReadingNotesPersist = true
-  notesText.value = ''
-  suppressReadingNotesPersist = false
+  clearReadingNotesDraft()
   clearEndlessTimer()
   resetPracticeTimerClock()
   endlessNextAssetId.value = ''
@@ -1027,27 +1023,6 @@ function getCurrentScrollY() {
   return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : 0
 }
 
-function initializeReadingPreferences() {
-  try {
-    const storedFont = window.localStorage?.getItem('reading_font_size')
-    if (fontSizeOptions.some((option) => option.value === storedFont)) {
-      readingFontSize.value = storedFont
-    }
-  } catch (_) {}
-  try {
-    const storedTheme = window.localStorage?.getItem('reading_theme_mode')
-    if (themeModeOptions.some((option) => option.value === storedTheme)) {
-      readingThemeMode.value = storedTheme
-    }
-  } catch (_) {}
-  try {
-    const storedSuiteFlow = window.localStorage?.getItem(SUITE_AUTO_ADVANCE_STORAGE_KEY)
-    if (storedSuiteFlow === 'true' || storedSuiteFlow === 'false') {
-      suiteAutoAdvance.value = storedSuiteFlow === 'true'
-    }
-  } catch (_) {}
-}
-
 async function loadReadingCoachPreference() {
   readingCoachSettingError.value = ''
   try {
@@ -1096,88 +1071,6 @@ async function updateReadingCoachEnabled(enabled) {
     readingCoachSettingSaving.value = false
   }
 }
-
-function toggleSettingsPanel() {
-  const nextVisible = !settingsPanelOpen.value
-  closeFloatingPanels()
-  settingsPanelOpen.value = nextVisible
-}
-
-function toggleNotesPanel() {
-  const nextVisible = !notesPanelOpen.value
-  closeFloatingPanels()
-  notesPanelOpen.value = nextVisible
-  if (nextVisible) {
-    nextTick(() => {
-      document.querySelector('#notes-panel textarea')?.focus?.()
-    })
-  }
-}
-
-function closeFloatingPanels() {
-  settingsPanelOpen.value = false
-  notesPanelOpen.value = false
-}
-
-function selectReadingFont(value) {
-  if (!fontSizeOptions.some((option) => option.value === value)) {
-    return
-  }
-  readingFontSize.value = value
-  try {
-    window.localStorage?.setItem('reading_font_size', value)
-  } catch (_) {}
-}
-
-function selectReadingTheme(value) {
-  if (!themeModeOptions.some((option) => option.value === value)) {
-    return
-  }
-  readingThemeMode.value = value
-  syncDropzoneThemeStyles()
-  nextTick(() => syncDropzoneThemeStyles())
-  try {
-    window.localStorage?.setItem('reading_theme_mode', value)
-  } catch (_) {}
-}
-
-function setSuiteAutoAdvance(value) {
-  suiteAutoAdvance.value = Boolean(value)
-  try {
-    window.localStorage?.setItem(SUITE_AUTO_ADVANCE_STORAGE_KEY, String(suiteAutoAdvance.value))
-  } catch (_) {}
-}
-
-function loadReadingNotes() {
-  if (!asset.value?.id) {
-    suppressReadingNotesPersist = true
-    notesText.value = ''
-    suppressReadingNotesPersist = false
-    return
-  }
-  try {
-    suppressReadingNotesPersist = true
-    notesText.value = window.localStorage?.getItem(`${READING_NOTES_STORAGE_PREFIX}${asset.value.id}`) || ''
-  } catch (_) {
-    notesText.value = ''
-  } finally {
-    suppressReadingNotesPersist = false
-  }
-}
-
-function persistReadingNotes() {
-  if (suppressReadingNotesPersist) {
-    return
-  }
-  if (!asset.value?.id) {
-    return
-  }
-  try {
-    window.localStorage?.setItem(`${READING_NOTES_STORAGE_PREFIX}${asset.value.id}`, notesText.value || '')
-  } catch (_) {}
-}
-
-watch(notesText, persistReadingNotes)
 
 function restoreSubmittedMetadata(loadedSubmission) {
   markedQuestions.value = Array.isArray(loadedSubmission?.markedQuestions)
@@ -2237,73 +2130,11 @@ async function openDictionaryBubble(highlight) {
   dictionaryBubble.top = Math.max(12, Math.round(rect.bottom + 8))
   dictionaryBubble.visible = true
   currentHighlightNode = highlight
-  try {
-    await ensureReviewDictionaryRuntime()
-  } catch (error) {
-    console.warn('加载阅读高亮词典失败:', error)
-  }
+  const lookup = await lookupTermInDictionary(term)
   if (currentHighlightNode !== highlight || !dictionaryBubble.visible) {
     return
   }
-  const lookup = lookupLocalWord(term)
   applyDictionaryLookupToBubble(lookup, term)
-}
-
-function resolveRuntimeAssetUrl(relativePath) {
-  const normalized = String(relativePath || '').replace(/^\/+/, '')
-  try {
-    const currentUrl = new URL(window.location.href)
-    if (currentUrl.pathname.includes('/dist/writing/')) {
-      return new URL(`../../${normalized}`, currentUrl.href).href
-    }
-  } catch (_) {}
-  return `/${normalized}`
-}
-
-function loadRuntimeScript(relativePath) {
-  if (runtimeScriptPromises.has(relativePath)) return runtimeScriptPromises.get(relativePath)
-  const existing = document.querySelector(`script[data-reading-runtime-script="${relativePath}"]`)
-  if (existing) {
-    const promise = Promise.resolve()
-    runtimeScriptPromises.set(relativePath, promise)
-    return promise
-  }
-  const promise = new Promise((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = resolveRuntimeAssetUrl(relativePath)
-    script.async = false
-    script.dataset.readingRuntimeScript = relativePath
-    script.onload = () => resolve()
-    script.onerror = () => {
-      runtimeScriptPromises.delete(relativePath)
-      reject(new Error(`加载阅读运行时脚本失败：${relativePath}`))
-    }
-    document.head.appendChild(script)
-  })
-  runtimeScriptPromises.set(relativePath, promise)
-  return promise
-}
-
-function ensureReviewDictionaryRuntime() {
-  if (
-    window.DictionaryService?.lookup
-    && window.__LOCAL_DICTIONARIES__?.ecdict?.entries?.length
-    && window.__EMBEDDED_WORDLISTS__?.ielts_core?.length
-  ) {
-    return Promise.resolve()
-  }
-  if (!reviewDictionaryRuntimePromise) {
-    reviewDictionaryRuntimePromise = Promise.all(DICTIONARY_WORDLIST_SCRIPTS.map(loadRuntimeScript))
-      .then(() => loadRuntimeScript(DICTIONARY_SERVICE_SCRIPT))
-      .then(() => {
-        window.DictionaryService?.init?.()
-      })
-      .catch((error) => {
-        reviewDictionaryRuntimePromise = null
-        throw error
-      })
-  }
-  return reviewDictionaryRuntimePromise
 }
 
 function formatDictionaryLookupMeaning(result) {
@@ -2406,89 +2237,18 @@ function applyDictionaryLookupToBubble(lookup, fallbackTerm) {
   dictionaryBubble.found = normalized.found
 }
 
-function lookupLocalWord(term) {
-  const normalized = normalizeComparableText(term)
-  try {
-    const service = window.DictionaryService
-    if (service?.lookup) {
-      const result = service.lookup(normalized)
-      if (result?.found) {
-        return normalizeDictionaryLookupResult(result, normalized)
-      }
-    }
-  } catch (_) {}
-  const list = readVocabFallbackList()
-  const existing = list.words.find((word) => String(word.word || '').trim().toLowerCase() === normalized.toLowerCase())
-  return existing
-    ? normalizeDictionaryLookupResult({
-      found: true,
-      term: existing.word,
-      meaning: existing.meaning || existing.definition || existing.note || '',
-      example: existing.example || '',
-      sourceLabel: '本地生词本'
-    }, normalized)
-    : normalizeDictionaryLookupResult({ found: false, term: normalized }, normalized)
-}
-
-function readVocabFallbackList() {
-  try {
-    const raw = window.localStorage?.getItem(VOCAB_FALLBACK_STORAGE_KEY)
-    if (!raw) return { words: [] }
-    const parsed = JSON.parse(raw)
-    const data = parsed && Object.prototype.hasOwnProperty.call(parsed, 'data') ? parsed.data : parsed
-    return data && typeof data === 'object' && Array.isArray(data.words) ? data : { words: [] }
-  } catch (_) {
-    return { words: [] }
-  }
-}
-
-function writeVocabFallbackList(list) {
-  try {
-    window.localStorage?.setItem(VOCAB_FALLBACK_STORAGE_KEY, JSON.stringify({
-      data: list,
-      timestamp: Date.now(),
-      version: '1.0.0',
-      compressed: false
-    }))
-    return true
-  } catch (_) {
-    return false
-  }
-}
-
-function saveDictionaryBubbleWord() {
+async function saveDictionaryBubbleWord() {
   const word = normalizeComparableText(dictionaryBubble.term)
   if (!word) return
-  const now = new Date().toISOString()
-  const list = readVocabFallbackList()
-  const normalizedKey = word.toLowerCase()
-  const existingIndex = list.words.findIndex((entry) => String(entry.word || '').trim().toLowerCase() === normalizedKey)
-  const record = {
-    id: `reading-highlight-${normalizedKey.replace(/[^a-z0-9]+/g, '-')}`,
-    word,
+  const item = await saveTermToVocab({
+    term: word,
     meaning: dictionaryBubble.meaning || dictionaryBubble.definition || '待补充释义',
+    definition: dictionaryBubble.definition || dictionaryBubble.meaning || '待补充释义',
     example: dictionaryBubble.example || '',
-    note: [
-      dictionaryBubble.phonetic ? `音标: ${dictionaryBubble.phonetic}` : '',
-      dictionaryBubble.partOfSpeech ? `词性: ${dictionaryBubble.partOfSpeech}` : '',
-      dictionaryBubble.sourceLabel ? `来源: ${dictionaryBubble.sourceLabel}` : '来源: 阅读高亮',
-      dictionaryBubble.license ? `许可: ${dictionaryBubble.license}` : ''
-    ].filter(Boolean).join('；'),
-    timestamp: Date.now(),
-    source: 'reading-highlight',
-    createdAt: existingIndex >= 0 ? list.words[existingIndex].createdAt || now : now,
-    updatedAt: now
-  }
-  if (existingIndex >= 0) {
-    list.words.splice(existingIndex, 1, { ...list.words[existingIndex], ...record })
-  } else {
-    list.words.push(record)
-  }
-  list.id = list.id || 'reading-highlights'
-  list.name = list.name || '阅读高亮生词'
-  list.source = list.source || 'reading-highlight'
-  list.updatedAt = now
-  dictionaryBubble.saved = writeVocabFallbackList(list)
+    phonetic: dictionaryBubble.phonetic || null,
+    partOfSpeech: dictionaryBubble.partOfSpeech || null
+  }, asset.value?.id || null, tauriAttemptId || null)
+  dictionaryBubble.saved = Boolean(item)
 }
 
 const readingAttempt = useReadingAttempt()

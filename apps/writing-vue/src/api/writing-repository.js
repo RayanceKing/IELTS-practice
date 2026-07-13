@@ -4,7 +4,7 @@
 
 import { invokeCommand, isTauriRuntime, unwrapCommandResponse } from '@/api/tauri-bridge.js'
 
-function newIdempotencyKey(prefix = 'w') {
+export function newIdempotencyKey(prefix = 'w') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 

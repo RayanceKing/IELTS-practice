@@ -16,10 +16,7 @@ use crate::sqlite::{DbError, DbResult};
 
 pub const BACKUP_SCHEMA_VERSION: u32 = 1;
 
-pub fn create_backup_package(
-    conn: &Connection,
-    app_version: &str,
-) -> DbResult<BackupPackage> {
+pub fn create_backup_package(conn: &Connection, app_version: &str) -> DbResult<BackupPackage> {
     let attempts = load_all_attempts_summary(conn)?;
     let settings = list_settings(conn, None)?;
     let secret_refs = list_secret_refs(conn)?;
@@ -54,14 +51,15 @@ pub fn write_backup_file(package: &BackupPackage, path: &Path) -> DbResult<()> {
 
 pub fn read_backup_file(path: &Path) -> DbResult<BackupPackage> {
     let raw = std::fs::read_to_string(path)?;
-    let package: BackupPackage =
-        serde_json::from_str(&raw).map_err(|e| DbError::Validation(format!("backup parse: {e}")))?;
+    let package: BackupPackage = serde_json::from_str(&raw)
+        .map_err(|e| DbError::Validation(format!("backup parse: {e}")))?;
     Ok(package)
 }
 
 pub fn validate_backup(package: &BackupPackage) -> DbResult<Vec<String>> {
     let mut warnings = Vec::new();
-    if package.manifest.schema_version == 0 || package.manifest.schema_version > BACKUP_SCHEMA_VERSION
+    if package.manifest.schema_version == 0
+        || package.manifest.schema_version > BACKUP_SCHEMA_VERSION
     {
         return Err(DbError::Validation(format!(
             "unsupported backup schema_version {}",
@@ -88,8 +86,7 @@ pub fn validate_backup(package: &BackupPackage) -> DbResult<Vec<String>> {
         ));
     }
     let expected = checksum_package(package)?;
-    if !package.manifest.checksum_sha256.is_empty()
-        && package.manifest.checksum_sha256 != expected
+    if !package.manifest.checksum_sha256.is_empty() && package.manifest.checksum_sha256 != expected
     {
         return Err(DbError::Validation(format!(
             "checksum mismatch: manifest {} computed {}",
@@ -167,9 +164,10 @@ pub fn import_backup(
             Ok(_) => report.settings_imported += 1,
             Err(e) => {
                 report.ok = false;
-                report
-                    .errors
-                    .push(format!("setting {}.{}: {e}", setting.namespace, setting.key));
+                report.errors.push(format!(
+                    "setting {}.{}: {e}",
+                    setting.namespace, setting.key
+                ));
             }
         }
     }
@@ -200,8 +198,7 @@ fn checksum_package(package: &BackupPackage) -> DbResult<String> {
     // Hash payload without the checksum field itself.
     let mut for_hash = package.clone();
     for_hash.manifest.checksum_sha256.clear();
-    let bytes =
-        serde_json::to_vec(&for_hash).map_err(|e| DbError::Message(e.to_string()))?;
+    let bytes = serde_json::to_vec(&for_hash).map_err(|e| DbError::Message(e.to_string()))?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     Ok(hex::encode(hasher.finalize()))
@@ -249,11 +246,13 @@ fn load_all_attempts_summary(conn: &Connection) -> DbResult<Vec<AttemptRecord>> 
             completed_at: row.get(8)?,
             duration_ms: row.get::<_, i64>(9)? as u64,
             score_value: row.get(10)?,
-            score_scale: row.get::<_, Option<String>>(11)?.and_then(|s| match s.as_str() {
-                "ratio" => Some(ScoreScale::Ratio),
-                "band9" => Some(ScoreScale::Band9),
-                _ => None,
-            }),
+            score_scale: row
+                .get::<_, Option<String>>(11)?
+                .and_then(|s| match s.as_str() {
+                    "ratio" => Some(ScoreScale::Ratio),
+                    "band9" => Some(ScoreScale::Band9),
+                    _ => None,
+                }),
             correct_count: row.get(12)?,
             question_count: row.get::<_, Option<i64>>(13)?.map(|v| v as u32),
             title_snapshot: row.get(14)?,
