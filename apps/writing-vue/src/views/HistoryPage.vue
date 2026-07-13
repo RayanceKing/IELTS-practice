@@ -1789,10 +1789,11 @@ onBeforeUnmount(() => {
 .total-score {
   text-align: center;
   padding: 32px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  background: var(--bloom-highlight);
+  color: var(--shui-text-strong);
   border-radius: var(--border-radius);
   margin-bottom: 20px;
+  box-shadow: var(--bloom-shadow);
 }
 
 .total-score .score-value {

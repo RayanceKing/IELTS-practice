@@ -1889,9 +1889,7 @@ function updateSegmentedIndicators() {
   --color-gray-700: #334155;
   --color-gray-800: #1e293b;
   --color-gray-900: #0f172a;
-  --color-brand-primary: #667eea;
-  --color-brand-secondary: #764ba2;
-  --color-brand-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  /* brand inherits glass warm tokens from design-system :root */
   --color-success: #10b981;
   --color-warning: #f59e0b;
   --color-info: #3b82f6;
@@ -4058,9 +4056,9 @@ function updateSegmentedIndicators() {
 
 .practice-library-open-source .suite-flow-option.active,
 .practice-library-open-source .suite-flow-option[aria-pressed="true"] {
-  border-color: rgba(102, 126, 234, 0.78);
-  background: rgba(102, 126, 234, 0.1);
-  box-shadow: 0 0 0 1px rgba(102, 126, 234, 0.58);
+  border-color: var(--color-brand-ring);
+  background: var(--color-brand-soft);
+  box-shadow: 0 0 0 1px var(--color-brand-ring);
 }
 
 .practice-library-open-source .suite-frequency-selector {
@@ -4138,8 +4136,8 @@ function updateSegmentedIndicators() {
 }
 
 .practice-library-open-source .custom-suite-picked-chip.filled {
-  background: rgba(102, 126, 234, 0.12);
-  border-color: rgba(102, 126, 234, 0.38);
+  background: var(--color-brand-soft);
+  border-color: var(--color-brand-ring);
   color: var(--shui-text-strong);
 }
 

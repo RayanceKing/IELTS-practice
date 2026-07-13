@@ -1916,7 +1916,7 @@ onBeforeUnmount(() => {
 
 .mode-card.active {
   border-color: var(--primary-color);
-  background: rgba(102, 126, 234, 0.05);
+  background: var(--primary-soft);
 }
 
 .mode-header {

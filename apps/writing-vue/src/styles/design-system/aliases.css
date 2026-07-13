@@ -21,7 +21,7 @@
 
   --primary-color: var(--color-brand-primary);
   --primary-strong: var(--color-brand-secondary);
-  --primary-soft: rgba(102, 126, 234, 0.12);
+  --primary-soft: var(--color-brand-soft);
   --secondary-color: var(--color-gray-700);
 
   --success-color: var(--color-success);

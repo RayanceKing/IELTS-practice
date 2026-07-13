@@ -22,10 +22,13 @@
     --color-gray-800: #1e293b;
     --color-gray-900: #0f172a;
 
-    /* Brand Colors */
-    --color-brand-primary: #667eea;
-    --color-brand-secondary: #764ba2;
-    --color-brand-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    /* Brand Colors — glass warm accents (purple fully withdrawn) */
+    --color-brand-primary: #0f766e;
+    --color-brand-secondary: #d97706;
+    --color-brand-gradient: linear-gradient(135deg, #ffd89b 0%, #6accc7 100%);
+    --color-brand-soft: rgba(53, 192, 161, 0.12);
+    --color-brand-soft-strong: rgba(53, 192, 161, 0.22);
+    --color-brand-ring: rgba(15, 118, 110, 0.55);
 
     /* Semantic Colors */
     --color-success: #10b981;
@@ -130,7 +133,7 @@
     --suite-card-description-color: var(--color-gray-600);
     --suite-card-icon-color: var(--color-brand-primary);
     --suite-card-icon-bg: rgba(255, 255, 255, 0.65);
-    --suite-card-accent-overlay: linear-gradient(135deg, rgba(102, 126, 234, 0.16), rgba(118, 75, 162, 0.08));
+    --suite-card-accent-overlay: linear-gradient(135deg, rgba(246, 178, 107, 0.18), rgba(53, 192, 161, 0.12));
     --suite-card-accent-opacity: 0.35;
 
   /* ===== Shui / HeroUI shell (Atlas heroui-bridge.css) ===== */

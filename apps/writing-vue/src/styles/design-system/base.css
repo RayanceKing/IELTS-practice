@@ -108,15 +108,20 @@ img {
 }
 
 .btn-brand {
-  background: var(--color-brand-gradient);
-  color: var(--color-white);
+  background: rgba(255, 255, 255, 0.42);
+  background-image: var(--bloom-sheen);
+  color: var(--shui-text-strong);
   padding: 12px 24px;
-  border: 1px solid rgba(255, 255, 255, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.62);
   border-radius: var(--shui-radius-sm);
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-medium);
   cursor: pointer;
-  box-shadow: 0 10px 20px rgba(102, 126, 234, 0.28);
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(var(--lg-blur-sm)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-sm)) saturate(var(--lg-saturate));
 }
 
 .btn-warm-sand,

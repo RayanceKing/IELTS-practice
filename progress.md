@@ -32,3 +32,4 @@
 - `useReadingAttempt` / `useReadingHighlights` / `useReadingTimer` / interactions 进入 strict typecheck；`useReadingCoach` 仍未纳入。
 - 验证：`npm run typecheck` 通过；Vue production build 通过；static suite `6/6` 通过。
 - 设计系统收敛启动：以 `IELTS Atlas` HeroUI/Shui 为唯一视觉事实源，落地 `styles/design-system/{tokens,aliases,base}.css`；写作 terracotta / liquid-glass 名称降级为 alias；Library/Settings 去掉页面内 token 重声明。
+- 紫色品牌特殊情况清除：`--color-brand-*` → teal/amber + shui 渐变；`--primary-soft`/`suite` overlay/`btn-brand` 改 glass warm；Library 本地 brand 重声明与 History/Settings 硬编码紫渐变删除。

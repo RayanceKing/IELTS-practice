@@ -11,7 +11,8 @@
 - [in_progress] 5. 前端 Vue/TS 单一路径、god-page 拆分与剩余严格类型收敛
   - 已完成：阅读交互/拖拽 composable 抽取；attempt/highlights/timer/interactions 纳入 strict tsconfig
   - 已完成：设计系统地基 `styles/design-system`（Atlas HeroUI/Shui tokens + alias + base）
-  - 未完成：useReadingCoach 严格类型；PracticeReadingPage 高亮/提交/endless 继续拆；PracticeLibraryPage god-page；页面级 CSS 硬编码颜色迁 token
+  - 已完成：紫色渐变品牌全量撤出；brand/primary 重定向 glass warm（shui peach/teal + bloom）
+  - 未完成：useReadingCoach 严格类型；PracticeReadingPage 高亮/提交/endless 继续拆；PracticeLibraryPage god-page；Library 本地 spacing/token 重声明仍待删除
 - [in_progress] 6. 测试门禁、CI、release 与 DoD 文档证据
 - [completed] 7. 删除 legacy shipping tree 并验证功能 parity
 - [pending] 8. 全量验证与交付摘要
