@@ -39,6 +39,9 @@ pub struct SuitePassageEntry {
     pub status: PassageStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempt_id: Option<String>,
+    /// Review routes historically used sessionId; keep both equal to attempt id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub submitted_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -307,6 +310,7 @@ pub fn create_suite_session(
                     PassageStatus::Pending
                 },
                 attempt_id: None,
+                session_id: None,
                 submitted_at: None,
                 score_info: None,
             }
@@ -424,7 +428,8 @@ pub fn submit_suite_passage(
     {
         let passage = &mut session.sequence[passage_index];
         passage.status = PassageStatus::Submitted;
-        passage.attempt_id = Some(attempt_id);
+        passage.attempt_id = Some(attempt_id.clone());
+        passage.session_id = Some(attempt_id);
         passage.submitted_at = submit.attempt.submitted_at.clone();
         passage.score_info = Some(score_info);
     }
@@ -593,6 +598,7 @@ fn load_suite(conn: &Connection, suite_id: &str) -> DbResult<ReadingSuiteSession
             title: title.unwrap_or_default(),
             category: category.unwrap_or_default(),
             status: parse_passage_status(&st),
+            session_id: attempt_id.clone(),
             attempt_id,
             submitted_at,
             score_info: score_json.and_then(|s| serde_json::from_str(&s).ok()),

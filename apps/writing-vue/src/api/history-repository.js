@@ -123,7 +123,7 @@ export function mapHistoryDetailToSubmission(detail) {
     answerComparison[questionId] = {
       questionId,
       userAnswer: entry.answer,
-      correctAnswer: null,
+      correctAnswer: entry.correctAnswer ?? entry.correct_answer ?? null,
       isCorrect: entry.isCorrect ?? entry.is_correct ?? null,
       weight: entry.weight ?? 1,
       matchMode: 'single',
@@ -135,6 +135,9 @@ export function mapHistoryDetailToSubmission(detail) {
   const accuracy = attempt.scoreValue ?? attempt.score_value ?? null
   const durationMs = attempt.durationMs ?? attempt.duration_ms ?? 0
   const assetId = attempt.assetId || attempt.asset_id || detail?.summary?.assetId || null
+  const highlights = normalizeAnnotations(
+    Array.isArray(attempt.annotations) ? attempt.annotations : []
+  )
   return {
     sessionId: attempt.id,
     attemptId: attempt.id,
@@ -153,9 +156,29 @@ export function mapHistoryDetailToSubmission(detail) {
     duration: Math.round(Number(durationMs || 0) / 1000),
     submittedAt: attempt.submittedAt || attempt.submitted_at || attempt.completedAt || attempt.completed_at || null,
     title: attempt.titleSnapshot || attempt.title_snapshot || detail?.summary?.title || null,
-    highlights: Array.isArray(attempt.annotations) ? attempt.annotations : [],
+    highlights,
     source: 'tauri-history'
   }
+}
+
+function normalizeAnnotations(items) {
+  return (items || []).map((item) => {
+    const anchor = item?.anchor || {}
+    return {
+      id: item.id,
+      scope: item.scope || 'passage',
+      text: anchor.text || item.text || '',
+      kind: item.kind || 'highlight',
+      questionId: item.questionId || item.question_id || null,
+      startOffset: anchor.startOffset ?? anchor.start_offset ?? item.startOffset ?? null,
+      endOffset: anchor.endOffset ?? anchor.end_offset ?? item.endOffset ?? null,
+      before: anchor.before || item.before || '',
+      after: anchor.after || item.after || '',
+      occurrence: anchor.occurrence ?? item.occurrence ?? 0,
+      createdAt: item.createdAt || item.created_at || null,
+      noteText: item.noteText || item.note_text || null
+    }
+  }).filter((entry) => entry.text)
 }
 
 export const historyRepository = {

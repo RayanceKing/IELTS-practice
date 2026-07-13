@@ -66,6 +66,7 @@ pub fn run() {
             commands::history::get_history_detail,
             commands::history::export_history,
             commands::history::delete_history_attempt,
+            commands::history::import_reading_archive_value,
             commands::settings::list_settings,
             commands::settings::upsert_setting,
             commands::settings::migrate_local_preferences,

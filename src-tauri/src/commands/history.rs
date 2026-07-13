@@ -77,3 +77,31 @@ pub fn delete_history_attempt(db: State<'_, AppDb>, attempt_id: String) -> Comma
         Err(e) => CommandResponse::failure(map_db_err(e)),
     }
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingArchiveImportResult {
+    pub imported_count: usize,
+    pub skipped_count: usize,
+    pub failed_count: usize,
+    pub attempt_ids: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+/// Product reading archive import (`submissions[]` or cold `records[]`).
+#[tauri::command]
+pub fn import_reading_archive_value(
+    db: State<'_, AppDb>,
+    value: serde_json::Value,
+) -> CommandResponse<ReadingArchiveImportResult> {
+    match db.with_conn(|conn| ielts_db::import_reading_archive_value(conn, &value)) {
+        Ok(report) => CommandResponse::success(ReadingArchiveImportResult {
+            imported_count: report.imported,
+            skipped_count: 0,
+            failed_count: report.failed,
+            attempt_ids: report.attempt_ids,
+            errors: report.errors,
+        }),
+        Err(e) => CommandResponse::failure(map_db_err(e)),
+    }
+}

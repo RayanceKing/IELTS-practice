@@ -15,10 +15,14 @@ pub struct ImportReport {
 }
 
 pub fn import_reading_archive_value(conn: &Connection, doc: &Value) -> DbResult<ImportReport> {
+    // Product archives use submissions[]; cold fixtures use records[].
     let records = doc
-        .get("records")
+        .get("submissions")
+        .or_else(|| doc.get("records"))
         .and_then(|v| v.as_array())
-        .ok_or_else(|| DbError::Import("reading archive missing records[]".into()))?;
+        .ok_or_else(|| {
+            DbError::Import("reading archive missing submissions[]/records[]".into())
+        })?;
 
     let mut report = ImportReport::default();
     for (idx, record) in records.iter().enumerate() {

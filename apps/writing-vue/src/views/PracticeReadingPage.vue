@@ -741,6 +741,8 @@ const {
   dictionaryBubble,
   lookupTermInDictionary,
   saveTermToVocab,
+  persistHighlightToStore,
+  loadPersistedHighlights,
   normalizeHighlightSnapshot: normalizeHighlightSnapshotState,
   resetHighlightUiState: resetHighlightUiStateFromComposable
 } = useReadingHighlights()
@@ -902,8 +904,15 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   flushActiveQuestionVisit()
+  if (!reviewMode.value && !isMemorizeMode.value && !activeSuiteSessionId.value) {
+    void persistTauriDraft()
+  }
   clearEndlessTimer()
   stopPracticeTimer()
+  if (draftAutosaveTimer) {
+    clearTimeout(draftAutosaveTimer)
+    draftAutosaveTimer = null
+  }
   document.removeEventListener('selectionchange', handleSelectionChange)
   document.removeEventListener('click', handleDocumentClick, true)
   removeDividerDragListeners()
@@ -997,7 +1006,8 @@ async function loadAsset() {
     }
     if (replaySessionId) {
       await loadSubmittedSession(replaySessionId)
-    } else if (isTauriRuntime() && !isMemorizeMode.value) {
+    } else if (isTauriRuntime() && !isMemorizeMode.value && !activeSuiteSessionId.value) {
+      // Suite passages use suite-scoped attempt ids; do not hydrate leftover single drafts.
       await hydrateOpenDraft(normalizedAssetId)
     }
   } catch (loadError) {
@@ -1006,6 +1016,13 @@ async function loadAsset() {
   if (asset.value && payload.value) {
     await nextTick()
     syncDomAnswers()
+    if (!highlightSnapshot.value.length && isTauriRuntime()) {
+      const attemptScope = tauriAttemptId || replaySessionId || null
+      const loaded = await loadPersistedHighlights(asset.value.id, attemptScope)
+      if (loaded.length) {
+        highlightSnapshot.value = loaded
+      }
+    }
     restoreHighlightsFromRecords(highlightSnapshot.value)
     applyMemorizeStudyLayer()
     if (readOnlyMode.value) {
@@ -1029,7 +1046,23 @@ async function loadSubmittedSession(sessionId) {
     throw new Error('阅读回放记录与当前题目不匹配')
   }
   submission.value = loadedSubmission
-  highlightSnapshot.value = normalizeHighlightSnapshotState(loadedSubmission.highlights || loadedSubmission.analysisArtifacts?.highlights || [])
+  // Field contraction: store may omit correctAnswer; fill from asset answerKey for review UI.
+  fillCorrectAnswersFromPayload(loadedSubmission)
+  const attemptScope = String(loadedSubmission.sessionId || loadedSubmission.attemptId || sessionId || '').trim()
+  if (isTauriRuntime() && asset.value?.id) {
+    const persisted = await loadPersistedHighlights(asset.value.id, attemptScope || null)
+    if (persisted.length) {
+      highlightSnapshot.value = persisted
+    } else {
+      highlightSnapshot.value = normalizeHighlightSnapshotState(
+        loadedSubmission.highlights || loadedSubmission.analysisArtifacts?.highlights || []
+      )
+    }
+  } else {
+    highlightSnapshot.value = normalizeHighlightSnapshotState(
+      loadedSubmission.highlights || loadedSubmission.analysisArtifacts?.highlights || []
+    )
+  }
   hydrateReadingCoachFromSubmission(loadedSubmission, {
     open: true,
     pendingIfMissing: true,
@@ -1077,6 +1110,21 @@ async function hydrateOpenDraft(assetId) {
   } catch (draftError) {
     console.warn('加载阅读草稿失败:', draftError)
   }
+}
+
+function fillCorrectAnswersFromPayload(loadedSubmission) {
+  const comparison = loadedSubmission?.answerComparison
+  const answerKey = payload.value?.answerKey || payload.value?.answers || null
+  if (!comparison || typeof comparison !== 'object' || !answerKey || typeof answerKey !== 'object') {
+    return
+  }
+  Object.keys(comparison).forEach((questionId) => {
+    const row = comparison[questionId]
+    if (!row || row.correctAnswer != null) return
+    if (Object.prototype.hasOwnProperty.call(answerKey, questionId)) {
+      row.correctAnswer = answerKey[questionId]
+    }
+  })
 }
 
 function restoreSubmittedViewport(loadedSubmission) {
@@ -1238,6 +1286,7 @@ function handleQuestionInput(event) {
 
   if (target.type === 'checkbox') {
     collectCheckboxGroup(target.name)
+    scheduleDraftAutosave()
     return
   }
 
@@ -1248,11 +1297,13 @@ function handleQuestionInput(event) {
   if (target.type === 'radio') {
     if (target.checked) {
       setAnswer(questionId, target.value)
+      scheduleDraftAutosave()
     }
     return
   }
 
   setAnswer(questionId, target.value)
+  scheduleDraftAutosave()
 }
 
 function collectCheckboxGroup(name) {
@@ -1500,7 +1551,20 @@ function snapshotHighlights() {
     })
   })
   highlightSnapshot.value = records
+  void persistHighlightSnapshotToStore(records)
   return records
+}
+
+async function persistHighlightSnapshotToStore(records) {
+  if (!isTauriRuntime() || !asset.value?.id || reviewMode.value) return
+  if (!tauriAttemptId) {
+    tauriAttemptId = readingAttempt.newAttemptId()
+    void persistTauriDraft()
+  }
+  const list = Array.isArray(records) ? records : highlightSnapshot.value
+  for (const entry of list) {
+    await persistHighlightToStore(asset.value.id, entry, tauriAttemptId || null)
+  }
 }
 
 function resolveHighlightQuestionId(node) {
@@ -1854,6 +1918,18 @@ async function saveDictionaryBubbleWord() {
 
 const readingAttempt = useReadingAttempt()
 let tauriAttemptId = ''
+let draftAutosaveTimer = null
+
+function scheduleDraftAutosave() {
+  if (!isTauriRuntime() || reviewMode.value || isMemorizeMode.value || activeSuiteSessionId.value) {
+    return
+  }
+  if (draftAutosaveTimer) clearTimeout(draftAutosaveTimer)
+  draftAutosaveTimer = setTimeout(() => {
+    draftAutosaveTimer = null
+    void persistTauriDraft()
+  }, 800)
+}
 
 async function persistTauriDraft() {
   if (!isTauriRuntime() || !asset.value?.id || reviewMode.value) return
@@ -2091,15 +2167,16 @@ function findSuiteReviewNavigationTarget(direction) {
   const targetIndex = currentIndex + offset
   const entry = suiteSequence.value[targetIndex]
   const assetId = String(entry?.assetId || entry?.examId || '').trim()
+  const sessionId = String(entry?.sessionId || entry?.attemptId || entry?.attempt_id || '').trim()
   if (currentIndex < 0 || !assetId) {
     return null
   }
-  if (entry.status === 'submitted' && entry.sessionId) {
+  if (entry.status === 'submitted' && sessionId) {
     return {
       name: 'PracticeReadingReview',
       params: {
         assetId,
-        sessionId: entry.sessionId
+        sessionId
       },
       query: {
         suiteSessionId: activeSuiteSessionId.value

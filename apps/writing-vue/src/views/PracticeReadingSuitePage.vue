@@ -71,7 +71,7 @@
           <div class="passage-main">
             <div class="passage-meta">
               <span>{{ getPassageStatusLabel(entry.status) }}</span>
-              <span v-if="entry.sessionId">Session {{ entry.sessionId }}</span>
+              <span v-if="passageSessionId(entry)">Session {{ passageSessionId(entry) }}</span>
             </div>
             <h2>{{ entry.title }}</h2>
             <p>{{ formatPassageScore(entry) }}</p>
@@ -86,7 +86,7 @@
               开始
             </button>
             <button
-              v-else-if="entry.status === 'submitted' && entry.sessionId"
+              v-else-if="entry.status === 'submitted' && passageSessionId(entry)"
               class="btn btn-secondary"
               type="button"
               @click="openReview(entry)"
@@ -171,17 +171,22 @@ function openPassage(entry) {
 }
 
 function openReview(entry) {
-  if (!entry?.assetId || !entry?.sessionId) return
+  const sessionId = passageSessionId(entry)
+  if (!entry?.assetId || !sessionId) return
   router.push({
     name: 'PracticeReadingReview',
     params: {
       assetId: entry.assetId,
-      sessionId: entry.sessionId
+      sessionId
     },
     query: {
       suiteSessionId: suite.value?.sessionId || ''
     }
   })
+}
+
+function passageSessionId(entry) {
+  return String(entry?.sessionId || entry?.attemptId || entry?.attempt_id || '').trim()
 }
 
 function getStatusLabel(status) {

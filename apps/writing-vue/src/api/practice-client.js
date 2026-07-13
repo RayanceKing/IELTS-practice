@@ -19,7 +19,6 @@ import {
   listHistory,
   getHistoryDetail,
   deleteHistoryAttempt,
-  exportHistory,
   mapHistoryDetailToSubmission
 } from '@/api/history-repository.js'
 import {
@@ -194,24 +193,79 @@ export const practiceHistory = {
   },
 
   async exportArchive(filters = { activity: 'reading' }) {
-    const { result } = await exportHistory('json', filters)
-    return result
+    const listed = await listHistory({
+      activity: filters.activity || 'reading',
+      limit: 10000,
+      offset: 0,
+      search: filters.search || null
+    })
+    const submissions = []
+    for (const item of listed.items || []) {
+      try {
+        const { detail } = await getHistoryDetail(item.id)
+        const submission = mapHistoryDetailToSubmission(detail)
+        if (submission) {
+          submissions.push({
+            ...submission,
+            id: submission.sessionId || submission.attemptId || item.id,
+            title: submission.title || item.title || null
+          })
+        } else if (detail?.attempt) {
+          // Non-reading or partial: still include attempt snapshot for restore.
+          const attempt = detail.attempt
+          submissions.push({
+            id: attempt.id,
+            sessionId: attempt.id,
+            assetId: attempt.assetId || attempt.asset_id || item.assetId || null,
+            examId: attempt.assetId || attempt.asset_id || item.assetId || null,
+            activity: attempt.activity || 'reading',
+            status: attempt.status || 'completed',
+            answers: Object.fromEntries(
+              (attempt.answers || []).map((entry) => [
+                entry.questionId || entry.question_id,
+                entry.answer
+              ]).filter(([qid]) => qid)
+            ),
+            markedQuestions: (attempt.answers || [])
+              .filter((entry) => entry.marked)
+              .map((entry) => entry.questionId || entry.question_id)
+              .filter(Boolean),
+            score: attempt.scoreValue ?? attempt.score_value ?? null,
+            correctCount: attempt.correctCount ?? attempt.correct_count ?? 0,
+            questionCount: attempt.questionCount ?? attempt.question_count ?? 0,
+            durationMs: attempt.durationMs ?? attempt.duration_ms ?? 0,
+            submittedAt: attempt.submittedAt || attempt.submitted_at || null,
+            title: attempt.titleSnapshot || attempt.title_snapshot || item.title || null
+          })
+        }
+      } catch (err) {
+        console.warn('exportArchive skip item', item?.id, err)
+      }
+    }
+    const exportedAt = new Date().toISOString()
+    return {
+      activity: filters.activity || 'reading',
+      schemaVersion: 'practice-history-archive.v1',
+      exportedAt,
+      count: submissions.length,
+      submissions
+    }
   },
 
   async importArchive(activity, payload) {
-    // Optional cold-path: browser export import via Tauri when command exists.
-    try {
-      const response = await invokeCommand('import_browser_export_value', {
-        value: payload,
-        activity: activity || 'reading'
-      })
-      return unwrapCommandResponse(response, 'import_browser_export_value')
-    } catch (err) {
-      const error = new Error(
-        `importArchive requires optional legacy import command: ${err?.message || err}`
-      )
-      error.code = 'not_implemented'
-      throw error
+    const archive = payload?.archive && typeof payload.archive === 'object'
+      ? payload.archive
+      : payload
+    const response = await invokeCommand('import_reading_archive_value', {
+      value: archive
+    })
+    const report = unwrapCommandResponse(response, 'import_reading_archive_value') || {}
+    return {
+      importedCount: Number(report.importedCount ?? report.imported ?? 0),
+      skippedCount: Number(report.skippedCount ?? 0),
+      failedCount: Number(report.failedCount ?? report.failed ?? 0),
+      attemptIds: report.attemptIds || report.attempt_ids || [],
+      errors: report.errors || []
     }
   }
 }

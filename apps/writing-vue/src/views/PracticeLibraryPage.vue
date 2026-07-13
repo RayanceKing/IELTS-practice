@@ -1606,13 +1606,13 @@ async function restoreReadingBackup(backup) {
     showLocalMessage('备份数据无效，无法恢复')
     return
   }
-  if (!window.confirm(`确定要恢复备份 ${normalized.id} 吗？当前阅读练习记录将被替换。`)) {
+  if (!window.confirm(`确定要恢复备份 ${normalized.id} 吗？将导入备份中的阅读记录（同 id 覆盖）。`)) {
     return
   }
 
   historyBusy.value = true
   try {
-    await clearReadingHistory()
+    // Import first — never clear before a successful write (prevents wipe-on-failure).
     const result = await importReadingHistoryArchive(normalized.archive)
     selectedHistoryIds.value = new Set()
     bulkDeleteMode.value = false
