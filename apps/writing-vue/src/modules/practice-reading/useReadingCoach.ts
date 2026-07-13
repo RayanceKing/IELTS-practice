@@ -3,43 +3,108 @@ import { readingCoachApi, readingSessionApi } from './api'
 
 const AUTOMATIC_REVIEW_QUERY = '请复盘我本次错题，按优先级给出训练建议'
 
-function readSource(source) {
-  return typeof source === 'function' ? source() : unref(source)
+type AnyRecord = Record<string, any>
+type StreamMode = 'coach' | 'review'
+type LlmReviewStatus = 'idle' | 'running' | 'success' | 'failed'
+
+export type ReadingCoachOptions = {
+  submissionSource?: unknown
+  assetIdSource?: unknown
+  setSubmission?: (next: AnyRecord) => void
+  readCoachEnabled?: () => boolean
+  readSelectedContext?: () => AnyRecord | null | undefined
+  getDisplayLabel?: (questionId: string) => string
+  formatReviewAnswer?: (value: unknown) => string
+  resolveCoachMode?: () => string
+  flushActiveQuestionVisit?: () => void
+  onSubmissionHydrated?: (submission: AnyRecord) => void
+  snapshotSubmission?: () => void
 }
 
-function normalizeCoachTranscript(value) {
+type CoachTranscriptEntry = {
+  id: string
+  role: 'assistant' | 'user'
+  content: string
+  isError: boolean
+  followUps: unknown[]
+  snapshot: AnyRecord | null
+}
+
+type PayloadOptions = {
+  action?: string
+  surface?: string
+  promptKind?: string
+}
+
+type HydrateOptions = {
+  open?: boolean
+  successMessage?: string
+  pendingIfMissing?: boolean
+  pendingMessage?: string
+}
+
+type StreamHandleOptions = {
+  expectedSessionId?: string
+  mode?: StreamMode
+}
+
+type RefreshOptions = {
+  preserveCoachResponse?: boolean
+}
+
+type ReviewOptions = {
+  expectedSessionId?: string
+  force?: boolean
+}
+
+function readSource(source: unknown): any {
+  return typeof source === 'function' ? (source as () => unknown)() : unref(source as any)
+}
+
+function asRecord(value: unknown): AnyRecord | null {
+  return value && typeof value === 'object' ? (value as AnyRecord) : null
+}
+
+function errorField(error: unknown, key: 'code' | 'message'): string {
+  const record = asRecord(error)
+  return record ? String(record[key] || '').trim() : ''
+}
+
+function normalizeCoachTranscript(value: unknown): CoachTranscriptEntry[] {
   return (Array.isArray(value) ? value : [])
     .map((entry, index) => {
-      if (!entry || typeof entry !== 'object') return null
-      const snapshot = entry.snapshot && typeof entry.snapshot === 'object' ? entry.snapshot : null
-      const content = String(entry.content || entry.text || snapshot?.answer || snapshot?.message || '').trim()
+      const row = asRecord(entry)
+      if (!row) return null
+      const snapshot = asRecord(row.snapshot)
+      const content = String(row.content || row.text || snapshot?.answer || snapshot?.message || '').trim()
       if (!content) return null
       return {
-        id: String(entry.id || entry.createdAt || `coach_${index}`),
-        role: entry.role === 'assistant' ? 'assistant' : 'user',
+        id: String(row.id || row.createdAt || `coach_${index}`),
+        role: row.role === 'assistant' ? 'assistant' as const : 'user' as const,
         content,
-        isError: Boolean(entry.isError),
-        followUps: Array.isArray(entry.followUps)
-          ? entry.followUps
-          : (Array.isArray(snapshot?.followUps) ? snapshot.followUps : []),
+        isError: Boolean(row.isError),
+        followUps: Array.isArray(row.followUps)
+          ? row.followUps
+          : (Array.isArray(snapshot?.followUps) ? snapshot!.followUps : []),
         snapshot
       }
     })
-    .filter(Boolean)
+    .filter((entry): entry is CoachTranscriptEntry => Boolean(entry))
     .slice(-40)
 }
 
-function hasLlmReview(submission) {
+function hasLlmReview(submission: AnyRecord | null | undefined): boolean {
   return Boolean(
     submission?.singleAttemptAnalysisLlm
     || submission?.analysisArtifacts?.singleAttemptAnalysisLlm
   )
 }
 
-function formatCoachStreamMessage(streamEvent, mode = 'coach') {
-  const eventName = String(streamEvent?.event || streamEvent?.type || '').trim()
-  const payload = streamEvent?.data && typeof streamEvent.data === 'object' ? streamEvent.data : {}
-  const detail = payload.data && typeof payload.data === 'object' ? payload.data : payload
+function formatCoachStreamMessage(streamEvent: unknown, mode: StreamMode = 'coach'): string {
+  const event = asRecord(streamEvent) || {}
+  const eventName = String(event.event || event.type || '').trim()
+  const payload = asRecord(event.data) || {}
+  const detail = asRecord(payload.data) || payload
   if (eventName === 'start') return mode === 'review' ? 'AI 复盘已启动...' : '教练已连接...'
   if (eventName === 'cache_hit') return '命中已缓存复盘上下文...'
   if (eventName === 'route') return '正在判断问题意图...'
@@ -55,9 +120,9 @@ function formatCoachStreamMessage(streamEvent, mode = 'coach') {
   return ''
 }
 
-function formatLlmFailureStatusMessage(error) {
-  const code = String(error?.code || '').trim().toLowerCase()
-  const rawMessage = String(error?.message || '').trim()
+function formatLlmFailureStatusMessage(error: unknown): string {
+  const code = errorField(error, 'code').toLowerCase()
+  const rawMessage = errorField(error, 'message')
   if (code === 'coach_locked_until_submit') {
     return 'AI 复盘暂不可用：请先完成并提交本轮作答。'
   }
@@ -73,15 +138,15 @@ function formatLlmFailureStatusMessage(error) {
   return 'AI 复盘暂不可用，请稍后重试。'
 }
 
-export function useReadingCoach(options = {}) {
+export function useReadingCoach(options: ReadingCoachOptions = {}) {
   const coachQuery = ref('这题怎么定位证据？')
   const coachLoading = ref(false)
   const coachError = ref('')
-  const coachResponse = ref(null)
-  const selectedContext = ref(null)
+  const coachResponse = ref<any>(null)
+  const selectedContext = ref<AnyRecord | null>(null)
   const coachStreamMessage = ref('')
   const readingCoachOpen = ref(false)
-  const llmReviewStatus = ref('idle')
+  const llmReviewStatus = ref<LlmReviewStatus>('idle')
   const llmReviewMessage = ref('')
   let coachRequestSequence = 0
 
@@ -120,7 +185,7 @@ export function useReadingCoach(options = {}) {
     return true
   }
 
-  function setSubmission(nextSubmission) {
+  function setSubmission(nextSubmission: AnyRecord) {
     if (typeof options.setSubmission === 'function') {
       options.setSubmission(nextSubmission)
     }
@@ -137,11 +202,11 @@ export function useReadingCoach(options = {}) {
     llmReviewMessage.value = ''
   }
 
-  function setReadingCoachOpen(value) {
+  function setReadingCoachOpen(value: unknown) {
     readingCoachOpen.value = isReadingCoachEnabled() && Boolean(value)
   }
 
-  function hydrateReadingCoachFromSubmission(nextSubmission, hydrateOptions = {}) {
+  function hydrateReadingCoachFromSubmission(nextSubmission: AnyRecord | null | undefined, hydrateOptions: HydrateOptions = {}) {
     if (!isReadingCoachEnabled()) {
       readingCoachOpen.value = false
       coachResponse.value = null
@@ -181,7 +246,7 @@ export function useReadingCoach(options = {}) {
     selectedContext.value = null
   }
 
-  function normalizeCoachQuestionNumber(value) {
+  function normalizeCoachQuestionNumber(value: unknown) {
     const raw = String(value || '').trim()
     if (!raw) return ''
     const exactNumber = raw.match(/^\d+$/)
@@ -200,15 +265,15 @@ export function useReadingCoach(options = {}) {
       ? submission.value.coachContext.wrongQuestions
       : []
     if (fromCoachContext.length) {
-      return fromCoachContext.map((item) => String(item || '').trim()).filter(Boolean)
+      return fromCoachContext.map((item: unknown) => String(item || '').trim()).filter(Boolean)
     }
     return Object.values(submission.value?.answerComparison || {})
-      .filter((entry) => entry?.isCorrect === false)
-      .map((entry) => String(entry.displayLabel || options.getDisplayLabel?.(entry.questionId)).replace(/^q/i, '').trim())
+      .filter((entry: any) => entry?.isCorrect === false)
+      .map((entry: any) => String(entry.displayLabel || options.getDisplayLabel?.(entry.questionId)).replace(/^q/i, '').trim())
       .filter(Boolean)
   }
 
-  function formatReviewAnswer(value) {
+  function formatReviewAnswer(value: unknown) {
     return typeof options.formatReviewAnswer === 'function'
       ? options.formatReviewAnswer(value)
       : String(value == null ? '' : value).trim()
@@ -223,17 +288,17 @@ export function useReadingCoach(options = {}) {
           .filter(([questionNumber, answer]) => questionNumber && answer)
       )
     }
-    return Object.values(submission.value?.answerComparison || {}).reduce((accumulator, entry) => {
+    return Object.values(submission.value?.answerComparison || {}).reduce((accumulator: Record<string, string>, entry: any) => {
       const questionNumber = String(entry?.displayLabel || options.getDisplayLabel?.(entry?.questionId)).replace(/^q/i, '').trim()
       const answer = formatReviewAnswer(entry?.userAnswer)
       if (questionNumber && answer) {
         accumulator[questionNumber] = answer
       }
       return accumulator
-    }, {})
+    }, {} as Record<string, string>)
   }
 
-  function resolveCoachFocusQuestionNumbers(context = selectedContext.value) {
+  function resolveCoachFocusQuestionNumbers(context: AnyRecord | null = selectedContext.value) {
     if (Array.isArray(context?.questionNumbers) && context.questionNumbers.length) {
       return context.questionNumbers
     }
@@ -242,7 +307,7 @@ export function useReadingCoach(options = {}) {
       return wrongQuestions.slice(0, 3)
     }
     if (typeof document !== 'undefined') {
-      const active = document.activeElement
+      const active = document.activeElement as HTMLElement | null
       const raw = active?.getAttribute?.('name') || active?.id || ''
       const focused = normalizeCoachQuestionNumber(raw)
       if (focused) return [focused]
@@ -257,7 +322,7 @@ export function useReadingCoach(options = {}) {
     return 'single'
   }
 
-  function buildCoachPayload(query, payloadOptions = {}) {
+  function buildCoachPayload(query: unknown, payloadOptions: PayloadOptions = {}) {
     options.flushActiveQuestionVisit?.()
     const action = String(payloadOptions.action || 'chat').trim() || 'chat'
     const surface = String(payloadOptions.surface || (action === 'review_set' ? 'review_workspace' : 'chat_widget')).trim()
@@ -292,7 +357,7 @@ export function useReadingCoach(options = {}) {
     }
   }
 
-  function resolveCoachPresetQuery(action) {
+  function resolveCoachPresetQuery(action: string) {
     const focusNumbers = resolveCoachFocusQuestionNumbers()
     const focusText = focusNumbers.length ? `（重点看 Q${focusNumbers.join(', Q')}）` : ''
     if (action === 'hint') {
@@ -310,7 +375,7 @@ export function useReadingCoach(options = {}) {
     return ''
   }
 
-  function appendLocalCoachError(message) {
+  function appendLocalCoachError(message: unknown) {
     if (!submission.value) return
     const transcript = Array.isArray(submission.value.readingCoachTranscript)
       ? submission.value.readingCoachTranscript.slice()
@@ -327,12 +392,12 @@ export function useReadingCoach(options = {}) {
     })
   }
 
-  function isCurrentSubmission(expectedSessionId) {
+  function isCurrentSubmission(expectedSessionId: unknown) {
     const normalized = String(expectedSessionId || '').trim()
     return Boolean(normalized && String(submission.value?.sessionId || '').trim() === normalized)
   }
 
-  function handleCoachStreamEvent(streamEvent, { expectedSessionId, mode = 'coach' } = {}) {
+  function handleCoachStreamEvent(streamEvent: unknown, { expectedSessionId, mode = 'coach' }: StreamHandleOptions = {}) {
     if (!isCurrentSubmission(expectedSessionId)) return
     const nextMessage = formatCoachStreamMessage(streamEvent, mode)
     if (!nextMessage) return
@@ -343,13 +408,13 @@ export function useReadingCoach(options = {}) {
     }
   }
 
-  async function refreshSubmissionFromHistory(expectedSessionId, refreshOptions = {}) {
+  async function refreshSubmissionFromHistory(expectedSessionId: string, refreshOptions: RefreshOptions = {}) {
     if (!isCurrentSubmission(expectedSessionId)) {
       return null
     }
     try {
-      const state = await readingSessionApi.getState(expectedSessionId)
-      const refreshedSubmission = state?.submission || null
+      const state = asRecord(await readingSessionApi.getState(expectedSessionId))
+      const refreshedSubmission = asRecord(state?.submission)
       if (!refreshedSubmission || !isCurrentSubmission(expectedSessionId)) {
         return null
       }
@@ -363,11 +428,11 @@ export function useReadingCoach(options = {}) {
     }
   }
 
-  function mergeCoachResultIntoSubmission(response, query, llmPatch = null, meta = {}, expectedSessionId = '') {
+  function mergeCoachResultIntoSubmission(response: unknown, query: unknown, llmPatch: AnyRecord | null = null, meta: AnyRecord = {}, expectedSessionId = '') {
     if (!submission.value || (expectedSessionId && !isCurrentSubmission(expectedSessionId))) {
       return
     }
-    const snapshot = response && typeof response === 'object' ? response : { value: response }
+    const snapshot: AnyRecord = asRecord(response) || { value: response }
     const now = new Date().toISOString()
     const transcript = Array.isArray(submission.value.readingCoachTranscript)
       ? submission.value.readingCoachTranscript.slice()
@@ -400,7 +465,7 @@ export function useReadingCoach(options = {}) {
     setSubmission(nextSubmission)
   }
 
-  async function sendCoachQuery(query, queryOptions = {}) {
+  async function sendCoachQuery(query: unknown, queryOptions: PayloadOptions = {}) {
     const normalizedQuery = String(query || '').trim()
     if (!isReadingCoachEnabled() || !submission.value?.sessionId || !normalizedQuery || coachLoading.value) {
       return null
@@ -428,7 +493,7 @@ export function useReadingCoach(options = {}) {
         mergeCoachResultIntoSubmission(
           response,
           normalizedQuery,
-          response?.singleAttemptAnalysisLlm || null,
+          asRecord(response)?.singleAttemptAnalysisLlm || null,
           requestPayload,
           expectedSessionId
         )
@@ -443,8 +508,9 @@ export function useReadingCoach(options = {}) {
       if (!isCurrentSubmission(expectedSessionId)) {
         return null
       }
-      coachError.value = coachFailure?.message
-        ? `阅读教练请求失败：${coachFailure.message}`
+      const failureMessage = errorField(coachFailure, 'message')
+      coachError.value = failureMessage
+        ? `阅读教练请求失败：${failureMessage}`
         : '阅读教练请求失败，请稍后重试'
       const refreshedSubmission = await refreshSubmissionFromHistory(expectedSessionId, { preserveCoachResponse: false })
       if (!refreshedSubmission) {
@@ -460,7 +526,7 @@ export function useReadingCoach(options = {}) {
     }
   }
 
-  async function runAutomaticReviewCoach(reviewOptions = {}) {
+  async function runAutomaticReviewCoach(reviewOptions: ReviewOptions = {}) {
     const expectedSessionId = String(reviewOptions.expectedSessionId || submission.value?.sessionId || '').trim()
     if (!isReadingCoachEnabled()) {
       llmReviewStatus.value = 'idle'
@@ -498,7 +564,7 @@ export function useReadingCoach(options = {}) {
       if (!isCurrentSubmission(expectedSessionId)) {
         return
       }
-      const llmPatch = response?.singleAttemptAnalysisLlm || null
+      const llmPatch = asRecord(response)?.singleAttemptAnalysisLlm || null
       coachResponse.value = response
       const refreshedSubmission = await refreshSubmissionFromHistory(expectedSessionId)
       if (!refreshedSubmission) {
@@ -539,7 +605,7 @@ export function useReadingCoach(options = {}) {
     })
   }
 
-  async function askCoachFollowUp(query) {
+  async function askCoachFollowUp(query: unknown) {
     if (!isReadingCoachEnabled()) {
       return
     }
@@ -550,7 +616,7 @@ export function useReadingCoach(options = {}) {
     })
   }
 
-  async function runCoachQuickAction(actionId) {
+  async function runCoachQuickAction(actionId: unknown) {
     if (!isReadingCoachEnabled()) {
       return
     }
@@ -568,7 +634,7 @@ export function useReadingCoach(options = {}) {
     })
   }
 
-  async function runCoachSelectionAction(actionId) {
+  async function runCoachSelectionAction(actionId: unknown) {
     if (!isReadingCoachEnabled()) {
       return
     }
@@ -578,7 +644,7 @@ export function useReadingCoach(options = {}) {
       return
     }
     const action = String(actionId || 'explain_selection').trim()
-    const queryMap = {
+    const queryMap: Record<string, string> = {
       explain_selection: '解释我选中的内容，并说明它和题目定位有什么关系',
       locate_evidence: '根据我选中的内容定位相关证据',
       find_paraphrases: '找出我选中内容里的同义替换和关键词'
@@ -590,7 +656,7 @@ export function useReadingCoach(options = {}) {
     })
   }
 
-  function queueAutomaticReviewRefresh(sessionId) {
+  function queueAutomaticReviewRefresh(sessionId: unknown) {
     const expectedSessionId = String(sessionId || '').trim()
     if (!expectedSessionId) return
     Promise.resolve().then(() => {

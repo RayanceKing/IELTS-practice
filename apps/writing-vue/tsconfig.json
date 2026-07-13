@@ -26,12 +26,15 @@
     "src/modules/practice-reading/useReadingAnswers.ts",
     "src/modules/practice-reading/useReadingAsset.ts",
     "src/modules/practice-reading/useReadingAttempt.ts",
+    "src/modules/practice-reading/useReadingCoach.ts",
+    "src/modules/practice-reading/useReadingEndlessState.ts",
     "src/modules/practice-reading/useReadingHighlights.ts",
     "src/modules/practice-reading/useReadingHistory.ts",
     "src/modules/practice-reading/useReadingInteractions.ts",
     "src/modules/practice-reading/useReadingLibrary.ts",
     "src/modules/practice-reading/useReadingSuite.ts",
-    "src/modules/practice-reading/useReadingTimer.ts"
+    "src/modules/practice-reading/useReadingTimer.ts",
+    "src/modules/practice-reading/useReadingUiPreferences.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

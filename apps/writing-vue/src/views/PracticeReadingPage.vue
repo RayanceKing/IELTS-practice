@@ -421,6 +421,7 @@ import {
   readingThemeModeOptions as themeModeOptions,
   useReadingUiPreferences
 } from '@/modules/practice-reading/useReadingUiPreferences'
+import { useReadingEndlessState } from '@/modules/practice-reading/useReadingEndlessState'
 import { useReadingInteractions } from '@/modules/practice-reading/useReadingInteractions'
 import {
   escapeCss,
@@ -431,8 +432,13 @@ import {
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 import { submitSuitePassage as tauriSubmitSuitePassage } from '@/api/modes-repository.js'
 
-const ENDLESS_STATE_KEY = 'practice_reading_endless_state_v1'
 const ENDLESS_COUNTDOWN_SEC = 5
+const {
+  ensureReady: ensureEndlessStateReady,
+  readEndlessState,
+  writeEndlessState,
+  clearEndlessState
+} = useReadingEndlessState()
 const EXPLANATION_SPLIT_KINDS = new Set([
   'single_choice',
   'multi_choice',
@@ -885,7 +891,8 @@ const analysisKindRows = computed(() => {
 })
 
 onMounted(async () => {
-  initializeReadingPreferences()
+  await ensureEndlessStateReady()
+  await initializeReadingPreferences()
   document.addEventListener('selectionchange', handleSelectionChange)
   document.addEventListener('click', handleDocumentClick, true)
   await loadReadingCoachPreference()
@@ -1184,24 +1191,12 @@ async function recycleSubmittedAttempt() {
 
 function snapshotAnswers() {
   if (!asset.value?.id) return
-  const key = `practice_reading_answers_${asset.value.id}`
-  const snapshot = {
-    assetId: asset.value.id,
-    savedAt: new Date().toISOString(),
-    answers: snapshotAnswerMap(),
-    markedQuestions: markedQuestions.value.slice(),
-    questionTimelineLite: buildQuestionTimelineLite(),
-    highlights: snapshotHighlights(),
-    scrollY: getCurrentScrollY(),
-    timerSnapshot: getPracticeTimerSnapshot()
-  }
-  try {
-    window.sessionStorage?.setItem(key, JSON.stringify(snapshot))
-    void persistTauriDraft()
-    snapshotMessage.value = '作答快照已保存到当前会话。'
-  } catch (_) {
-    snapshotMessage.value = '当前环境无法写入会话缓存。'
-  }
+  // Durable truth is Tauri SQLite draft; no Web Storage dual-write.
+  void persistTauriDraft().then(() => {
+    snapshotMessage.value = '作答快照已保存。'
+  }).catch(() => {
+    snapshotMessage.value = '当前环境无法写入草稿。'
+  })
 }
 
 function handleQuestionInput(event) {
@@ -1979,21 +1974,11 @@ async function submitAnswers() {
 }
 
 function snapshotSubmission() {
-  if (!asset.value?.id || !submission.value) return
-  try {
-    window.sessionStorage?.setItem(`practice_reading_submission_${asset.value.id}`, JSON.stringify(submission.value))
-  } catch (_) {
-    // best-effort session cache
-  }
+  // Submission truth lives in SQLite via reading session APIs; no Web Storage mirror.
 }
 
 function clearSubmissionSnapshot() {
-  if (!asset.value?.id) return
-  try {
-    window.sessionStorage?.removeItem(`practice_reading_submission_${asset.value.id}`)
-  } catch (_) {
-    // best-effort session cache cleanup
-  }
+  // No-op: sessionStorage submission cache removed.
 }
 
 function clearEndlessTimer() {
@@ -2002,30 +1987,6 @@ function clearEndlessTimer() {
     endlessTimer = null
   }
   endlessCountdown.value = 0
-}
-
-function readEndlessState() {
-  try {
-    const parsed = JSON.parse(window.sessionStorage?.getItem(ENDLESS_STATE_KEY) || '{}')
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch (_) {
-    return {}
-  }
-}
-
-function writeEndlessState(patch = {}) {
-  const nextState = {
-    ...readEndlessState(),
-    ...patch,
-    active: patch.active !== undefined ? Boolean(patch.active) : true,
-    updatedAt: new Date().toISOString()
-  }
-  try {
-    window.sessionStorage?.setItem(ENDLESS_STATE_KEY, JSON.stringify(nextState))
-  } catch (_) {
-    // best-effort continuity state
-  }
-  return nextState
 }
 
 async function getEndlessPool() {
@@ -2166,7 +2127,7 @@ function stopEndlessMode() {
   clearEndlessTimer()
   endlessNextAssetId.value = ''
   try {
-    window.sessionStorage?.removeItem(ENDLESS_STATE_KEY)
+    clearEndlessState()
   } catch (_) {}
   router.push({
     name: 'PracticeLibrary'

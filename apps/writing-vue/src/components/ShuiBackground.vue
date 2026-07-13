@@ -8,6 +8,7 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useTauriPreferences } from '@/composables/useTauriPreferences.js'
 
 const STORAGE_KEY = 'three_bg_theme'
 
@@ -30,6 +31,7 @@ const themes = {
 }
 
 const activeTheme = ref('misty-mountain')
+const preferences = useTauriPreferences()
 
 function normalizeThemeName(themeName) {
   return Object.prototype.hasOwnProperty.call(themes, themeName)
@@ -37,33 +39,47 @@ function normalizeThemeName(themeName) {
     : 'misty-mountain'
 }
 
-function getStoredTheme() {
+function takeLocalLegacy() {
   try {
-    return normalizeThemeName(localStorage.getItem(STORAGE_KEY) || 'misty-mountain')
+    const value = localStorage.getItem(STORAGE_KEY) || ''
+    if (value) localStorage.removeItem(STORAGE_KEY)
+    return value
   } catch (_) {
-    return 'misty-mountain'
+    return ''
   }
 }
 
-function applyFallbackTheme(themeName) {
+async function resolveStoredTheme() {
+  await preferences.hydrate()
+  let theme = preferences.get(STORAGE_KEY, '')
+  if (!theme) {
+    const legacy = takeLocalLegacy()
+    if (legacy) {
+      preferences.set(STORAGE_KEY, legacy)
+      theme = legacy
+    }
+  }
+  return normalizeThemeName(theme || 'misty-mountain')
+}
+
+function applyFallbackTheme(themeName, { persist = true } = {}) {
   const nextThemeName = normalizeThemeName(themeName)
   const theme = themes[nextThemeName]
   activeTheme.value = nextThemeName
   document.documentElement.style.setProperty('--shui-gradient-start', theme.start)
   document.documentElement.style.setProperty('--shui-gradient-end', theme.end)
   document.documentElement.dataset.shuiBgTheme = theme.label
-  try {
-    localStorage.setItem(STORAGE_KEY, nextThemeName)
-  } catch (_) {}
+  if (persist) {
+    preferences.set(STORAGE_KEY, nextThemeName)
+  }
 }
 
 function switchTheme(themeName) {
-  const nextThemeName = normalizeThemeName(themeName)
-  applyFallbackTheme(nextThemeName)
+  applyFallbackTheme(themeName, { persist: true })
 }
 
 function handleThemeChange(event) {
-  switchTheme(event?.detail?.theme || getStoredTheme())
+  switchTheme(event?.detail?.theme || activeTheme.value)
 }
 
 function destroy() {
@@ -74,8 +90,8 @@ function destroy() {
   document.documentElement.style.removeProperty('--shui-gradient-end')
 }
 
-onMounted(() => {
-  applyFallbackTheme(getStoredTheme())
+onMounted(async () => {
+  applyFallbackTheme(await resolveStoredTheme(), { persist: false })
   window.addEventListener('shui-bg-theme-change', handleThemeChange)
   document.body.classList.add('hero-body', 'shui-gradient-active')
 })

@@ -328,10 +328,15 @@ import { useReadingLibrary } from '@/modules/practice-reading/useReadingLibrary'
 import { useReadingSuite } from '@/modules/practice-reading/useReadingSuite'
 import { historyPercentage, sortReadingHistory } from '@/modules/practice-reading/historyStats'
 import { useTauriPreferences } from '@/composables/useTauriPreferences.js'
+import { useReadingEndlessState } from '@/modules/practice-reading/useReadingEndlessState'
 
 const router = useRouter()
 const route = useRoute()
 const preferences = useTauriPreferences()
+const {
+  ensureReady: ensureEndlessStateReady,
+  writeEndlessState
+} = useReadingEndlessState()
 const { loadReadingAssets } = useReadingLibrary()
 const {
   loadReadingHistory,
@@ -346,7 +351,6 @@ const {
   computePracticeTrendBars
 } = useReadingHistory()
 const { createReadingSuite } = useReadingSuite()
-const ENDLESS_STATE_KEY = 'practice_reading_endless_state_v1'
 const READING_BACKUP_STORAGE_KEY = 'practice_reading_archive_backups_v1'
 const LICENSE_STORAGE_KEY = 'hasSeenGplLicense'
 const MAX_READING_BACKUPS = 10
@@ -669,6 +673,7 @@ const customSuiteReady = computed(() => customSuiteCategories.every((category) =
 
 onMounted(async () => {
   await preferences.hydrate()
+  await ensureEndlessStateReady()
   browseRememberPosition.value = readBrowseRememberPosition()
   readingBackups.value = readReadingBackups()
   const suitePreference = resolveSuitePreference()
@@ -1040,8 +1045,8 @@ function startEndlessMode() {
     showLocalMessage('无尽模式：题库为空，请先加载题库')
     return
   }
-  try {
-    window.sessionStorage?.setItem(ENDLESS_STATE_KEY, JSON.stringify({
+  void ensureEndlessStateReady().then(() => {
+    writeEndlessState({
       active: true,
       startedAt: new Date().toISOString(),
       currentAssetId: selected.id,
@@ -1050,10 +1055,8 @@ function startEndlessMode() {
         title: asset.title,
         category: asset.category
       }))
-    }))
-  } catch (_) {
-    // best-effort endless state; route query still keeps the mode active.
-  }
+    })
+  })
   showLocalMessage(`无尽模式已启动，正在打开：${selected.title}`)
   router.push({
     name: 'PracticeReading',
@@ -1830,9 +1833,7 @@ function applyBackgroundTheme(themeName) {
   const nextTheme = backgroundThemes.some((theme) => theme.value === themeName)
     ? themeName
     : 'misty-mountain'
-  try {
-    localStorage.setItem('three_bg_theme', nextTheme)
-  } catch (_) {}
+  preferences.set('three_bg_theme', nextTheme)
   window.dispatchEvent(new CustomEvent('shui-bg-theme-change', { detail: { theme: nextTheme } }))
   themeSwitcherOpen.value = false
   const label = backgroundThemes.find((theme) => theme.value === nextTheme)?.title || nextTheme
