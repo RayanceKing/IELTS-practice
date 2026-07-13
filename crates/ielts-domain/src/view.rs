@@ -36,6 +36,9 @@ pub struct HistoryListItemVm {
     /// Session/attempt id used by review routes (same as `id` for current store).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Suite session id when this attempt is part of a reading suite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suite_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -89,6 +92,7 @@ pub fn history_item_from_attempt(attempt: &AttemptRecord) -> HistoryListItemVm {
         score_display,
         asset_id: attempt.asset_id.clone(),
         session_id: Some(attempt.id.clone()),
+        suite_id: attempt.suite_id.clone(),
     }
 }
 

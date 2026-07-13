@@ -72,6 +72,7 @@ function normalizeUnifiedItem(item) {
   const scoreDisplay = item.scoreDisplay || item.score_display || '—'
   const assetId = item.assetId || item.asset_id || null
   const sessionId = item.sessionId || item.session_id || item.id || null
+  const suiteId = item.suiteId || item.suite_id || null
   return {
     id: item.id,
     activity,
@@ -89,6 +90,9 @@ function normalizeUnifiedItem(item) {
     examId: assetId,
     sessionId,
     session_id: sessionId,
+    suiteId,
+    suite_id: suiteId,
+    metadata: suiteId ? { suiteSessionId: suiteId, suite_session_id: suiteId } : (item.metadata || {}),
     task_type: activity === 'reading' ? 'reading' : item.taskType || 'task2',
     display_topic_title: item.title || 'Untitled',
     topic_title: item.title || 'Untitled',

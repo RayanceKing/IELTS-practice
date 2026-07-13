@@ -779,7 +779,15 @@ function normalizeReadingHistoryRecord(record) {
 
 function getReadingHistorySuiteSessionId(record) {
   const metadata = record?.metadata || record?.raw?.metadata || record?.raw?.submission?.metadata || {}
-  return String(metadata.suiteSessionId || metadata.suite_session_id || '').trim()
+  return String(
+    record?.suiteId
+    || record?.suite_id
+    || record?.raw?.suiteId
+    || record?.raw?.suite_id
+    || metadata.suiteSessionId
+    || metadata.suite_session_id
+    || ''
+  ).trim()
 }
 
 function filterReadingHistory(records, source = filters.value) {

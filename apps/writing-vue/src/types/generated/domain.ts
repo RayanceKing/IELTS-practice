@@ -190,6 +190,7 @@ export interface HistoryListItemVm {
   scoreDisplay: string;
   assetId?: string | null;
   sessionId?: string | null;
+  suiteId?: string | null;
 }
 
 export interface WritingResultVm {
@@ -261,6 +262,7 @@ export interface HistoryListItemVm {
   scoreDisplay: string
   assetId?: string | null
   sessionId?: string | null
+  suiteId?: string | null
 }
 
 export interface ListHistoryPage {

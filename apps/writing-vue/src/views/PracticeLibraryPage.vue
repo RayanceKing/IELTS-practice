@@ -1362,7 +1362,13 @@ function openReadingReview(record) {
 
 function getReadingHistorySuiteSessionId(record) {
   const metadata = record?.metadata || {}
-  return String(metadata.suiteSessionId || metadata.suite_session_id || '').trim()
+  return String(
+    record?.suiteId
+    || record?.suite_id
+    || metadata.suiteSessionId
+    || metadata.suite_session_id
+    || ''
+  ).trim()
 }
 
 function handleHistoryItemClick(record, event) {
