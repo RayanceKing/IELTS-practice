@@ -8,8 +8,10 @@ use uuid::Uuid;
 use ielts_domain::domain::{AttemptMode, SuiteFlowMode, SuiteStatus};
 
 use crate::modes::timer::{TimerMode, TimerState};
+use crate::reading::assets::{list_assets, AssetIndexEntry};
 use crate::reading::attempt::{submit_reading_attempt, ReadingSubmitCommand, ReadingSubmitResult};
 use crate::sqlite::{DbError, DbResult};
+use ielts_domain::domain::Activity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -98,7 +100,7 @@ pub struct CreateSuiteCommand {
     pub idempotency_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SuiteAssetSeed {
     pub asset_id: String,
@@ -265,11 +267,6 @@ pub fn create_suite_session(
     conn: &Connection,
     cmd: &CreateSuiteCommand,
 ) -> DbResult<ReadingSuiteSession> {
-    if cmd.sequence.is_empty() {
-        return Err(DbError::Validation(
-            "suite sequence required (provide P1/P2/P3 asset seeds)".into(),
-        ));
-    }
     if let Some(key) = cmd.idempotency_key.as_deref() {
         if !key.trim().is_empty() {
             if let Some(prev) = load_idempotent(conn, "suite.create", key)? {
@@ -289,8 +286,25 @@ pub fn create_suite_session(
         .unwrap_or_else(|| TimerState::new_suite(now_ms))
         .normalize(now_ms);
 
-    let sequence: Vec<SuitePassageEntry> = cmd
-        .sequence
+    // Auto-pick P1/P2/P3 when sequence is empty (non-custom scopes). Custom must pass seeds.
+    let seeds = if cmd.sequence.is_empty() {
+        if matches!(freq, FrequencyScope::Custom) {
+            return Err(DbError::Validation(
+                "custom suite requires an explicit P1/P2/P3 sequence".into(),
+            ));
+        }
+        let assets = list_assets(conn, Some(Activity::Reading))?;
+        pick_suite_sequence(&assets, freq, cmd.seed.as_deref())?
+    } else {
+        if cmd.sequence.len() != 3 {
+            return Err(DbError::Validation(
+                "suite sequence must contain exactly 3 passages (P1/P2/P3)".into(),
+            ));
+        }
+        cmd.sequence.clone()
+    };
+
+    let sequence: Vec<SuitePassageEntry> = seeds
         .iter()
         .enumerate()
         .map(|(i, seed)| {
@@ -328,7 +342,7 @@ pub fn create_suite_session(
         current_index: 0,
         total_passages: sequence.len() as u32,
         sequence,
-        aggregate: empty_aggregate(cmd.sequence.len() as u32),
+        aggregate: empty_aggregate(seeds.len() as u32),
         created_at: now.clone(),
         updated_at: now.clone(),
         completed_at: None,
@@ -341,6 +355,161 @@ pub fn create_suite_session(
         }
     }
     Ok(session)
+}
+
+/// Pure suite picker: one asset each for P1/P2/P3 under the frequency scope.
+pub fn pick_suite_sequence(
+    assets: &[AssetIndexEntry],
+    scope: FrequencyScope,
+    seed: Option<&str>,
+) -> DbResult<Vec<SuiteAssetSeed>> {
+    let mut picks = Vec::with_capacity(3);
+    for category in ["P1", "P2", "P3"] {
+        let mut candidates: Vec<&AssetIndexEntry> = assets
+            .iter()
+            .filter(|a| normalize_category(a.category.as_deref()) == category)
+            .filter(|a| frequency_matches(scope, a))
+            .collect();
+        if candidates.is_empty() {
+            // Fall back to category-only if frequency is too tight.
+            candidates = assets
+                .iter()
+                .filter(|a| normalize_category(a.category.as_deref()) == category)
+                .collect();
+        }
+        if candidates.is_empty() {
+            return Err(DbError::Validation(format!(
+                "no reading assets available for {category} under frequency scope"
+            )));
+        }
+        candidates.sort_by(|a, b| {
+            a.id.cmp(&b.id)
+                .then_with(|| a.title.cmp(&b.title))
+        });
+        let index = stable_pick_index(seed, category, candidates.len());
+        let chosen = candidates[index];
+        picks.push(SuiteAssetSeed {
+            asset_id: chosen.id.clone(),
+            title: Some(chosen.title.clone()),
+            category: Some(category.to_string()),
+        });
+    }
+    Ok(picks)
+}
+
+fn normalize_category(raw: Option<&str>) -> String {
+    let value = raw.unwrap_or("").trim().to_ascii_uppercase();
+    if value.contains("P1") {
+        "P1".into()
+    } else if value.contains("P2") {
+        "P2".into()
+    } else if value.contains("P3") {
+        "P3".into()
+    } else if value.is_empty() {
+        "P1".into()
+    } else {
+        value
+    }
+}
+
+fn normalize_asset_frequency(asset: &AssetIndexEntry) -> &'static str {
+    let blob = [
+        asset.frequency.as_deref(),
+        asset.difficulty.as_deref(),
+        Some(asset.title.as_str()),
+        Some(asset.id.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ")
+    .to_ascii_lowercase();
+    if blob.contains("medium") || blob.contains("次高频") || blob.contains("中频") || blob.contains("-medium")
+    {
+        "medium"
+    } else if blob.contains("high")
+        || blob.contains("超高频")
+        || blob.contains("高频")
+        || blob.contains("-high")
+    {
+        "high"
+    } else if blob.contains("low") || blob.contains("低频") || blob.contains("-low") {
+        "low"
+    } else {
+        "unknown"
+    }
+}
+
+fn frequency_matches(scope: FrequencyScope, asset: &AssetIndexEntry) -> bool {
+    let freq = normalize_asset_frequency(asset);
+    match scope {
+        FrequencyScope::All | FrequencyScope::Custom => true,
+        FrequencyScope::High => freq == "high",
+        FrequencyScope::HighMedium => freq == "high" || freq == "medium",
+    }
+}
+
+fn stable_pick_index(seed: Option<&str>, category: &str, len: usize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    let material = format!("{}::{}", seed.unwrap_or("suite-default"), category);
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in material.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    (hash as usize) % len
+}
+
+#[cfg(test)]
+mod pick_tests {
+    use super::*;
+
+    fn asset(id: &str, category: &str, frequency: &str) -> AssetIndexEntry {
+        AssetIndexEntry {
+            id: id.into(),
+            title: id.into(),
+            category: Some(category.into()),
+            difficulty: None,
+            frequency: Some(frequency.into()),
+            fingerprint: "fp".into(),
+            schema_version: 1,
+            content_ref: None,
+            payload_ref: None,
+            activity: "reading".into(),
+        }
+    }
+
+    #[test]
+    fn pick_suite_sequence_one_per_category() {
+        let assets = vec![
+            asset("p1-a", "P1", "high"),
+            asset("p1-b", "P1", "low"),
+            asset("p2-a", "P2", "high"),
+            asset("p3-a", "P3", "medium"),
+        ];
+        let picks = pick_suite_sequence(&assets, FrequencyScope::All, Some("seed-1")).unwrap();
+        assert_eq!(picks.len(), 3);
+        assert_eq!(picks[0].category.as_deref(), Some("P1"));
+        assert_eq!(picks[1].category.as_deref(), Some("P2"));
+        assert_eq!(picks[2].category.as_deref(), Some("P3"));
+        // Same seed is stable.
+        let again = pick_suite_sequence(&assets, FrequencyScope::All, Some("seed-1")).unwrap();
+        assert_eq!(picks, again);
+    }
+
+    #[test]
+    fn pick_suite_high_scope_prefers_high() {
+        let assets = vec![
+            asset("p1-high", "P1", "high"),
+            asset("p1-low", "P1", "low"),
+            asset("p2-high", "P2", "high"),
+            asset("p3-high", "P3", "high"),
+        ];
+        let picks = pick_suite_sequence(&assets, FrequencyScope::High, Some("x")).unwrap();
+        assert_eq!(picks[0].asset_id, "p1-high");
+    }
 }
 
 pub fn get_suite_session(conn: &Connection, suite_id: &str) -> DbResult<ReadingSuiteSession> {

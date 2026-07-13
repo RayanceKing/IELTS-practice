@@ -431,7 +431,11 @@ import {
 } from '@/modules/practice-reading/readingQuestionIds'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 import { getOpenReadingDraft } from '@/api/reading-repository.js'
-import { submitSuitePassage as tauriSubmitSuitePassage } from '@/api/modes-repository.js'
+import {
+  submitSuitePassage as tauriSubmitSuitePassage,
+  submitEndless as tauriSubmitEndless,
+  getEndless as tauriGetEndless
+} from '@/api/modes-repository.js'
 
 const ENDLESS_COUNTDOWN_SEC = 5
 const {
@@ -546,6 +550,15 @@ function readRouteQueryValue(key) {
   const value = route.query?.[key]
   return Array.isArray(value) ? value[0] : value
 }
+const activeEndlessSessionId = computed(() => {
+  const fromQuery = String(readRouteQueryValue('endlessSessionId') || '').trim()
+  if (fromQuery) return fromQuery
+  try {
+    return String(readEndlessState()?.sessionId || '').trim()
+  } catch (_) {
+    return ''
+  }
+})
 
 function normalizePracticeModeQueryValue(value) {
   return String(value || '').trim().toLowerCase()
@@ -2082,6 +2095,55 @@ async function submitAnswers() {
         submission,
         suiteSession: (suiteResult.result && suiteResult.result.suiteSession) || null
       }
+    } else if (isTauriRuntime() && isEndlessMode.value && activeEndlessSessionId.value) {
+      const endlessResult = await tauriSubmitEndless({
+        sessionId: activeEndlessSessionId.value,
+        assetId: asset.value.id,
+        assetPayload: payload.value,
+        answers: attempt.answers,
+        markedQuestions: attempt.markedQuestions,
+        durationMs: Math.round((durationSec || 0) * 1000),
+        titleSnapshot: asset.value.title || asset.value.name || null
+      })
+      const rawSub = endlessResult.result && endlessResult.result.submission
+      const submission = rawSub
+        ? {
+            sessionId: rawSub.attempt && rawSub.attempt.id,
+            attemptId: rawSub.attempt && rawSub.attempt.id,
+            assetId: asset.value.id,
+            activity: 'reading',
+            status: 'submitted',
+            score: rawSub.score && rawSub.score.accuracy,
+            correctCount: rawSub.score && rawSub.score.correct,
+            questionCount: rawSub.score && rawSub.score.total,
+            percentage: rawSub.score && rawSub.score.percentage,
+            duration: Math.round((durationSec || 0)),
+            answers: attempt.answers,
+            markedQuestions: attempt.markedQuestions,
+            answerComparison: Object.fromEntries(
+              (rawSub.comparisons || []).map((entry) => [
+                entry.questionId,
+                {
+                  questionId: entry.questionId,
+                  userAnswer: entry.userAnswer,
+                  correctAnswer: entry.correctAnswer,
+                  isCorrect: entry.isCorrect,
+                  weight: entry.weight,
+                  matchMode: entry.matchMode
+                }
+              ])
+            ),
+            source: 'tauri-endless'
+          }
+        : null
+      const nextId = endlessResult.result?.nextAssetId
+        || endlessResult.result?.session?.currentAssetId
+        || null
+      result = {
+        submission,
+        endlessSession: endlessResult.result?.session || null,
+        nextEndlessAssetId: nextId
+      }
     } else if (isTauriRuntime()) {
       if (!tauriAttemptId) tauriAttemptId = readingAttempt.newAttemptId()
       const tauriResult = await readingAttempt.submit({
@@ -2122,7 +2184,7 @@ async function submitAnswers() {
       await reviewPromise
     }
     maybeAdvanceSuitePassage()
-    scheduleEndlessNext()
+    scheduleEndlessNext(result?.nextEndlessAssetId || null)
   } catch (submitFailure) {
     console.error('提交阅读练习失败:', submitFailure)
     submitError.value = submitFailure?.message
@@ -2182,24 +2244,38 @@ function pickNextEndlessAsset(pool) {
   return usablePool[Math.floor(Math.random() * usablePool.length)] || null
 }
 
-async function scheduleEndlessNext() {
+async function scheduleEndlessNext(preferredNextId = null) {
   if (!isEndlessMode.value || activeSuiteSessionId.value) {
     return
   }
   try {
-    const pool = await getEndlessPool()
-    const nextAsset = pickNextEndlessAsset(pool)
-    if (!nextAsset?.id) {
+    let nextId = String(preferredNextId || '').trim()
+    if (!nextId && activeEndlessSessionId.value && isTauriRuntime()) {
+      try {
+        const { session } = await tauriGetEndless(activeEndlessSessionId.value)
+        nextId = String(session?.currentAssetId || '').trim()
+      } catch (err) {
+        console.warn('load endless session failed', err)
+      }
+    }
+    if (!nextId) {
+      // Fallback for legacy preference-only endless sessions (pre-Rust cutover).
+      const pool = await getEndlessPool()
+      const nextAsset = pickNextEndlessAsset(pool)
+      nextId = String(nextAsset?.id || '').trim()
+    }
+    if (!nextId) {
       stopEndlessMode()
-      submitError.value = '无尽模式：题库为空，已退出。'
+      submitError.value = '无尽模式：题库已刷完或为空，已退出。'
       return
     }
-    endlessNextAssetId.value = String(nextAsset.id)
+    endlessNextAssetId.value = nextId
     writeEndlessState({
       active: true,
-      currentAssetId: nextAsset.id,
+      sessionId: activeEndlessSessionId.value || readEndlessState()?.sessionId || '',
+      currentAssetId: nextId,
       lastCompletedAssetId: asset.value?.id || route.params.assetId || '',
-      pool
+      pool: readEndlessState()?.pool || []
     })
     clearEndlessTimer()
     endlessCountdown.value = ENDLESS_COUNTDOWN_SEC
@@ -2280,10 +2356,13 @@ function goToNextEndlessAsset() {
   const nextAssetId = String(endlessNextAssetId.value || '').trim()
   if (!nextAssetId) return
   clearEndlessTimer()
+  const endlessSessionId = activeEndlessSessionId.value
   router.push({
     name: 'PracticeReading',
     params: { assetId: nextAssetId },
-    query: { mode: 'endless' }
+    query: endlessSessionId
+      ? { mode: 'endless', endlessSessionId }
+      : { mode: 'endless' }
   })
 }
 

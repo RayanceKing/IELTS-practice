@@ -25,14 +25,16 @@ pub async fn evaluate(
         prepared.prompt.as_deref().unwrap_or("not provided"),
         prepared.essay
     );
-    let schema_instruction = "Return JSON only with this shape: {\"score\":{\"overall\":0,\"taskResponse\":0,\"coherence\":0,\"lexical\":0,\"grammar\":0},\"feedback\":{\"overall\":\"\",\"plan\":[],\"paragraphs\":[],\"sentences\":[],\"rewrites\":[]}}. Scores must be IELTS bands from 0 to 9.";
+    // Product path: Settings prompt bank + model temperature, resolved in prepare_evaluation.
+    let system = prepared.system_prompt.as_str();
+    let temperature = prepared.temperature;
     let content = runtime
         .chat_completion(
             json!([
-                { "role": "system", "content": schema_instruction },
+                { "role": "system", "content": system },
                 { "role": "user", "content": prompt }
             ]),
-            0.2,
+            temperature,
         )
         .await?;
     parse_output(&content)

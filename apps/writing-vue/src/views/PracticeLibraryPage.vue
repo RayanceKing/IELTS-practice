@@ -329,6 +329,7 @@ import { useReadingSuite } from '@/modules/practice-reading/useReadingSuite'
 import { historyPercentage, sortReadingHistory } from '@/modules/practice-reading/historyStats'
 import { useTauriPreferences } from '@/composables/useTauriPreferences.js'
 import { useReadingEndlessState } from '@/modules/practice-reading/useReadingEndlessState'
+import { createEndless } from '@/api/modes-repository.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -1034,35 +1035,57 @@ function startRandomPractice(category = 'all') {
   startReading(selected)
 }
 
-function startEndlessMode() {
+async function startEndlessMode() {
   const pool = readingAssets.value.filter((asset) => (
     asset?.id
     && asset.activity === 'reading'
     && hasReadingPracticePayload(asset)
   ))
-  const selected = pool[Math.floor(Math.random() * pool.length)]
-  if (!selected) {
+  if (!pool.length) {
     showLocalMessage('无尽模式：题库为空，请先加载题库')
     return
   }
-  void ensureEndlessStateReady().then(() => {
-    writeEndlessState({
-      active: true,
-      startedAt: new Date().toISOString(),
-      currentAssetId: selected.id,
-      pool: pool.map((asset) => ({
-        id: asset.id,
-        title: asset.title,
-        category: asset.category
-      }))
+  // Shuffle so Rust session first asset is not always index-0 of library order.
+  const shuffled = pool.slice().sort(() => Math.random() - 0.5)
+  try {
+    const { session } = await createEndless({
+      pool: shuffled.map((asset) => String(asset.id)),
+      poolPolicy: {
+        categories: [],
+        frequencyScope: 'all',
+        excludeCompleted: true
+      }
     })
-  })
-  showLocalMessage(`无尽模式已启动，正在打开：${selected.title}`)
-  router.push({
-    name: 'PracticeReading',
-    params: { assetId: selected.id },
-    query: { mode: 'endless' }
-  })
+    const sessionId = String(session?.id || '').trim()
+    const assetId = String(session?.currentAssetId || shuffled[0]?.id || '').trim()
+    if (!sessionId || !assetId) {
+      throw new Error('endless session create failed')
+    }
+    const title = shuffled.find((a) => String(a.id) === assetId)?.title || assetId
+    // Keep preference blob as cache only; durable owner is Rust endless session.
+    void ensureEndlessStateReady().then(() => {
+      writeEndlessState({
+        active: true,
+        startedAt: new Date().toISOString(),
+        sessionId,
+        currentAssetId: assetId,
+        pool: shuffled.map((asset) => ({
+          id: asset.id,
+          title: asset.title,
+          category: asset.category
+        }))
+      })
+    })
+    showLocalMessage(`无尽模式已启动，正在打开：${title}`)
+    router.push({
+      name: 'PracticeReading',
+      params: { assetId },
+      query: { mode: 'endless', endlessSessionId: sessionId }
+    })
+  } catch (error) {
+    console.error('创建无尽模式失败:', error)
+    showLocalMessage(error?.message ? `无尽模式启动失败：${error.message}` : '无尽模式启动失败')
+  }
 }
 
 function openClockTool(event) {

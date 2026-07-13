@@ -17,6 +17,9 @@ use ielts_domain::ErrorEnvelope;
 
 use crate::sqlite::{DbError, DbResult};
 use crate::writing::draft::get_writing_draft;
+use crate::writing::eval_resolve::{
+    resolve_writing_eval_policy, DEFAULT_SYSTEM_PROMPT, ResolvedWritingEvalPolicy,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,6 +83,12 @@ pub struct PreparedEvaluation {
     pub essay: String,
     pub prompt: Option<String>,
     pub task_type: Option<WritingTaskType>,
+    /// Active system prompt body (Settings prompt bank or default schema instruction).
+    pub system_prompt: String,
+    /// Sampling temperature resolved from model settings for this task.
+    pub temperature: f32,
+    pub prompt_id: Option<String>,
+    pub prompt_version: String,
     pub existing: Option<EvaluationRunResult>,
 }
 
@@ -259,6 +268,10 @@ pub fn prepare_evaluation(
                 essay: String::new(),
                 prompt: None,
                 task_type: None,
+                system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
+                temperature: 0.2,
+                prompt_id: None,
+                prompt_version: "prompt-v1".into(),
                 existing: Some(EvaluationRunResult {
                     session,
                     evaluation,
@@ -274,6 +287,8 @@ pub fn prepare_evaluation(
         return Err(DbError::Validation("empty essay".into()));
     }
 
+    let task_type = parse_task(cmd.task_type.as_deref());
+    let policy: ResolvedWritingEvalPolicy = resolve_writing_eval_policy(conn, task_type)?;
     let now = chrono::Utc::now().to_rfc3339();
     let evaluation_id = Uuid::new_v4().to_string();
     let session_id = Uuid::new_v4().to_string();
@@ -295,7 +310,7 @@ pub fn prepare_evaluation(
             provider_id,
             model,
             "rubric-v1",
-            "prompt-v1",
+            policy.prompt_version.as_str(),
             now,
         ],
     )?;
@@ -357,7 +372,11 @@ pub fn prepare_evaluation(
         session_id,
         essay: draft.content_text,
         prompt: draft.prompt_snapshot,
-        task_type: parse_task(cmd.task_type.as_deref()),
+        task_type,
+        system_prompt: policy.system_prompt,
+        temperature: policy.temperature,
+        prompt_id: policy.prompt_id,
+        prompt_version: policy.prompt_version,
         existing: None,
     })
 }
