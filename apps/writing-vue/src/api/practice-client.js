@@ -17,6 +17,7 @@ import {
 } from '@/api/modes-repository.js'
 import {
   listHistory,
+  listHistoryAll,
   getHistoryDetail,
   deleteHistoryAttempt,
   mapHistoryDetailToSubmission
@@ -167,7 +168,16 @@ export const practiceHistory = {
   },
 
   async listAll(filters = {}, options = {}) {
-    return this.list(filters, { page: 1, limit: 10000 })
+    const result = await listHistoryAll({
+      activity: filters.activity || null,
+      search: filters.search || null
+    })
+    return {
+      data: result.items || [],
+      total: result.total,
+      page: 1,
+      limit: (result.items || []).length
+    }
   },
 
   async get(activity, recordId) {
@@ -181,10 +191,8 @@ export const practiceHistory = {
   },
 
   async clear(filters = {}) {
-    const result = await listHistory({
-      activity: filters.activity || null,
-      limit: 10000,
-      offset: 0
+    const result = await listHistoryAll({
+      activity: filters.activity || null
     })
     for (const item of result.items || []) {
       await deleteHistoryAttempt(item.id)
@@ -193,10 +201,8 @@ export const practiceHistory = {
   },
 
   async exportArchive(filters = { activity: 'reading' }) {
-    const listed = await listHistory({
+    const listed = await listHistoryAll({
       activity: filters.activity || 'reading',
-      limit: 10000,
-      offset: 0,
       search: filters.search || null
     })
     const submissions = []

@@ -4,6 +4,9 @@
 
 import { invokeCommand, isTauriRuntime, unwrapCommandResponse } from '@/api/tauri-bridge.js'
 
+/** Matches backend UI hard-cap on list_history. */
+const LIST_HISTORY_UI_MAX = 200
+
 /**
  * @param {object} query
  */
@@ -28,6 +31,47 @@ export async function listHistory(query = {}) {
     limit: Number(page?.limit || query.limit || 20),
     offset: Number(page?.offset || query.offset || 0),
     nextCursor: page?.nextCursor || null
+  }
+}
+
+/**
+ * Page through list_history until exhausted (or maxItems).
+ * list_history hard-caps each page at 200, so bulk clear/export clients must page.
+ * @param {object} query
+ * @param {{ maxItems?: number }} [options]
+ */
+export async function listHistoryAll(query = {}, options = {}) {
+  const maxItems = Number(options.maxItems || 50_000)
+  const pageLimit = Math.min(LIST_HISTORY_UI_MAX, Math.max(1, Number(query.limit || LIST_HISTORY_UI_MAX)))
+  const items = []
+  let offset = 0
+  let total = Infinity
+
+  while (items.length < maxItems && offset < total) {
+    const page = await listHistory({
+      ...query,
+      limit: pageLimit,
+      offset
+    })
+    total = Number(page.total || 0)
+    const batch = page.items || []
+    if (batch.length === 0) break
+    items.push(...batch)
+    offset += batch.length
+    if (items.length >= total) break
+  }
+
+  if (items.length > maxItems) {
+    items.length = maxItems
+  }
+
+  return {
+    source: 'tauri',
+    items,
+    total: Number.isFinite(total) ? total : items.length,
+    limit: items.length,
+    offset: 0,
+    nextCursor: null
   }
 }
 
@@ -187,6 +231,7 @@ function normalizeAnnotations(items) {
 
 export const historyRepository = {
   listHistory,
+  listHistoryAll,
   getHistoryDetail,
   exportHistory,
   deleteHistoryAttempt,

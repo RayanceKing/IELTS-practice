@@ -61,7 +61,22 @@ export async function testAiProvider() {
 
 export async function createBackup(appVersion) {
   const response = await invokeCommand('create_backup', { appVersion: appVersion || null })
-  return { source: 'tauri', manifest: unwrapCommandResponse(response, 'create_backup') }
+  const data = unwrapCommandResponse(response, 'create_backup')
+  // Backward compatible: either CreateBackupResult or bare manifest.
+  if (data && data.manifest) {
+    return { source: 'tauri', manifest: data.manifest, path: data.path || null }
+  }
+  return { source: 'tauri', manifest: data, path: null }
+}
+
+export async function listBackups() {
+  const response = await invokeCommand('list_backups')
+  return { source: 'tauri', items: unwrapCommandResponse(response, 'list_backups') || [] }
+}
+
+export async function pickBackupImportPath() {
+  const response = await invokeCommand('pick_backup_import_path')
+  return unwrapCommandResponse(response, 'pick_backup_import_path') || null
 }
 
 export async function importBackupPath(path, dryRun = true) {
@@ -81,6 +96,8 @@ export const settingsRepository = {
   setDefaultAiConfig,
   testAiProvider,
   createBackup,
+  listBackups,
+  pickBackupImportPath,
   importBackupPath,
   isTauriRuntime
 }

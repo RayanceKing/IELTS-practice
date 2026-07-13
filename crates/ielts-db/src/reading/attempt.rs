@@ -211,10 +211,13 @@ pub fn get_open_reading_draft(
     if asset_id.is_empty() {
         return Err(DbError::Validation("asset_id required".into()));
     }
+    // Open drafts include both `draft` and `active`: patch_reading_answer may promote
+    // an in-progress attempt to active, and callers must still resume it.
     let attempt_id: Option<String> = conn
         .query_row(
             "SELECT id FROM attempts
-             WHERE activity = 'reading' AND asset_id = ?1 AND lower(status) = 'draft'
+             WHERE activity = 'reading' AND asset_id = ?1
+               AND lower(status) IN ('draft', 'active')
              ORDER BY started_at DESC
              LIMIT 1",
             params![asset_id],
@@ -249,6 +252,9 @@ pub fn get_open_reading_draft(
                 "completed" => AttemptStatus::Completed,
                 "cancelled" => AttemptStatus::Cancelled,
                 "failed" => AttemptStatus::Failed,
+                "active" => AttemptStatus::Active,
+                "reviewing" => AttemptStatus::Reviewing,
+                "interrupted" => AttemptStatus::Interrupted,
                 _ => AttemptStatus::Draft,
             };
             let score_scale = match row.get::<_, Option<String>>(11)? {
@@ -393,9 +399,18 @@ pub fn patch_reading_answer(
             now
         ],
     )?;
-    // touch attempt
+    // Touch attempt without stranding open drafts:
+    // - terminal statuses stay terminal
+    // - `draft` stays `draft` so get_open_reading_draft still finds it
+    // - other non-terminal statuses become/remain `active`
     conn.execute(
-        "UPDATE attempts SET updated_at = ?1, status = CASE WHEN status = 'completed' THEN status ELSE 'active' END WHERE id = ?2",
+        "UPDATE attempts SET updated_at = ?1,
+            status = CASE
+                WHEN lower(status) IN ('completed', 'submitted', 'cancelled', 'failed', 'reviewing') THEN status
+                WHEN lower(status) = 'draft' THEN 'draft'
+                ELSE 'active'
+            END
+         WHERE id = ?2",
         params![now, attempt_id],
     )?;
     Ok(())

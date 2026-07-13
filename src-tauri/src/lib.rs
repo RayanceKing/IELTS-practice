@@ -74,6 +74,8 @@ pub fn run() {
             commands::settings::list_secret_refs,
             commands::settings::delete_secret,
             commands::backup::create_backup,
+            commands::backup::list_backups,
+            commands::backup::pick_backup_import_path,
             commands::backup::import_backup_path,
             commands::writing::writing_save_draft,
             commands::writing::writing_get_draft,

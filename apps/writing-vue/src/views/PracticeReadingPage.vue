@@ -742,6 +742,7 @@ const {
   lookupTermInDictionary,
   saveTermToVocab,
   persistHighlightToStore,
+  deleteHighlightFromStore,
   loadPersistedHighlights,
   normalizeHighlightSnapshot: normalizeHighlightSnapshotState,
   resetHighlightUiState: resetHighlightUiStateFromComposable
@@ -1537,6 +1538,7 @@ function snapshotHighlights() {
       cursorByText.set(key, cursor)
       const endOffset = hit + text.length
       records.push({
+        id: node.dataset.annotationId || null,
         scope,
         text,
         kind: node.dataset.hlType === 'note' ? 'note' : 'highlight',
@@ -1546,13 +1548,14 @@ function snapshotHighlights() {
         before: fullText.slice(Math.max(0, hit - 20), hit),
         after: fullText.slice(endOffset, endOffset + 20),
         occurrence,
-        createdAt: node.dataset.createdAt || new Date().toISOString()
+        createdAt: node.dataset.createdAt || new Date().toISOString(),
+        node
       })
     })
   })
-  highlightSnapshot.value = records
+  highlightSnapshot.value = records.map(({ node, ...rest }) => rest)
   void persistHighlightSnapshotToStore(records)
-  return records
+  return highlightSnapshot.value
 }
 
 async function persistHighlightSnapshotToStore(records) {
@@ -1563,8 +1566,14 @@ async function persistHighlightSnapshotToStore(records) {
   }
   const list = Array.isArray(records) ? records : highlightSnapshot.value
   for (const entry of list) {
-    await persistHighlightToStore(asset.value.id, entry, tauriAttemptId || null)
+    const annotation = await persistHighlightToStore(asset.value.id, entry, tauriAttemptId || null)
+    const id = annotation?.id
+    if (id && entry.node) {
+      entry.node.dataset.annotationId = id
+      entry.id = id
+    }
   }
+  highlightSnapshot.value = list.map(({ node, ...rest }) => rest)
 }
 
 function resolveHighlightQuestionId(node) {
@@ -1624,6 +1633,7 @@ function applyHighlightRecord(root, record) {
     const span = document.createElement('span')
     applyHighlightKind(span, record.kind)
     span.dataset.createdAt = record.createdAt || new Date().toISOString()
+    if (record.id) span.dataset.annotationId = String(record.id)
     try {
       range.surroundContents(span)
       return true
@@ -1727,12 +1737,16 @@ function removeSelectionHighlight() {
     target = (ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor)?.closest?.('.hl') || null
   }
   if (target?.parentNode) {
+    const annotationId = target.dataset?.annotationId || null
     const parent = target.parentNode
     while (target.firstChild) {
       parent.insertBefore(target.firstChild, target)
     }
     parent.removeChild(target)
     parent.normalize()
+    if (annotationId) {
+      void deleteHighlightFromStore(annotationId)
+    }
     snapshotHighlights()
     recordInteraction()
   }

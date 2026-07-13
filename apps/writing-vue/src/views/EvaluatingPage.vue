@@ -84,7 +84,7 @@
 <script setup>
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { evaluate, getErrorMessage } from '@/api/client.js'
+import { evaluate, getErrorMessage, resolveApiErrorMessage } from '@/api/client.js'
 import { getDraft } from '@/api/writing-repository.js'
 import {
   EVALUATION_CONTRACT_VERSION,
@@ -465,7 +465,7 @@ async function handleRetry() {
   } catch (retryError) {
     console.error('重试失败:', retryError)
     const code = String(retryError?.code || 'unknown_error')
-    const message = retryError?.message || getErrorMessage(code)
+    const message = resolveApiErrorMessage(retryError, code)
     error.value = { code, message }
     appendLog('error', `重试失败：${message}`)
   } finally {

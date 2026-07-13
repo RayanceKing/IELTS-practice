@@ -1,5 +1,5 @@
 import { reactive, ref } from 'vue'
-import { upsertAnnotation, listAnnotations, lookupDictionary, upsertVocab } from '@/api/enrichment-repository.js'
+import { upsertAnnotation, listAnnotations, deleteAnnotation, lookupDictionary, upsertVocab } from '@/api/enrichment-repository.js'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 
 export interface HighlightRecord {
@@ -24,6 +24,7 @@ export interface HighlightRecord {
 }
 
 export interface NormalizedHighlight {
+  id: string | null
   scope: 'passage' | 'questions' | 'unknown'
   text: string
   kind: 'note' | 'highlight'
@@ -86,6 +87,7 @@ export function useReadingHighlights() {
     if (!isTauriRuntime() || !assetId || !entry?.text) return null
     try {
       const { annotation } = await upsertAnnotation({
+        id: entry.id || null,
         attemptId,
         assetId,
         scope: entry.scope || 'passage',
@@ -101,11 +103,21 @@ export function useReadingHighlights() {
           endOffset: entry.endOffset ?? null,
           contentFingerprint: entry.contentFingerprint || null
         }
-      }) as { annotation?: unknown }
+      }) as { annotation?: { id?: string } }
       return annotation
     } catch (err) {
       console.warn('persist highlight failed', err)
       return null
+    }
+  }
+
+  async function deleteHighlightFromStore(id: string | null | undefined) {
+    if (!isTauriRuntime() || !id) return false
+    try {
+      return await deleteAnnotation(id)
+    } catch (err) {
+      console.warn('delete highlight failed', err)
+      return false
     }
   }
 
@@ -206,6 +218,7 @@ export function useReadingHighlights() {
         const startOffset = Number(record.startOffset ?? record.start)
         const endOffset = Number(record.endOffset ?? record.end)
         return {
+          id: record.id ? String(record.id) : null,
           scope: (scope === 'passage' || scope === 'questions' ? scope : 'unknown') as NormalizedHighlight['scope'],
           text,
           kind: (record.kind === 'note' ? 'note' : 'highlight') as NormalizedHighlight['kind'],
@@ -256,6 +269,7 @@ export function useReadingHighlights() {
     highlightSnapshot,
     dictionaryBubble,
     persistHighlightToStore,
+    deleteHighlightFromStore,
     loadPersistedHighlights,
     lookupTermInDictionary,
     saveTermToVocab,

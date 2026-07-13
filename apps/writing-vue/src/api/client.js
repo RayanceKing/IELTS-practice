@@ -5,6 +5,7 @@
 
 import {
   listHistory,
+  listHistoryAll,
   getHistoryDetail,
   exportHistory,
   deleteHistoryAttempt
@@ -28,6 +29,7 @@ import {
   testAiProvider
 } from '@/api/settings-repository.js'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
+import { adaptWritingHistoryDetail } from '@/utils/evaluation-result.js'
 
 const ERROR_MESSAGES = {
   invalid_api_key: 'API 密钥无效，请前往设置页面检查配置',
@@ -40,6 +42,7 @@ const ERROR_MESSAGES = {
   server_error: '服务异常，请稍后重试',
   invalid_response_format: '评分数据解析失败，请点击"重试"按钮',
   start_failed: '启动评测失败，请重试',
+  'ai.not_configured': '未配置 AI：请先在设置中添加并启用默认模型与 API Key。',
   not_implemented: '该功能尚未迁移到 Tauri 原生路径',
   tauri_required: '需要 Tauri 运行时（Electron/Fastify 已移除）',
   unknown_error: '未知错误，请重试'
@@ -49,8 +52,19 @@ const evaluationListeners = new Map()
 let listenerSequence = 0
 const activePolls = new Map()
 
-export function getErrorMessage(code) {
-  return ERROR_MESSAGES[code] || ERROR_MESSAGES.unknown_error
+export function getErrorMessage(code, fallbackMessage = '') {
+  const mapped = ERROR_MESSAGES[code]
+  if (mapped) return mapped
+  const message = typeof fallbackMessage === 'string' ? fallbackMessage.trim() : ''
+  if (message) return message
+  return ERROR_MESSAGES.unknown_error
+}
+
+/** Prefer backend Chinese message (e.g. startEvaluation) over bare error code. */
+export function resolveApiErrorMessage(error, fallbackCode = 'unknown_error') {
+  const message = typeof error?.message === 'string' ? error.message.trim() : ''
+  if (message) return message
+  return getErrorMessage(error?.code || fallbackCode)
 }
 
 export function isAPIAvailable() {
@@ -513,11 +527,12 @@ export const essays = {
   async getById(id) {
     const { detail } = await getHistoryDetail(id)
     if (!detail) return null
-    const attempt = detail.attempt || detail
+    // Shared V4 → UI adapter used by Result + History
+    const adapted = adaptWritingHistoryDetail(detail)
+    if (!adapted) return null
     return {
-      id: attempt.id || id,
-      ...attempt,
-      evaluation: detail.evaluation || null,
+      ...adapted,
+      id: adapted.id || id,
       source: 'tauri'
     }
   },
@@ -540,7 +555,7 @@ export const essays = {
   },
 
   async deleteAll() {
-    const result = await listHistory({ activity: 'writing', limit: 10000, offset: 0 })
+    const result = await listHistoryAll({ activity: 'writing' })
     for (const item of result.items || []) {
       await deleteHistoryAttempt(item.id)
     }
@@ -548,7 +563,7 @@ export const essays = {
   },
 
   async getStatistics() {
-    const result = await listHistory({ activity: 'writing', limit: 10000, offset: 0 })
+    const result = await listHistoryAll({ activity: 'writing' })
     const items = result.items || []
     const scores = items
       .map((i) => Number(i.score_value ?? i.total_score ?? 0))
@@ -563,7 +578,10 @@ export const essays = {
 
   async exportCSV(filters = {}) {
     const { result } = await exportHistory('csv', { activity: 'writing', ...filters })
-    return result
+    // Always return the CSV text body — callers historically did String(result)
+    // which becomes "[object Object]" when given the full ExportHistoryResult.
+    if (typeof result === 'string') return result
+    return result?.body ?? ''
   }
 }
 
@@ -637,5 +655,6 @@ export default {
   settings,
   upload,
   getErrorMessage,
+  resolveApiErrorMessage,
   isAPIAvailable
 }

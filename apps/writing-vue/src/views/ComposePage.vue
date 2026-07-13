@@ -222,7 +222,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { evaluate, getErrorMessage, topics as topicsApi } from '@/api/client.js'
+import { evaluate, resolveApiErrorMessage, topics as topicsApi } from '@/api/client.js'
 import { useDraft } from '@/composables/useDraft.js'
 import { createRequestGate } from '@/utils/request-gate.js'
 import { extractTextFromTiptap, getTopicTitlePreview } from '@/utils/tiptap-text.js'
@@ -660,7 +660,8 @@ async function submitEssay() {
     })
   } catch (err) {
     console.error('提交失败:', err)
-    error.value = getErrorMessage(err.code)
+    // Prefer startEvaluation Chinese message over bare code mapping
+    error.value = resolveApiErrorMessage(err, 'start_failed')
   } finally {
     isSubmitting.value = false
   }

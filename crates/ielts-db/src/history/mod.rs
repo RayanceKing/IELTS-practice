@@ -85,10 +85,25 @@ fn build_where(filter: &HistoryFilter) -> (String, Vec<Box<dyn ToSql>>) {
     (sql, binds)
 }
 
+/// Hard cap for normal UI/list pages. Export/bulk use a higher internal max.
+const LIST_HISTORY_UI_MAX: u32 = 200;
+/// Cap for export and other full-scan internal callers (not UI pages).
+const LIST_HISTORY_EXPORT_MAX: u32 = 50_000;
+
+/// UI-facing list: hard-caps `limit` at 200 so normal pages stay bounded.
 pub fn list_history(conn: &Connection, query: &ListHistoryQuery) -> DbResult<ListHistoryPage> {
+    list_history_capped(conn, query, LIST_HISTORY_UI_MAX)
+}
+
+/// Internal list with a configurable max limit (export / bulk full scan).
+fn list_history_capped(
+    conn: &Connection,
+    query: &ListHistoryQuery,
+    max_limit: u32,
+) -> DbResult<ListHistoryPage> {
     let filter = HistoryFilter::from(query);
     let (where_sql, binds) = build_where(&filter);
-    let limit = query.limit.max(1).min(200);
+    let limit = query.limit.max(1).min(max_limit.max(1));
     let offset = query.offset;
 
     let count_sql = format!("SELECT COUNT(*) FROM attempts {where_sql}");
@@ -137,6 +152,43 @@ pub fn list_history(conn: &Connection, query: &ListHistoryQuery) -> DbResult<Lis
     })
 }
 
+/// Page through history using the export max until exhausted (or `requested_limit` hit).
+fn list_history_all(
+    conn: &Connection,
+    query: &ListHistoryQuery,
+    requested_limit: u32,
+) -> DbResult<Vec<HistoryListItemVm>> {
+    let hard_cap = requested_limit.max(1).min(LIST_HISTORY_EXPORT_MAX);
+    // Export pages can be large; do not reuse the UI page size of 200.
+    let page_size = hard_cap.max(1);
+    let mut items = Vec::new();
+    let mut offset = 0u32;
+
+    loop {
+        if items.len() as u32 >= hard_cap {
+            break;
+        }
+        let remaining = hard_cap - items.len() as u32;
+        let mut page_query = query.clone();
+        page_query.limit = page_size.min(remaining);
+        page_query.offset = offset;
+        let page = list_history_capped(conn, &page_query, LIST_HISTORY_EXPORT_MAX)?;
+        if page.items.is_empty() {
+            break;
+        }
+        offset = offset.saturating_add(page.items.len() as u32);
+        items.extend(page.items);
+        if items.len() as u32 >= page.total || items.len() as u32 >= hard_cap {
+            break;
+        }
+    }
+
+    if items.len() as u32 > hard_cap {
+        items.truncate(hard_cap as usize);
+    }
+    Ok(items)
+}
+
 pub fn get_history_detail(conn: &Connection, attempt_id: &str) -> DbResult<HistoryDetailResponse> {
     let attempt = load_attempt(conn, attempt_id)?;
     let summary = history_item_from_attempt(&attempt);
@@ -168,19 +220,20 @@ pub fn export_history(
         min_score: None,
         max_score: None,
     });
-    q.limit = q.limit.max(1).min(50_000);
+    // Export must not inherit the UI list hard-cap of 200.
+    let requested = q.limit.max(1).min(LIST_HISTORY_EXPORT_MAX);
     q.offset = 0;
-    let page = list_history(conn, &q)?;
+    let items = list_history_all(conn, &q, requested)?;
     let body = match format {
-        HistoryExportFormat::Csv => render_csv(&page.items),
-        HistoryExportFormat::Markdown => render_markdown(&page.items),
-        HistoryExportFormat::Json => serde_json::to_string_pretty(&page.items)
+        HistoryExportFormat::Csv => render_csv(&items),
+        HistoryExportFormat::Markdown => render_markdown(&items),
+        HistoryExportFormat::Json => serde_json::to_string_pretty(&items)
             .map_err(|e| DbError::Message(e.to_string()))?,
     };
     Ok(ExportHistoryResult {
         format,
         body,
-        record_count: page.items.len() as u32,
+        record_count: items.len() as u32,
     })
 }
 

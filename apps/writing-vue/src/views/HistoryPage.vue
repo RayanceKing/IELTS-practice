@@ -639,13 +639,21 @@ const deleteConfirmMessage = computed(() => {
 })
 
 const detailEvaluation = computed(() => resolveEvaluationConsumption(
-  detailData.value?.evaluation_json,
+  detailData.value?.evaluation_json || detailData.value?.evaluation,
   {
     overall_feedback: detailData.value?.overall_feedback,
     feedback: detailData.value?.feedback,
     task_analysis: detailData.value?.task_analysis,
     band_rationale: detailData.value?.band_rationale,
-    improvement_plan: detailData.value?.improvement_plan
+    improvement_plan: detailData.value?.improvement_plan,
+    total_score: detailData.value?.total_score,
+    score: {
+      total_score: detailData.value?.total_score,
+      task_achievement: detailData.value?.task_achievement,
+      coherence_cohesion: detailData.value?.coherence_cohesion,
+      lexical_resource: detailData.value?.lexical_resource,
+      grammatical_range: detailData.value?.grammatical_range
+    }
   }
 ))
 const detailFeedback = computed(() => detailEvaluation.value.feedback)
@@ -1092,8 +1100,10 @@ async function exportCSV() {
       minScore: filtersSnapshot.min_score,
       maxScore: filtersSnapshot.max_score
     })
-    if (result?.body) {
-      const blob = new Blob([result.body], { type: 'text/csv;charset=utf-8' })
+    // ExportHistoryResult is { format, body, recordCount } — never stringify the object.
+    const csvBody = typeof result === 'string' ? result : (result?.body ?? '')
+    if (csvBody) {
+      const blob = new Blob([csvBody], { type: 'text/csv;charset=utf-8' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       const dateStr = new Date().toISOString().slice(0, 10)
@@ -1118,7 +1128,11 @@ async function exportCSV() {
       shouldExportWriting ? essaysApi.exportCSV(buildApiFilters(filtersSnapshot)) : Promise.resolve(''),
       shouldExportReading ? practiceHistory.listAll({ activity: 'reading' }) : Promise.resolve({ data: [] })
     ])
-    const writingLines = String(writingCsv || '').split(/\r?\n/).filter(Boolean)
+    // essaysApi.exportCSV returns the CSV body string (not the ExportHistoryResult object)
+    const writingBody = typeof writingCsv === 'string'
+      ? writingCsv
+      : (writingCsv?.body ?? '')
+    const writingLines = String(writingBody || '').split(/\r?\n/).filter(Boolean)
     const readingRows = shouldExportReading
       ? buildReadingHistoryCsvRows(filterReadingHistory(
         (Array.isArray(readingResult.data) ? readingResult.data : []).map(normalizeReadingHistoryRecord),

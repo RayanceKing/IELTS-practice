@@ -312,6 +312,7 @@ async function loadResult() {
   try {
       const detail = await essaysApi.getById(props.sessionId)
       if (!detail) throw new Error('writing attempt not found')
+      // essays.getById already runs adaptWritingHistoryDetail (V4 → UI)
       const evaluation = detail.evaluation || detail.evaluation_json || null
       const evaluationView = buildEvaluationView(evaluation?.result || evaluation?.result_json || evaluation, {
         score: {
@@ -321,6 +322,7 @@ async function loadResult() {
           lexical_resource: detail.lexical_resource,
           grammatical_range: detail.grammatical_range
         },
+        overall_feedback: detail.overall_feedback || detail.feedback,
         task_analysis: detail.task_analysis,
         band_rationale: detail.band_rationale,
         improvement_plan: detail.improvement_plan,
@@ -328,8 +330,8 @@ async function loadResult() {
         topic_source: detail.topic_source || ''
       })
 
-      essayText.value = detail.content || ''
-      essayWordCount.value = detail.word_count || 0
+      essayText.value = detail.content || detail.contentText || detail.content_text || ''
+      essayWordCount.value = detail.word_count || detail.wordCount || 0
       applyEvaluationView(evaluationView)
       return
   } catch (error) {

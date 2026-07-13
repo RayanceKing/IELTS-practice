@@ -37,8 +37,10 @@ export function upsertAiConfig(cmd: UpsertAiProviderConfigCommand): Promise<AiPr
 export function deleteAiConfig(id: string): Promise<unknown>
 export function setDefaultAiConfig(id: string): Promise<unknown>
 export function testAiProvider(): Promise<AiProviderTestResult>
-export function createBackup(appVersion?: string | null): Promise<unknown>
-export function importBackupPath(path: string, dryRun?: boolean): Promise<unknown>
+export function createBackup(appVersion?: string | null): Promise<{ source: 'tauri'; manifest: unknown; path?: string | null }>
+export function listBackups(): Promise<{ source: 'tauri'; items: Array<{ name: string; path: string; modifiedAt?: string | null; sizeBytes?: number }> }>
+export function pickBackupImportPath(): Promise<string | null>
+export function importBackupPath(path: string, dryRun?: boolean): Promise<{ source: 'tauri'; report: unknown }>
 
 declare const settingsRepository: Record<string, unknown>
 export default settingsRepository

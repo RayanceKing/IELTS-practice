@@ -5,67 +5,87 @@
     </div>
 
     <div class="hero-settings-group" aria-label="设置主面板">
-      <section class="hero-panel hero-section system-management-panel">
-        <h3 class="heading-serif">🔧 系统管理</h3>
-        <p class="hero-panel__muted">系统工具和设置选项</p>
+      <section class="hero-panel hero-section ai-settings-panel">
+        <h3 class="heading-serif">AI 与评测</h3>
+        <p class="hero-panel__muted">配置模型、提示词与温度。API Key 保存在系统密钥环，不会进入普通备份。</p>
         <div class="hero-settings-actions">
-          <button class="btn btn-warning hero-btn hero-btn--warn" id="clear-cache-btn" type="button" @click="clearAppCache">
-            🗑️ 清除缓存
+          <button class="btn btn-brand hero-btn" type="button" data-settings-open="api" @click="openSettingsDetail('api')">
+            API 配置
           </button>
-          <button class="btn btn-warning hero-btn hero-btn--warn" id="load-library-btn" type="button" @click="openWritingTopicLibrary">
-            📂 加载题库
+          <button class="btn hero-btn" type="button" data-settings-open="prompts" @click="openSettingsDetail('prompts')">
+            提示词
           </button>
-          <button class="btn btn-warning hero-btn hero-btn--warn" id="theme-switcher-btn-entry" type="button" @click="switchBackgroundTheme">
-            🎨 主题切换
+          <button class="btn hero-btn" type="button" data-settings-open="model" @click="openSettingsDetail('model')">
+            模型参数
           </button>
-          <button class="btn btn-warning hero-btn hero-btn--warn" id="show-onboarding-btn" type="button" @click="startOnboardingTour">
-            🎯 显示引导
+          <button class="btn hero-btn" type="button" data-settings-open="about" @click="openSettingsDetail('about')">
+            关于
           </button>
-          <button class="btn btn-warning hero-btn hero-btn--warn" id="library-config-btn" type="button" data-action="library-config" @click="openWritingLibraryConfig">
-            <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="ui-emoji-icon" aria-hidden="true">
-              <line x1="4" y1="21" x2="4" y2="14"></line>
-              <line x1="4" y1="10" x2="4" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="12"></line>
-              <line x1="12" y1="8" x2="12" y2="3"></line>
-              <line x1="20" y1="21" x2="20" y2="16"></line>
-              <line x1="20" y1="12" x2="20" y2="3"></line>
-              <line x1="1" y1="14" x2="7" y2="14"></line>
-              <line x1="9" y1="8" x2="15" y2="8"></line>
-              <line x1="17" y1="16" x2="23" y2="16"></line>
-            </svg>
-            题库配置切换
-          </button>
-          <button class="btn btn-warning hero-btn hero-btn--warn" id="force-refresh-btn" type="button" data-action="force-refresh" @click="refreshWritingLibrary">
-            🔄 强制刷新题库
-          </button>
-          <button class="btn btn-warning hero-btn hero-btn--warn" id="check-updates-btn" type="button" data-update-action="open-modal" @click="openUpdateManager">
-            🔍 检查更新
-          </button>
+        </div>
+        <div class="settings-stat-row">
+          <span class="settings-badge">{{ enabledConfigCount }} 个已启用</span>
+          <span class="settings-badge settings-badge--muted">共 {{ totalConfigCount }} 个配置</span>
+          <span class="settings-badge settings-badge--muted">{{ promptEntries.length }} 个提示词版本</span>
         </div>
       </section>
 
       <section class="hero-panel hero-section data-management-panel">
-        <h3 class="heading-serif">💾 数据管理</h3>
-        <p class="hero-panel__muted">数据备份、导入导出和完整性检查</p>
+        <h3 class="heading-serif">本机数据备份</h3>
+        <p class="hero-panel__muted">完整备份写入应用 backups 目录（练习记录 + 设置；不含明文 API Key）。写作设置快照可单独导出。</p>
         <div class="hero-settings-actions">
-          <button class="btn hero-btn data-mgmt-btn" id="create-backup-btn" type="button" @click="createSettingsBackup">
-            💾 创建备份
+          <button class="btn btn-brand hero-btn data-mgmt-btn" id="create-backup-btn" type="button" :disabled="backupBusy" @click="createFullAppBackup">
+            {{ backupBusy ? '处理中…' : '备份全部数据' }}
           </button>
-          <button class="btn hero-btn data-mgmt-btn" id="backup-list-btn" type="button" @click="showSettingsBackupList">
-            📋 备份列表
+          <button class="btn hero-btn data-mgmt-btn" id="restore-backup-btn" type="button" :disabled="backupBusy" @click="restoreFullAppBackup">
+            从备份恢复…
+          </button>
+          <button class="btn hero-btn data-mgmt-btn" id="backup-list-btn" type="button" :disabled="backupBusy" @click="showNativeBackupList">
+            备份列表
           </button>
           <button class="btn hero-btn data-mgmt-btn" id="export-data-btn" type="button" @click="exportSettingsData">
-            📤 导出数据
+            导出写作设置
           </button>
           <button class="btn hero-btn data-mgmt-btn" id="import-data-btn" type="button" @click="triggerSettingsImport">
-            📥 导入数据
+            导入写作设置
           </button>
           <input ref="settingsImportInput" class="settings-file-input" type="file" accept="application/json,.json" @change="handleSettingsImport" />
+        </div>
+        <p v-if="lastBackupPath" class="hero-panel__muted settings-backup-path">最近备份：{{ lastBackupPath }}</p>
+      </section>
+
+      <section class="hero-panel hero-section system-management-panel">
+        <h3 class="heading-serif">系统与外观</h3>
+        <p class="hero-panel__muted">主题、缓存、引导与题库工具。</p>
+        <div class="hero-settings-actions">
+          <button class="btn btn-warning hero-btn hero-btn--warn" id="clear-cache-btn" type="button" @click="clearAppCache">
+            清除缓存
+          </button>
+          <button class="btn btn-warning hero-btn hero-btn--warn" id="load-library-btn" type="button" @click="openWritingTopicLibrary">
+            加载题库
+          </button>
+          <button class="btn btn-warning hero-btn hero-btn--warn" id="theme-switcher-btn-entry" type="button" @click="switchBackgroundTheme">
+            主题切换
+          </button>
+          <button class="btn btn-warning hero-btn hero-btn--warn" id="show-onboarding-btn" type="button" @click="startOnboardingTour">
+            显示引导
+          </button>
+          <button class="btn btn-warning hero-btn hero-btn--warn" id="library-config-btn" type="button" data-action="library-config" @click="openWritingLibraryConfig">
+            提示词设置
+          </button>
+          <button class="btn btn-warning hero-btn hero-btn--warn" id="force-refresh-btn" type="button" data-action="force-refresh" @click="refreshWritingLibrary">
+            强制刷新题库
+          </button>
+          <button class="btn btn-warning hero-btn hero-btn--warn" id="check-updates-btn" type="button" data-update-action="open-modal" @click="openUpdateManager">
+            检查更新
+          </button>
+          <button class="btn hero-btn" type="button" @click="openSettingsDetail('data')">
+            历史保留上限
+          </button>
         </div>
       </section>
 
       <section class="hero-panel hero-section system-info-panel">
-        <h3 class="heading-serif">📊 系统信息</h3>
+        <h3 class="heading-serif">系统信息</h3>
         <div class="hero-surface settings-system-info system-info-surface">
           <div class="settings-system-info__status system-info-status">题库状态: {{ topicLibraryStatus }}</div>
           <div>总题目数: <span id="total-exams">{{ topicLibraryStats.total }}</span></div>
@@ -75,6 +95,7 @@
           <div>Host: <span>{{ hostName }}</span></div>
           <div>Tauri版本: <span>{{ tauriVersion }}</span></div>
           <div>数据目录: <span>{{ userDataPath || '加载中...' }}</span></div>
+          <div>备份目录: <span>{{ backupsPath || '加载中...' }}</span></div>
         </div>
         <div class="settings-credit">
           <a href="https://docs.qq.com/doc/DSXZhWUtqeVN0d1ZT" target="_blank" rel="noopener noreferrer" class="inline-hover-link">问题反馈</a>
@@ -399,12 +420,40 @@
         <section v-if="activeTab === 'data' && settingsBackupListOpen" class="settings-panel" data-writing-settings-backup-list>
           <div class="settings-panel__head">
             <div>
-              <h3>设置备份列表</h3>
-              <p>最近 10 个写作设置备份保存在本机，可恢复、下载或删除。</p>
+              <h3>应用备份文件</h3>
+              <p>来自 backups 目录的完整备份。恢复为合并写入，不含明文 API Key。</p>
             </div>
-            <span class="settings-badge">{{ settingsBackups.length }} 个备份</span>
+            <span class="settings-badge">{{ nativeBackups.length }} 个文件</span>
           </div>
-          <div v-if="!settingsBackups.length" class="settings-empty">暂无设置备份。</div>
+          <div v-if="!nativeBackups.length" class="settings-empty">暂无完整备份文件。可先点「备份全部数据」。</div>
+          <div v-else class="settings-list">
+            <div v-for="backup in nativeBackups" :key="backup.path" class="settings-list__row">
+              <div class="settings-list__main">
+                <div class="settings-list__title">
+                  <strong>{{ backup.name }}</strong>
+                  <span class="settings-badge settings-badge--muted">{{ formatNativeBackupDate(backup) }}</span>
+                </div>
+                <div class="settings-list__meta">
+                  <span>{{ formatBytes(backup.sizeBytes || backup.size_bytes || 0) }}</span>
+                  <span class="settings-path-clip">{{ backup.path }}</span>
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button class="btn-text" type="button" :disabled="backupBusy" @click="restoreNativeBackupFile(backup)">恢复</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="activeTab === 'data' && settingsSnapshotListOpen" class="settings-panel" data-writing-settings-snapshot-list>
+          <div class="settings-panel__head">
+            <div>
+              <h3>写作设置快照</h3>
+              <p>仅含温度/历史上限与提示词元数据；不是完整库备份，API Key 不会恢复。</p>
+            </div>
+            <span class="settings-badge">{{ settingsBackups.length }} 个快照</span>
+          </div>
+          <div v-if="!settingsBackups.length" class="settings-empty">暂无写作设置快照。</div>
           <div v-else class="settings-list">
             <div v-for="backup in settingsBackups" :key="backup.id" class="settings-list__row">
               <div class="settings-list__main">
@@ -413,12 +462,12 @@
                   <span class="settings-badge settings-badge--muted">{{ formatSettingsBackupDate(backup) }}</span>
                 </div>
                 <div class="settings-list__meta">
-                  <span>{{ backup.apiConfigCount }} 个 API 配置</span>
                   <span>{{ backup.promptCount }} 个提示词版本</span>
+                  <span>{{ backup.apiConfigCount }} 个 API 元数据（无密钥）</span>
                 </div>
               </div>
               <div class="settings-actions">
-                <button class="btn-text" type="button" @click="restoreSettingsBackup(backup)">恢复</button>
+                <button class="btn-text" type="button" @click="restoreSettingsBackup(backup)">恢复快照</button>
                 <button class="btn-text" type="button" @click="downloadSettingsBackup(backup)">下载</button>
                 <button class="btn-text danger" type="button" @click="deleteSettingsBackup(backup.id)">删除</button>
               </div>
@@ -621,7 +670,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { settings, essays, configs, prompts, topics } from '@/api/client.js'
-import { listSettings, upsertSetting } from '@/api/settings-repository.js'
+import { listSettings, upsertSetting, createBackup, listBackups, pickBackupImportPath, importBackupPath } from '@/api/settings-repository.js'
 import { invokeCommand } from '@/api/tauri-bridge.js'
 import { createRequestGate } from '@/utils/request-gate.js'
 import { useTauriPreferences } from '@/composables/useTauriPreferences.js'
@@ -839,6 +888,11 @@ const hostName = ref('Tauri')
 const tauriVersion = ref('N/A')
 const appVersion = ref('N/A')
 const userDataPath = ref('')
+const backupsPath = ref('')
+const backupBusy = ref(false)
+const lastBackupPath = ref('')
+const nativeBackups = ref([])
+const settingsSnapshotListOpen = ref(false)
 
 async function loadTauriAboutInfo() {
   try {
@@ -848,10 +902,12 @@ async function loadTauriAboutInfo() {
     appVersion.value = info?.version || 'N/A'
     const paths = await invokeCommand('get_app_data_paths')
     userDataPath.value = paths?.appData || paths?.app_data || ''
+    backupsPath.value = paths?.backups || ''
   } catch (error) {
     hostName.value = 'tauri'
     tauriVersion.value = 'N/A'
     userDataPath.value = '无法获取（需 Tauri 运行时）'
+    backupsPath.value = ''
   }
 }
 
@@ -1369,7 +1425,14 @@ async function executeConfirmAction() {
       }
       const result = await applySettingsImportPayload(normalized.archive)
       await loadApiConfigs()
-      setGlobalMessage('success', `备份已恢复：${result.settingsCount} 项设置，${result.promptCount} 个提示词版本。`)
+      setGlobalMessage(
+        'success',
+        `快照已恢复：${result.settingsCount} 项设置，${result.promptCount} 个提示词，${result.apiConfigCount || 0} 个 API 元数据。`
+      )
+    } else if (kind === 'restore-full-backup') {
+      const path = String(payload?.path || '').trim()
+      if (!path) throw new Error('缺少备份路径')
+      await applyFullBackupRestore(path)
     }
     closeConfirmDialog()
   } catch (error) {
@@ -1380,8 +1443,10 @@ async function executeConfirmAction() {
       : kind === 'delete-prompt'
         ? '删除提示词失败'
         : kind === 'restore-settings-backup'
-          ? '恢复备份失败'
-          : '清空失败'
+          ? '恢复快照失败'
+          : kind === 'restore-full-backup'
+            ? '恢复完整备份失败'
+            : '清空失败'
     setSectionMessage(section, 'error', `${errorLabel}: ${error.message}`)
   }
 }
@@ -1617,8 +1682,12 @@ async function applySettingsImportPayload(payload) {
   const promptPayload = Array.isArray(payload?.prompts)
     ? payload.prompts
     : null
-  if (!Object.keys(updates).length && !promptPayload?.length) {
-    throw new Error('文件不包含可导入的写作设置或提示词')
+  const apiPayload = Array.isArray(payload?.apiConfigs)
+    ? payload.apiConfigs
+    : []
+
+  if (!Object.keys(updates).length && !promptPayload?.length && !apiPayload.length) {
+    throw new Error('文件不包含可导入的写作设置、API 元数据或提示词')
   }
 
   if (Object.keys(updates).length) {
@@ -1630,12 +1699,158 @@ async function applySettingsImportPayload(payload) {
     await loadPromptList()
   }
 
+  let apiConfigCount = 0
+  // Metadata-only restore: never invent API keys. User must re-enter secrets.
+  for (const item of apiPayload) {
+    const id = String(item?.id || '').trim()
+    if (!id) continue
+    try {
+      await configs.update(id, {
+        config_name: item.config_name || item.configName || id,
+        provider: item.provider || 'openai-compatible',
+        base_url: item.base_url || item.baseUrl || '',
+        default_model: item.default_model || item.defaultModel || '',
+        is_default: Boolean(item.is_default ?? item.isDefault),
+        is_enabled: item.is_enabled ?? item.isEnabled ?? true,
+        api_key: ''
+      })
+      apiConfigCount += 1
+    } catch (error) {
+      // Create if missing
+      try {
+        await configs.create({
+          id,
+          config_name: item.config_name || item.configName || id,
+          provider: item.provider || 'openai-compatible',
+          base_url: item.base_url || item.baseUrl || '',
+          default_model: item.default_model || item.defaultModel || '',
+          is_default: Boolean(item.is_default ?? item.isDefault),
+          is_enabled: item.is_enabled ?? item.isEnabled ?? true,
+          api_key: ''
+        })
+        apiConfigCount += 1
+      } catch (createError) {
+        console.warn('import api config metadata failed', id, createError)
+      }
+    }
+  }
+  if (apiConfigCount) {
+    await loadApiConfigs()
+  }
+
   return {
     settingsCount: Object.keys(updates).length,
-    promptCount: promptPayload?.length || 0
+    promptCount: promptPayload?.length || 0,
+    apiConfigCount
   }
 }
 
+async function createFullAppBackup() {
+  if (backupBusy.value) return
+  backupBusy.value = true
+  try {
+    const { manifest, path } = await createBackup(appVersion.value || '0.1.0')
+    lastBackupPath.value = path || ''
+    await refreshNativeBackupList()
+    const attempts = manifest?.attemptCount ?? manifest?.attempt_count ?? 0
+    const settingsCount = manifest?.settingsCount ?? manifest?.settings_count ?? 0
+    setGlobalMessage(
+      'success',
+      `完整备份已写入：练习 ${attempts} 条 · 设置 ${settingsCount} 项${path ? ` · ${path}` : ''}`
+    )
+  } catch (error) {
+    setGlobalMessage('error', '完整备份失败: ' + (error?.message || error))
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+async function refreshNativeBackupList() {
+  try {
+    const { items } = await listBackups()
+    nativeBackups.value = Array.isArray(items) ? items : []
+  } catch (error) {
+    console.warn('list backups failed', error)
+    nativeBackups.value = []
+  }
+}
+
+async function showNativeBackupList() {
+  await refreshNativeBackupList()
+  settingsBackupListOpen.value = true
+  settingsSnapshotListOpen.value = true
+  settingsBackups.value = readSettingsBackups()
+  openSettingsDetail('data')
+}
+
+async function restoreFullAppBackup() {
+  if (backupBusy.value) return
+  backupBusy.value = true
+  try {
+    const path = await pickBackupImportPath()
+    if (!path) {
+      setGlobalMessage('info', '已取消选择备份文件。')
+      return
+    }
+    await previewAndConfirmRestore(path)
+  } catch (error) {
+    setGlobalMessage('error', '选择备份失败: ' + (error?.message || error))
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+async function restoreNativeBackupFile(backup) {
+  const path = String(backup?.path || '').trim()
+  if (!path) return
+  await previewAndConfirmRestore(path)
+}
+
+async function previewAndConfirmRestore(path) {
+  backupBusy.value = true
+  try {
+    const { report } = await importBackupPath(path, true)
+    if (!report?.ok && (report?.errors || []).length) {
+      throw new Error((report.errors || []).join('; ') || '备份校验失败')
+    }
+    openConfirmDialog({
+      kind: 'restore-full-backup',
+      section: 'data',
+      title: '恢复完整备份',
+      message: [
+        `文件：${path}`,
+        `将合并写入练习 ${report?.attemptImported ?? report?.attempt_imported ?? 0} 条、`,
+        `设置 ${report?.settingsImported ?? report?.settings_imported ?? 0} 项、`,
+        `密钥引用 ${report?.secretRefsImported ?? report?.secret_refs_imported ?? 0} 条。`,
+        '不会导入明文 API Key；已有同 id 记录会被覆盖。'
+      ].join(''),
+      confirmLabel: '确认恢复',
+      danger: true,
+      payload: { path }
+    })
+  } catch (error) {
+    setGlobalMessage('error', '备份预检失败: ' + (error?.message || error))
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+async function applyFullBackupRestore(path) {
+  const { report } = await importBackupPath(path, false)
+  if (!report?.ok) {
+    throw new Error((report?.errors || []).join('; ') || '恢复失败')
+  }
+  await loadSettings()
+  await loadApiConfigs()
+  await loadPromptList()
+  await refreshNativeBackupList()
+  setGlobalMessage(
+    'success',
+    `完整备份已恢复：练习 ${report.attemptImported ?? report.attempt_imported ?? 0} · 设置 ${report.settingsImported ?? report.settings_imported ?? 0}`
+  )
+}
+
+/** @deprecated name kept for any residual callers — creates writing settings snapshot only */
 async function createSettingsBackup() {
   try {
     const archive = await collectSettingsExportPayload()
@@ -1645,25 +1860,23 @@ async function createSettingsBackup() {
       archive
     })
     persistSettingsBackups([backup, ...readSettingsBackups()])
-    settingsBackupListOpen.value = true
+    settingsSnapshotListOpen.value = true
     openSettingsDetail('data')
-    downloadJsonFile(`ielts-writing-settings-backup-${Date.now()}.json`, archive)
-    setGlobalMessage('success', '设置备份已创建并保存到本机列表。')
+    downloadJsonFile(`ielts-writing-settings-snapshot-${Date.now()}.json`, archive)
+    setGlobalMessage('success', '写作设置快照已保存（不含 API Key / 不含练习记录）。')
   } catch (error) {
-    setGlobalMessage('error', '创建备份失败: ' + error.message)
+    setGlobalMessage('error', '创建设置快照失败: ' + error.message)
   }
 }
 
 function showSettingsBackupList() {
-  openSettingsDetail('data')
-  settingsBackups.value = readSettingsBackups()
-  settingsBackupListOpen.value = true
+  showNativeBackupList()
 }
 
 function downloadSettingsBackup(backup) {
   const normalized = normalizeSettingsBackupEntry(backup)
   if (!normalized) {
-    setGlobalMessage('error', '备份数据无效，无法下载。')
+    setGlobalMessage('error', '快照数据无效，无法下载。')
     return
   }
   const safeId = normalized.id.replace(/[^a-zA-Z0-9._-]+/g, '-')
@@ -1673,14 +1886,14 @@ function downloadSettingsBackup(backup) {
 function restoreSettingsBackup(backup) {
   const normalized = normalizeSettingsBackupEntry(backup)
   if (!normalized) {
-    setGlobalMessage('error', '备份数据无效，无法恢复。')
+    setGlobalMessage('error', '快照数据无效，无法恢复。')
     return
   }
   openConfirmDialog({
     kind: 'restore-settings-backup',
     section: 'data',
-    title: '恢复设置备份',
-    message: `恢复备份 ${formatSettingsBackupDate(normalized)}？当前写作设置和提示词版本会被导入记录覆盖。`,
+    title: '恢复写作设置快照',
+    message: `恢复快照 ${formatSettingsBackupDate(normalized)}？将导入温度/历史上限、提示词与 API 元数据（不含密钥）。`,
     confirmLabel: '确认恢复',
     danger: false,
     payload: { backup: normalized }
@@ -1691,15 +1904,15 @@ function deleteSettingsBackup(id) {
   const normalizedId = String(id || '').trim()
   if (!normalizedId) return
   persistSettingsBackups(readSettingsBackups().filter((backup) => backup.id !== normalizedId))
-  setGlobalMessage('success', '设置备份已删除。')
+  setGlobalMessage('success', '写作设置快照已删除。')
 }
 
 async function exportSettingsData() {
   try {
     downloadJsonFile('ielts-writing-settings-export.json', await collectSettingsExportPayload())
-    setGlobalMessage('success', '设置数据已导出。')
+    setGlobalMessage('success', '写作设置已导出（不含 API Key / 不含练习记录）。')
   } catch (error) {
-    setGlobalMessage('error', '导出数据失败: ' + error.message)
+    setGlobalMessage('error', '导出失败: ' + error.message)
   }
 }
 
@@ -1713,15 +1926,36 @@ async function handleSettingsImport(event) {
   try {
     const raw = await file.text()
     const parsed = JSON.parse(raw)
+    // Full app backup package shape: { manifest, attempts, settings, secretRefs }
+    if (parsed?.manifest && Array.isArray(parsed?.attempts)) {
+      throw new Error('这是完整应用备份。请使用「从备份恢复…」选择文件路径导入。')
+    }
     const result = await applySettingsImportPayload(parsed)
-    setGlobalMessage('success', `设置数据已导入：${result.settingsCount} 项设置，${result.promptCount} 个提示词版本。`)
+    setGlobalMessage(
+      'success',
+      `写作设置已导入：${result.settingsCount} 项设置，${result.promptCount} 个提示词，${result.apiConfigCount || 0} 个 API 元数据。`
+    )
   } catch (error) {
-    setGlobalMessage('error', '导入数据失败: ' + error.message)
+    setGlobalMessage('error', '导入失败: ' + error.message)
   } finally {
     if (event?.target) {
       event.target.value = ''
     }
   }
+}
+
+function formatNativeBackupDate(backup) {
+  const value = backup?.modifiedAt || backup?.modified_at || ''
+  if (!value) return '未知时间'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function formatBytes(n) {
+  const num = Number(n) || 0
+  if (num < 1024) return `${num} B`
+  if (num < 1024 * 1024) return `${(num / 1024).toFixed(1)} KB`
+  return `${(num / (1024 * 1024)).toFixed(1)} MB`
 }
 
 // 初始化
@@ -3725,5 +3959,28 @@ onBeforeUnmount(() => {
   .settings-page#settings-view .settings-tab {
     width: 100%;
   }
+}
+
+.settings-stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.settings-backup-path,
+.settings-path-clip {
+  margin-top: 10px;
+  font-size: 12px;
+  word-break: break-all;
+  opacity: 0.78;
+}
+
+.ai-settings-panel {
+  border: 1px solid color-mix(in srgb, var(--brand, #0f766e) 22%, transparent);
+}
+
+.data-management-panel .btn-brand {
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--brand, #0f766e) 18%, transparent);
 }
 </style>
