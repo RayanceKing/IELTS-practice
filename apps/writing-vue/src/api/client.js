@@ -62,13 +62,54 @@ export function getErrorMessage(code, fallbackMessage = '') {
 
 /** Prefer backend Chinese message (e.g. startEvaluation) over bare error code. */
 export function resolveApiErrorMessage(error, fallbackCode = 'unknown_error') {
+  const code = error?.code || fallbackCode
+  // Known product codes win over sparse/technical messages so UI stays consistent.
+  if (code && ERROR_MESSAGES[code] && (code === 'ai.not_configured' || !String(error?.message || '').trim())) {
+    return ERROR_MESSAGES[code]
+  }
   const message = typeof error?.message === 'string' ? error.message.trim() : ''
   if (message) return message
-  return getErrorMessage(error?.code || fallbackCode)
+  return getErrorMessage(code)
 }
 
 export function isAPIAvailable() {
   return isTauriRuntime()
+}
+
+function createAiNotConfiguredError() {
+  const error = new Error(ERROR_MESSAGES['ai.not_configured'])
+  error.code = 'ai.not_configured'
+  error.retryable = false
+  return error
+}
+
+/**
+ * Fail closed before draft/submit so unconfigured AI never leaves orphan submitted attempts.
+ * Mirrors writing_start_evaluation: unconfigured → refuse; deterministic offline OK; else need default+key.
+ */
+async function assertAiConfiguredForWritingEvaluation() {
+  const list = await configs.list()
+  const defaultConfig = list.find((item) => item.is_default) || null
+  if (defaultConfig?.is_enabled && defaultConfig?.has_secret) {
+    const provider = String(defaultConfig.provider || '').trim().toLowerCase()
+    if (provider && provider !== 'unconfigured') return
+  }
+
+  // Explicit offline scorer path (runtime provider only; not the product default).
+  const { items } = await listSettings('ai')
+  const providerEntry = (items || []).find((item) => item.key === 'provider')
+  let provider = providerEntry?.value
+  if (typeof provider === 'string') {
+    try {
+      const parsed = JSON.parse(provider)
+      if (typeof parsed === 'string') provider = parsed
+    } catch {
+      // keep raw string
+    }
+  }
+  if (String(provider || '').trim().toLowerCase() === 'deterministic') return
+
+  throw createAiNotConfiguredError()
 }
 
 function notImplemented(feature) {
@@ -325,6 +366,9 @@ export const evaluate = {
     const promptSnapshot =
       payload.topic_text || payload.topicText || payload.promptSnapshot || null
     const taskType = payload.task_type || payload.taskType || null
+
+    // Gate before any durable attempt mutation — avoids submitted orphans when AI is missing.
+    await assertAiConfiguredForWritingEvaluation()
 
     await saveDraft({
       attemptId,

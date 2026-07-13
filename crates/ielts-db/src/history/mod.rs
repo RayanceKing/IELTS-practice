@@ -44,6 +44,9 @@ fn build_where(filter: &HistoryFilter) -> (String, Vec<Box<dyn ToSql>>) {
 
     // Memorize attempts are temporary read-only sessions; never list in normal history.
     clauses.push("mode != 'memorize'".into());
+    // Open drafts / in-progress sessions are not finished work — keep them off history lists
+    // (compose autosave + reading open draft resume via their own paths).
+    clauses.push("lower(status) NOT IN ('draft', 'active')".into());
 
     if let Some(activity) = filter.activity {
         clauses.push("activity = ?".into());

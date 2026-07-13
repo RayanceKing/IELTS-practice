@@ -33,6 +33,7 @@ pub fn save_writing_draft(conn: &Connection, cmd: &SaveDraftCommand) -> DbResult
     let now = chrono::Utc::now().to_rfc3339();
     let content = cmd.content_text.clone().unwrap_or_default();
     let word_count = count_words(&content);
+    let title_snapshot = title_from_prompt(cmd.prompt_snapshot.as_deref());
 
     // Ensure attempt row exists (draft status).
     let attempt = AttemptRecord {
@@ -51,7 +52,7 @@ pub fn save_writing_draft(conn: &Connection, cmd: &SaveDraftCommand) -> DbResult
         score_scale: None,
         correct_count: None,
         question_count: None,
-        title_snapshot: None,
+        title_snapshot,
         prompt_snapshot: cmd.prompt_snapshot.clone(),
         content_text: Some(content.clone()),
         answers: vec![],
@@ -251,6 +252,23 @@ fn load_attempt_minimal(conn: &Connection, id: &str) -> DbResult<AttemptRecord> 
 
 fn count_words(text: &str) -> u32 {
     text.split_whitespace().filter(|w| !w.is_empty()).count() as u32
+}
+
+/// History list title from the first non-empty prompt line (truncated).
+fn title_from_prompt(prompt: Option<&str>) -> Option<String> {
+    let line = prompt?
+        .lines()
+        .map(str::trim)
+        .find(|s| !s.is_empty())?;
+    const MAX: usize = 80;
+    let count = line.chars().count();
+    if count <= MAX {
+        Some(line.to_string())
+    } else {
+        let mut out: String = line.chars().take(MAX).collect();
+        out.push('…');
+        Some(out)
+    }
 }
 
 fn mode_task_hint(mode: AttemptMode) -> Option<&'static str> {

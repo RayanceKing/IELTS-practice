@@ -502,6 +502,7 @@ const dividerDragging = ref(false)
 let endlessTimer = null
 let lastSelectionRange = null
 let currentHighlightNode = null
+let highlightPersistGeneration = 0
 let dividerPointerId = null
 const activeQuestionVisit = {
   questionId: '',
@@ -985,6 +986,7 @@ async function loadAsset() {
   resetReadingCoachState()
   closeFloatingPanels()
   resetHighlightUiStateFromComposable()
+  highlightPersistGeneration += 1
   clearReadingNotesDraft()
   clearEndlessTimer()
   resetPracticeTimerClock()
@@ -1257,6 +1259,7 @@ async function recycleSubmittedAttempt() {
   resetAttemptMetadata()
   initializeReadingAnswers(payload.value, { prefillAnswerKey: isMemorizeMode.value })
   resetHighlightUiStateFromComposable()
+  highlightPersistGeneration += 1
   await nextTick()
   Object.values(getHighlightRoots()).forEach((root) => unwrapHighlights(root))
   syncDomAnswers()
@@ -1496,7 +1499,9 @@ function normalizeHighlightSnapshot(value) {
       const scope = String(entry.scope || '').trim().toLowerCase()
       const startOffset = Number(entry.startOffset ?? entry.start)
       const endOffset = Number(entry.endOffset ?? entry.end)
+      const annotationId = entry.id ?? entry.annotationId
       return {
+        id: annotationId ? String(annotationId) : null,
         scope: scope === 'passage' || scope === 'questions' ? scope : 'unknown',
         text,
         kind: entry.kind === 'note' ? 'note' : 'highlight',
@@ -1510,6 +1515,19 @@ function normalizeHighlightSnapshot(value) {
       }
     })
     .filter(Boolean)
+}
+
+function collectHighlightAnnotationIds(entries) {
+  return new Set(
+    (Array.isArray(entries) ? entries : [])
+      .map((entry) => {
+        const raw = entry?.id
+          || entry?.annotationId
+          || entry?.node?.dataset?.annotationId
+        return raw ? String(raw) : ''
+      })
+      .filter(Boolean)
+  )
 }
 
 function snapshotHighlights() {
@@ -1537,8 +1555,9 @@ function snapshotHighlights() {
       if (hit < 0) return
       cursorByText.set(key, cursor)
       const endOffset = hit + text.length
+      const annotationId = node.dataset.annotationId ? String(node.dataset.annotationId) : null
       records.push({
-        id: node.dataset.annotationId || null,
+        id: annotationId,
         scope,
         text,
         kind: node.dataset.hlType === 'note' ? 'note' : 'highlight',
@@ -1553,27 +1572,51 @@ function snapshotHighlights() {
       })
     })
   })
+  const previousIds = collectHighlightAnnotationIds(highlightSnapshot.value)
   highlightSnapshot.value = records.map(({ node, ...rest }) => rest)
-  void persistHighlightSnapshotToStore(records)
+  const persistGeneration = ++highlightPersistGeneration
+  void persistHighlightSnapshotToStore(records, previousIds, persistGeneration)
   return highlightSnapshot.value
 }
 
-async function persistHighlightSnapshotToStore(records) {
+async function persistHighlightSnapshotToStore(records, previousIds = null, generation = highlightPersistGeneration) {
   if (!isTauriRuntime() || !asset.value?.id || reviewMode.value) return
   if (!tauriAttemptId) {
     tauriAttemptId = readingAttempt.newAttemptId()
     void persistTauriDraft()
   }
-  const list = Array.isArray(records) ? records : highlightSnapshot.value
-  for (const entry of list) {
-    const annotation = await persistHighlightToStore(asset.value.id, entry, tauriAttemptId || null)
-    const id = annotation?.id
-    if (id && entry.node) {
-      entry.node.dataset.annotationId = id
-      entry.id = id
+  const list = Array.isArray(records) ? records : []
+  const keepIds = collectHighlightAnnotationIds(list)
+  const knownIds = previousIds instanceof Set
+    ? previousIds
+    : collectHighlightAnnotationIds(highlightSnapshot.value)
+  // Always apply set-diff deletes for this snapshot generation so a superseded
+  // persist still removes ids that dropped out before a later snapshot ran.
+  for (const id of knownIds) {
+    if (!keepIds.has(id)) {
+      await deleteHighlightFromStore(id)
     }
   }
-  highlightSnapshot.value = list.map(({ node, ...rest }) => rest)
+  if (generation !== highlightPersistGeneration) return
+  for (const entry of list) {
+    // Skip nodes already unwrapped (e.g. rapid remove while upsert is in flight).
+    if (entry?.node && entry.node.isConnected === false) {
+      continue
+    }
+    const annotation = await persistHighlightToStore(asset.value.id, entry, tauriAttemptId || null)
+    if (generation !== highlightPersistGeneration) return
+    const id = annotation?.id ? String(annotation.id) : null
+    if (id) {
+      entry.id = id
+      if (entry.node?.isConnected) {
+        entry.node.dataset.annotationId = id
+      }
+    }
+  }
+  if (generation !== highlightPersistGeneration) return
+  highlightSnapshot.value = list
+    .filter((entry) => !entry?.node || entry.node.isConnected)
+    .map(({ node, ...rest }) => rest)
 }
 
 function resolveHighlightQuestionId(node) {
@@ -1737,7 +1780,9 @@ function removeSelectionHighlight() {
     target = (ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor)?.closest?.('.hl') || null
   }
   if (target?.parentNode) {
-    const annotationId = target.dataset?.annotationId || null
+    const annotationId = target.dataset?.annotationId
+      ? String(target.dataset.annotationId)
+      : null
     const parent = target.parentNode
     while (target.firstChild) {
       parent.insertBefore(target.firstChild, target)

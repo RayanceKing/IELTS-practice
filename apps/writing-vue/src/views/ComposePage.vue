@@ -646,7 +646,8 @@ async function submitEssay() {
     const result = await evaluate.start({
       task_type: payload.task_type,
       topic_id: payload.topic_id,
-      topic_text: topicMode.value === 'free' ? customTopicText.value.trim() : null,
+      // Bank and free both need the prompt text for AI + history/result topic display.
+      topic_text: payload.topic_text,
       content: payload.content,
       word_count: payload.word_count
     })
