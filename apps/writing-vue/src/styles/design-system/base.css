@@ -1,0 +1,178 @@
+/* Global base styles on top of Atlas tokens. No competing :root brand systems. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+html {
+  font-size: 16px;
+  background: transparent;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family-primary);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+  background: transparent;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body.hero-body {
+  color: var(--shui-text-strong);
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+  background: #fbfffd;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-family-display);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  letter-spacing: normal;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+/* Shared glass shell primitives (subset of Atlas heroui-bridge) */
+.hero-shell {
+  position: relative;
+  z-index: 1;
+  max-width: var(--shui-shell-max-width);
+  margin: 0 auto;
+  padding: clamp(32px, 5vw, 72px) clamp(16px, 5vw, 48px) 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.hero-panel,
+.glass-panel {
+  background: var(--shui-panel-bg);
+  border: 1px solid var(--shui-panel-border);
+  border-radius: var(--shui-radius-xl);
+  box-shadow: var(--shui-panel-shadow);
+  backdrop-filter: blur(var(--shui-blur)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--shui-blur)) saturate(var(--lg-saturate));
+}
+
+.glass-surface {
+  background: var(--shui-surface-bg);
+  border: 1px solid var(--shui-surface-border);
+  border-radius: var(--shui-radius-md);
+}
+
+.glass-card {
+  background: var(--lg-bg-primary);
+  backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+  border: 1px solid var(--lg-border-color);
+  border-radius: var(--lg-radius-lg);
+  box-shadow: var(--lg-shadow-elevated);
+}
+
+.btn-brand {
+  background: var(--color-brand-gradient);
+  color: var(--color-white);
+  padding: 12px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: var(--shui-radius-sm);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(102, 126, 234, 0.28);
+}
+
+.btn-warm-sand,
+.btn-glass {
+  background: var(--lg-bg-interactive);
+  color: var(--shui-text-strong);
+  padding: 12px 24px;
+  border: 1px solid var(--lg-border-color);
+  border-radius: var(--shui-radius-sm);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  box-shadow: var(--lg-shadow-subtle);
+  backdrop-filter: blur(var(--lg-blur-sm)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-sm)) saturate(var(--lg-saturate));
+}
+
+.btn-white {
+  background: var(--color-white);
+  color: var(--color-gray-900);
+  padding: 8px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--shui-radius-sm);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.btn-dark {
+  background: rgba(30, 41, 59, 0.88);
+  color: var(--color-white);
+  padding: 9.6px 16.8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--shui-radius-sm);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.btn-danger {
+  background: var(--color-error);
+  color: var(--color-white);
+  padding: 12px 24px;
+  border: none;
+  border-radius: var(--shui-radius-sm);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.card {
+  background: var(--lg-bg-primary);
+  border-radius: var(--shui-radius-sm);
+  padding: 28px;
+  border: 1px solid var(--lg-border-color);
+  backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+  box-shadow: var(--lg-shadow-elevated);
+}

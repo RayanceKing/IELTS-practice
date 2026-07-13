@@ -10,7 +10,8 @@
 - [completed] 4. 资源清单、Tauri bundle 与启动幂等 seed
 - [in_progress] 5. 前端 Vue/TS 单一路径、god-page 拆分与剩余严格类型收敛
   - 已完成：阅读交互/拖拽 composable 抽取；attempt/highlights/timer/interactions 纳入 strict tsconfig
-  - 未完成：useReadingCoach 严格类型；PracticeReadingPage 高亮/提交/endless 继续拆；PracticeLibraryPage god-page
+  - 已完成：设计系统地基 `styles/design-system`（Atlas HeroUI/Shui tokens + alias + base）
+  - 未完成：useReadingCoach 严格类型；PracticeReadingPage 高亮/提交/endless 继续拆；PracticeLibraryPage god-page；页面级 CSS 硬编码颜色迁 token
 - [in_progress] 6. 测试门禁、CI、release 与 DoD 文档证据
 - [completed] 7. 删除 legacy shipping tree 并验证功能 parity
 - [pending] 8. 全量验证与交付摘要

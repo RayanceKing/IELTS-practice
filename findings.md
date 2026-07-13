@@ -48,6 +48,7 @@
 - 删除后验证：`npm run typecheck`、Vue build、`cargo check --workspace --locked`、static gate `6/6`、packaged Tauri E2E `5/5` 全部通过。
 - 仍未完成的工程债务：`PracticeReadingPage.vue`/`PracticeLibraryPage.vue` 仍偏大；`useReadingCoach` 尚未进入 strict；release 签名/updater secrets、Windows/macOS notarization 和真实账号 AI 成功调用需要外部凭据。
 - 2026-07-13 god-page 拆分进展：阅读拖拽/交互已迁入 `useReadingInteractions`；attempt/highlights/timer 已 strict。页面仍含高亮 DOM、提交/endless/suite 编排和超大 CSS。
+- 设计系统崩坏根因：同时存在 terracotta writing tokens、liquid-glass `--lg-*`、页面内 Shui/Bauhaus/Bloom 重声明，以及 Atlas 源站 HeroUI 体系。现已建立 `styles/design-system` 作为全局 token 源；页面级 CSS 仍大量硬编码颜色/阴影，需继续按组件迁到 token。
 # Library / Settings page split findings (2026-07-12)
 - `PracticeLibraryPage.vue` and `SettingsPage.vue` persisted durable UI preferences and backup indexes directly in Web Storage, creating a second source of truth beside Tauri SQLite settings.
 - Durable values moved in this pass: GPL acknowledgement, browse preferences, reading suite preferences, reading backup index, and writing settings backup index.

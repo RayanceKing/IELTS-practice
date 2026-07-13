@@ -3088,36 +3088,7 @@ function updateSegmentedIndicators() {
 /* Vue port of opensource@ec47b29 index.html + heroui-bridge.css.
    Keep the legacy DOM/API contract above; this layer restores the actual product skin. */
 .practice-library-open-source {
-  --shui-shell-max-width: 1400px;
-  --shui-panel-bg: rgba(255, 255, 255, 0.25);
-  --shui-panel-border: rgba(255, 255, 255, 0.4);
-  --shui-panel-shadow: 0 20px 40px rgba(0, 0, 0, 0.1),
-    inset 0 1px 1px rgba(255, 255, 255, 0.6),
-    inset 0 -1px 1px rgba(255, 255, 255, 0.1);
-  --shui-surface-bg: rgba(255, 255, 255, 0.65);
-  --shui-surface-border: rgba(148, 163, 184, 0.35);
-  --shui-text-strong: var(--color-gray-900);
-  --shui-text-muted: rgba(51, 65, 85, 0.7);
-  --shui-accent: var(--color-brand-primary);
-  --shui-accent-alt: var(--color-brand-secondary);
-  --shui-gradient-start: #ffd89b;
-  --shui-gradient-end: #6accc7;
-  --shui-radius-xl: 28px;
-  --shui-radius-lg: 20px;
-  --shui-radius-md: 16px;
-  --shui-radius-sm: 12px;
-  --shui-blur: 32px;
-  --bauhaus-text-main: #0f172a;
-  --bauhaus-text-muted: #64748b;
-  --bauhaus-accent-red: #dc2626;
-  --bauhaus-accent-blue: #2563eb;
-  --bauhaus-accent-dark: #334155;
-  --bloom-surface: rgba(255, 252, 247, 0.95);
-  --bloom-border: rgba(232, 189, 145, 0.35);
-  --bloom-border-strong: rgba(232, 189, 145, 0.5);
-  --bloom-sheen: linear-gradient(135deg, rgba(252, 214, 172, 0.32), rgba(173, 228, 210, 0.28));
-  --bloom-highlight: linear-gradient(120deg, #f6b26b 0%, #35c0a1 100%);
-  --bloom-shadow: 0 18px 46px rgba(215, 180, 140, 0.2), 0 10px 28px rgba(53, 192, 161, 0.14);
+  /* Tokens come from styles/design-system (Atlas HeroUI/Shui). */
   max-width: var(--shui-shell-max-width);
   color: var(--shui-text-strong);
 }

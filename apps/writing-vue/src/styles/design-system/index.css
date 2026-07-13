@@ -1,0 +1,4 @@
+/* Design system entry: Atlas HeroUI/Shui is the single visual source of truth. */
+@import './tokens.css';
+@import './aliases.css';
+@import './base.css';

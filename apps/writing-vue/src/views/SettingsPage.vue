@@ -3135,20 +3135,7 @@ onBeforeUnmount(() => {
 
 /* Open-source settings shell parity */
 .settings-page#settings-view {
-  --shui-panel-bg: rgba(255, 255, 255, 0.58);
-  --shui-panel-border: rgba(255, 255, 255, 0.7);
-  --shui-panel-shadow: 0 24px 70px rgba(31, 41, 55, 0.12);
-  --shui-surface-bg: rgba(255, 255, 255, 0.46);
-  --shui-surface-border: rgba(255, 255, 255, 0.58);
-  --shui-radius-xl: 28px;
-  --shui-radius-lg: 20px;
-  --shui-radius-md: 16px;
-  --shui-blur: 32px;
-  --bauhaus-text-main: #0f172a;
-  --bauhaus-text-muted: #64748b;
-  --bauhaus-accent-red: #dc2626;
-  --bauhaus-accent-blue: #2563eb;
-  --bauhaus-accent-dark: #334155;
+  /* Tokens come from styles/design-system (Atlas HeroUI/Shui). */
   max-width: 1320px;
   margin: 20px auto 0;
   padding: clamp(28px, 4vw, 48px);

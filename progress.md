@@ -31,3 +31,4 @@
 - 页面从约 5527 行降到 5063 行；逻辑迁出，CSS 仍占大头。
 - `useReadingAttempt` / `useReadingHighlights` / `useReadingTimer` / interactions 进入 strict typecheck；`useReadingCoach` 仍未纳入。
 - 验证：`npm run typecheck` 通过；Vue production build 通过；static suite `6/6` 通过。
+- 设计系统收敛启动：以 `IELTS Atlas` HeroUI/Shui 为唯一视觉事实源，落地 `styles/design-system/{tokens,aliases,base}.css`；写作 terracotta / liquid-glass 名称降级为 alias；Library/Settings 去掉页面内 token 重声明。
