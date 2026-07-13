@@ -46,7 +46,8 @@
 - AI 静态安全门禁和 packaged Tauri 基线通过；真实外部账号成功调用需要用户提供 API Key，仓库内只验证可复现 mock/错误路径。
 - shipping legacy 收尸完成：删除根 `index.html`、`js/`、`css/`、`templates/` 和 Vue `modules/legacy/`；根 package 移除 `express`。
 - 删除后验证：`npm run typecheck`、Vue build、`cargo check --workspace --locked`、static gate `6/6`、packaged Tauri E2E `5/5` 全部通过。
-- 仍未完成的工程债务：`PracticeReadingPage.vue`/`PracticeLibraryPage.vue` 仍偏大；`useReadingAttempt/Coach/Highlights` 尚未进入 strict；release 签名/updater secrets、Windows/macOS notarization 和真实账号 AI 成功调用需要外部凭据。
+- 仍未完成的工程债务：`PracticeReadingPage.vue`/`PracticeLibraryPage.vue` 仍偏大；`useReadingCoach` 尚未进入 strict；release 签名/updater secrets、Windows/macOS notarization 和真实账号 AI 成功调用需要外部凭据。
+- 2026-07-13 god-page 拆分进展：阅读拖拽/交互已迁入 `useReadingInteractions`；attempt/highlights/timer 已 strict。页面仍含高亮 DOM、提交/endless/suite 编排和超大 CSS。
 # Library / Settings page split findings (2026-07-12)
 - `PracticeLibraryPage.vue` and `SettingsPage.vue` persisted durable UI preferences and backup indexes directly in Web Storage, creating a second source of truth beside Tauri SQLite settings.
 - Durable values moved in this pass: GPL acknowledgement, browse preferences, reading suite preferences, reading backup index, and writing settings backup index.

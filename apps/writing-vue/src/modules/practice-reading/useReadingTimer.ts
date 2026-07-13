@@ -33,17 +33,23 @@ export function normalizeSuiteTimerState(value: unknown): TimerState | null {
   const input = value as Record<string, unknown>
   const anchorMs = Number(input.anchorMs ?? input.effectiveStartTimeMs)
   if (!Number.isFinite(anchorMs) || anchorMs <= 0) return null
-  const limitSeconds = input.limitSeconds == null ? null : Number(input.limitSeconds)
-  const pausedOffsetMs = input.pausedOffsetMs == null ? 0 : Number(input.pausedOffsetMs)
-  const pausedAtMs = input.pausedAtMs == null ? null : Number(input.pausedAtMs)
+  const parsedLimitSeconds = input.limitSeconds == null ? Number.NaN : Number(input.limitSeconds)
+  const parsedPausedOffsetMs = input.pausedOffsetMs == null ? 0 : Number(input.pausedOffsetMs)
+  const parsedPausedAtMs = input.pausedAtMs == null ? Number.NaN : Number(input.pausedAtMs)
   return {
     source: 'suite',
     anchorMs: Math.floor(anchorMs),
     effectiveStartTimeMs: Math.floor(anchorMs),
     mode: String(input.mode).toLowerCase() === 'countdown' ? 'countdown' : 'elapsed',
-    limitSeconds: Number.isFinite(limitSeconds) && limitSeconds >= 0 ? Math.floor(limitSeconds) : null,
-    pausedOffsetMs: Number.isFinite(pausedOffsetMs) && pausedOffsetMs >= 0 ? Math.floor(pausedOffsetMs) : 0,
-    pausedAtMs: Number.isFinite(pausedAtMs) && pausedAtMs > 0 ? Math.floor(pausedAtMs) : null,
+    limitSeconds: Number.isFinite(parsedLimitSeconds) && parsedLimitSeconds >= 0
+      ? Math.floor(parsedLimitSeconds)
+      : null,
+    pausedOffsetMs: Number.isFinite(parsedPausedOffsetMs) && parsedPausedOffsetMs >= 0
+      ? Math.floor(parsedPausedOffsetMs)
+      : 0,
+    pausedAtMs: Number.isFinite(parsedPausedAtMs) && parsedPausedAtMs > 0
+      ? Math.floor(parsedPausedAtMs)
+      : null,
     running: input.running !== false
   }
 }

@@ -421,6 +421,13 @@ import {
   readingThemeModeOptions as themeModeOptions,
   useReadingUiPreferences
 } from '@/modules/practice-reading/useReadingUiPreferences'
+import { useReadingInteractions } from '@/modules/practice-reading/useReadingInteractions'
+import {
+  escapeCss,
+  expandQuestionSequence,
+  normalizeQuestionId,
+  resolveAnswerAliases as resolveAnswerAliasesFromIds
+} from '@/modules/practice-reading/readingQuestionIds'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 import { submitSuitePassage as tauriSubmitSuitePassage } from '@/api/modes-repository.js'
 
@@ -478,7 +485,6 @@ const suiteSession = ref(null)
 const answerTimeline = reactive({})
 const markedQuestions = ref([])
 const interactionCount = ref(0)
-const currentDragPayload = ref(null)
 const endlessCountdown = ref(0)
 const endlessNextAssetId = ref('')
 const readingCoachEnabled = ref(true)
@@ -605,6 +611,49 @@ const {
     snapshotMessage.value = ''
     submitError.value = ''
   }
+})
+const {
+  currentDragPayload,
+  getInteraction,
+  getDisplayLabel,
+  isChoiceControl,
+  isDragDropControl,
+  getOptions,
+  isMultiValueCheckbox,
+  getDragDropGroup,
+  getDragDropGroupQuestionIds,
+  allowsDragOptionReuse,
+  getSelectedOption,
+  getSelectedOptionLabel,
+  findQuestionUsingDragOption,
+  isDragOptionUnavailable,
+  setDragDropAnswer,
+  clearDragDropAnswer,
+  dropOnAnswerSlot,
+  handleWorkspaceClick,
+  handleDragStart,
+  handleDragEnd,
+  handleDragOver,
+  handleDragLeave,
+  handleDrop,
+  findNativeDropzonesByQuestionId,
+  ensureDropzoneHolder,
+  applyDropzoneThemeStyle,
+  syncDropzoneThemeStyles,
+  syncDropzoneControl,
+  setReadOnlyDomControls,
+  clearDragHoverState,
+  getNativeDropzoneElement,
+  getDragPoolElement,
+  resolveDropzoneQuestionId
+} = useReadingInteractions({
+  payloadSource: () => payload.value,
+  reviewModeSource: reviewMode,
+  themeModeSource: readingThemeMode,
+  getAnswerValue,
+  getRawAnswer,
+  assignAnswer,
+  recordQuestionVisit: (questionId) => recordQuestionVisit(questionId)
 })
 const {
   elapsedSeconds,
@@ -1095,303 +1144,6 @@ function restoreSubmittedMetadata(loadedSubmission) {
   })
 }
 
-function getInteraction(questionId) {
-  return payload.value?.interactionModel?.[questionId] || null
-}
-
-function getDisplayLabel(questionId) {
-  return payload.value?.questionDisplayMap?.[questionId] || String(questionId).replace(/^q/i, '')
-}
-
-function isChoiceControl(questionId) {
-  const interaction = getInteraction(questionId)
-  return ['radio', 'checkbox', 'select'].includes(interaction?.control)
-}
-
-function isDragDropControl(questionId) {
-  return getInteraction(questionId)?.control === 'dragdrop'
-}
-
-function getOptions(questionId) {
-  const interaction = getInteraction(questionId)
-  return Array.isArray(interaction?.options) ? interaction.options : []
-}
-
-function isMultiValueCheckbox(questionId) {
-  const interaction = getInteraction(questionId)
-  const correctAnswer = payload.value?.answerKey?.[questionId]
-  return interaction?.control === 'checkbox' && Array.isArray(correctAnswer)
-}
-
-function getDragDropGroup(questionId) {
-  return payload.value?.questionGroups?.find((group) => (
-    Array.isArray(group.questionIds) && group.questionIds.includes(questionId)
-  )) || null
-}
-
-function getDragDropGroupQuestionIds(questionId) {
-  const group = getDragDropGroup(questionId)
-  return Array.isArray(group?.questionIds) ? group.questionIds : [questionId]
-}
-
-function allowsDragOptionReuse(questionId) {
-  const interaction = getInteraction(questionId)
-  if (typeof interaction?.allowOptionReuse === 'boolean') {
-    return interaction.allowOptionReuse
-  }
-  return Boolean(getDragDropGroup(questionId)?.allowOptionReuse)
-}
-
-function getSelectedOption(questionId) {
-  const value = getAnswerValue(questionId)
-  return getOptions(questionId).find((option) => String(option.value || '').trim() === value) || null
-}
-
-function getSelectedOptionLabel(questionId) {
-  const option = getSelectedOption(questionId)
-  return option?.label || getAnswerValue(questionId) || '未作答'
-}
-
-function findQuestionUsingDragOption(questionId, optionValue) {
-  const normalizedOption = String(optionValue || '').trim()
-  if (!normalizedOption || allowsDragOptionReuse(questionId)) {
-    return ''
-  }
-  return getDragDropGroupQuestionIds(questionId).find((candidateId) => (
-    candidateId !== questionId && String(getRawAnswer(candidateId) || '').trim() === normalizedOption
-  )) || ''
-}
-
-function isDragOptionUnavailable(questionId, optionValue) {
-  return Boolean(findQuestionUsingDragOption(questionId, optionValue))
-}
-
-function isMarkedQuestion(questionId) {
-  const normalized = normalizeQuestionId(questionId)
-  return Boolean(normalized && markedQuestions.value.includes(normalized))
-}
-
-function toggleMarkedQuestion(questionId) {
-  if (reviewMode.value) {
-    return
-  }
-  const normalized = normalizeQuestionId(questionId)
-  if (!normalized) return
-  recordInteraction()
-  markedQuestions.value = isMarkedQuestion(normalized)
-    ? markedQuestions.value.filter((entry) => entry !== normalized)
-    : [...markedQuestions.value, normalized]
-}
-
-function setDragDropAnswer(questionId, value, options = {}) {
-  if (reviewMode.value) {
-    return
-  }
-  const normalizedValue = String(value || '').trim()
-  const sourceQuestionId = normalizeQuestionId(options.sourceQuestionId)
-  recordQuestionVisit(questionId)
-  if (!normalizedValue) {
-    assignAnswer(questionId, '', { ...options, track: true })
-    return
-  }
-
-  const currentValue = getAnswerValue(questionId)
-  if (sourceQuestionId && sourceQuestionId !== questionId && isDragDropControl(sourceQuestionId)) {
-    assignAnswer(questionId, normalizedValue, { syncNative: true, track: true })
-    assignAnswer(sourceQuestionId, currentValue, { syncNative: true, track: true })
-    return
-  }
-
-  if (findQuestionUsingDragOption(questionId, normalizedValue)) {
-    return
-  }
-  assignAnswer(questionId, normalizedValue, { ...options, track: true })
-}
-
-function clearDragDropAnswer(questionId) {
-  if (reviewMode.value) {
-    return
-  }
-  assignAnswer(questionId, '', { syncNative: true, track: true })
-}
-
-function dropOnAnswerSlot(questionId, event) {
-  if (reviewMode.value) {
-    return
-  }
-  const dragPayload = getDragPayloadFromEvent(event)
-  if (!dragPayload?.value) {
-    return
-  }
-  setDragDropAnswer(questionId, dragPayload.value, {
-    sourceQuestionId: dragPayload.sourceQuestionId,
-    syncNative: true
-  })
-}
-
-function handleWorkspaceClick(event) {
-  const clearTarget = event.target?.closest?.('[data-dropzone-clear]')
-  if (!clearTarget) {
-    return
-  }
-  const questionId = normalizeQuestionId(clearTarget.dataset.sourceQuestionId)
-  if (questionId) {
-    clearDragDropAnswer(questionId)
-  }
-}
-
-function handleDragStart(event) {
-  if (reviewMode.value) {
-    event.preventDefault()
-    return
-  }
-  const source = event.target?.closest?.('[data-drag-value], [data-answer-value], .drag-item, .draggable-word, .card')
-  const dragPayload = buildDragPayloadFromElement(source)
-  if (!dragPayload?.value) {
-    event.preventDefault()
-    return
-  }
-  currentDragPayload.value = dragPayload
-  source?.classList?.add('dragging')
-  event.dataTransfer?.setData('text/plain', JSON.stringify(dragPayload))
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'copyMove'
-  }
-}
-
-function handleDragEnd(event) {
-  event.target?.closest?.('.dragging')?.classList?.remove('dragging')
-  clearDragHoverState()
-  currentDragPayload.value = null
-}
-
-function handleDragOver(event) {
-  if (reviewMode.value) {
-    return
-  }
-  const dropzone = getNativeDropzoneElement(event.target)
-  const pool = getDragPoolElement(event.target)
-  if (!dropzone && !pool) {
-    return
-  }
-  event.preventDefault()
-  if (event.dataTransfer) {
-    event.dataTransfer.dropEffect = pool ? 'move' : 'copy'
-  }
-  ;(dropzone || pool).classList.add('drag-over')
-}
-
-function handleDragLeave(event) {
-  const target = getNativeDropzoneElement(event.target) || getDragPoolElement(event.target)
-  const related = event.relatedTarget
-  if (target && related && target.contains(related)) {
-    return
-  }
-  target?.classList?.remove('drag-over')
-}
-
-function handleDrop(event) {
-  if (reviewMode.value) {
-    return
-  }
-  const dragPayload = getDragPayloadFromEvent(event)
-  if (!dragPayload?.value && !dragPayload?.sourceQuestionId) {
-    return
-  }
-
-  const dropzone = getNativeDropzoneElement(event.target)
-  if (dropzone) {
-    const questionId = resolveDropzoneQuestionId(dropzone)
-    if (!questionId || !isDragDropControl(questionId) || !dragPayload.value) {
-      return
-    }
-    event.preventDefault()
-    dropzone.classList.remove('drag-over')
-    setDragDropAnswer(questionId, dragPayload.value, {
-      sourceQuestionId: dragPayload.sourceQuestionId,
-      syncNative: true
-    })
-    return
-  }
-
-  const pool = getDragPoolElement(event.target)
-  if (pool && dragPayload.sourceQuestionId) {
-    event.preventDefault()
-    pool.classList.remove('drag-over')
-    clearDragDropAnswer(dragPayload.sourceQuestionId)
-  }
-}
-
-function getDragPayloadFromEvent(event) {
-  const raw = event?.dataTransfer?.getData('text/plain')
-  const parsed = parseDragPayload(raw)
-  return parsed?.value || parsed?.sourceQuestionId ? parsed : currentDragPayload.value
-}
-
-function parseDragPayload(rawValue) {
-  if (!rawValue) {
-    return null
-  }
-  try {
-    const parsed = JSON.parse(rawValue)
-    if (!parsed || typeof parsed !== 'object') {
-      return null
-    }
-    return {
-      value: String(parsed.value || '').trim(),
-      label: String(parsed.label || parsed.value || '').trim(),
-      sourceQuestionId: normalizeQuestionId(parsed.sourceQuestionId)
-    }
-  } catch (_) {
-    const fallback = String(rawValue || '').trim()
-    return fallback ? { value: fallback, label: fallback, sourceQuestionId: '' } : null
-  }
-}
-
-function buildDragPayloadFromElement(element) {
-  if (!element) {
-    return null
-  }
-  const dataset = element.dataset || {}
-  const sourceDropzone = getNativeDropzoneElement(element)
-  const sourceQuestionId = normalizeQuestionId(dataset.sourceQuestionId)
-    || (sourceDropzone ? resolveDropzoneQuestionId(sourceDropzone) : '')
-  const value = String(
-    dataset.dragValue
-    || dataset.answerValue
-    || dataset.heading
-    || dataset.option
-    || dataset.word
-    || dataset.key
-    || dataset.value
-    || element.getAttribute?.('value')
-    || inferDragValueFromLabel(element.textContent)
-    || ''
-  ).trim()
-  const label = String(
-    dataset.dragLabel
-    || dataset.answerLabel
-    || dataset.word
-    || dataset.value
-    || element.textContent
-    || value
-  ).trim()
-  return value ? { value, label: label || value, sourceQuestionId } : null
-}
-
-function inferDragValueFromLabel(label) {
-  const text = String(label || '').trim()
-  if (!text) {
-    return ''
-  }
-  const leading = text.match(/^([A-Za-z])(?:[.)])?\s+/)
-  if (leading) {
-    return leading[1].toUpperCase()
-  }
-  const roman = text.match(/^([ivxlcdm]+)(?:[.)])?\s+/i)
-  return roman ? roman[1].toLowerCase() : text
-}
-
 function resetAnswers() {
   if (reviewMode.value) {
     return
@@ -1553,180 +1305,6 @@ function syncNativeControl(questionId, explicitValue = getRawAnswer(questionId))
       input.value = String(explicitValue || '')
       input.disabled = reviewMode.value
     })
-  })
-}
-
-function syncDropzoneControl(questionId, explicitValue = getRawAnswer(questionId)) {
-  const dropzones = findNativeDropzonesByQuestionId(questionId)
-  if (!dropzones.length) {
-    return
-  }
-  const value = String(Array.isArray(explicitValue) ? explicitValue[0] || '' : explicitValue || '').trim()
-  const option = getOptions(questionId).find((entry) => String(entry.value || '').trim() === value)
-  const label = option?.label || value
-  dropzones.forEach((dropzone) => {
-    dropzone.dataset.answerValue = value
-    dropzone.dataset.answerLabel = label
-    dropzone.dataset.sourceQuestionId = questionId
-    dropzone.setAttribute('data-vue-dropzone', 'true')
-    dropzone.classList.toggle('dropzone-filled', Boolean(value))
-    dropzone.classList.toggle('dropzone-empty', !value)
-    dropzone.setAttribute('aria-disabled', reviewMode.value ? 'true' : 'false')
-    applyDropzoneThemeStyle(dropzone)
-
-    const holder = ensureDropzoneHolder(dropzone)
-    if (!holder) {
-      return
-    }
-    holder.innerHTML = ''
-    if (!value) {
-      return
-    }
-
-    const chip = document.createElement('button')
-    chip.type = 'button'
-    chip.className = 'drag-item dragdrop-chip dragdrop-chip-assigned'
-    chip.textContent = label
-    chip.dataset.answerValue = value
-    chip.dataset.answerLabel = label
-    chip.dataset.sourceQuestionId = questionId
-    chip.dataset.dropzoneClear = 'true'
-    chip.draggable = !reviewMode.value
-    chip.disabled = reviewMode.value
-    holder.appendChild(chip)
-  })
-}
-
-function applyDropzoneThemeStyle(dropzone) {
-  if (!dropzone) {
-    return
-  }
-  if (dropzone.classList?.contains('drop-target-summary')) {
-    dropzone.style.removeProperty('--reading-dropzone-bg')
-    dropzone.style.removeProperty('--reading-dropzone-border')
-    dropzone.style.backgroundColor = ''
-    dropzone.style.borderColor = ''
-    dropzone.querySelectorAll?.('.drag-item, .dragdrop-chip').forEach((chip) => {
-      chip.style.backgroundColor = ''
-      chip.style.borderColor = ''
-      chip.style.color = ''
-    })
-    return
-  }
-  const isDark = readingThemeMode.value === 'dark'
-  dropzone.style.setProperty('--reading-dropzone-bg', isDark ? '#1e293b' : '#eff6ff')
-  dropzone.style.setProperty('--reading-dropzone-border', isDark ? '#475569' : '#93c5fd')
-  dropzone.style.backgroundColor = isDark ? '#1e293b' : ''
-  dropzone.style.borderColor = isDark ? '#475569' : ''
-  dropzone.querySelectorAll?.('.drag-item, .dragdrop-chip').forEach((chip) => {
-    chip.style.backgroundColor = isDark ? '#334155' : ''
-    chip.style.borderColor = isDark ? '#64748b' : ''
-    chip.style.color = isDark ? '#f8fafc' : ''
-  })
-}
-
-function syncDropzoneThemeStyles() {
-  if (typeof document === 'undefined') {
-    return
-  }
-  document.querySelectorAll('.paragraph-dropzone, .match-dropzone, .drop-target-summary, [data-vue-dropzone="true"]').forEach((dropzone) => {
-    applyDropzoneThemeStyle(dropzone)
-  })
-}
-
-function ensureDropzoneHolder(dropzone) {
-  if (!dropzone) {
-    return null
-  }
-  if (dropzone.classList.contains('drop-target-summary')) {
-    return dropzone
-  }
-  let holder = dropzone.querySelector('.dropped-items')
-  if (!holder) {
-    holder = document.createElement('div')
-    holder.className = 'dropped-items'
-    dropzone.appendChild(holder)
-  }
-  return holder
-}
-
-function findNativeDropzonesByQuestionId(questionId) {
-  const matches = []
-  const seen = new Set()
-  const aliases = resolveAnswerAliases(questionId)
-  for (const alias of aliases) {
-    const escaped = escapeCss(alias)
-    const selector = [
-      `.paragraph-dropzone[data-question="${escaped}"]`,
-      `.paragraph-dropzone[data-question-id="${escaped}"]`,
-      `.paragraph-dropzone[data-target="${escaped}"]`,
-      `.match-dropzone[data-question="${escaped}"]`,
-      `.match-dropzone[data-question-id="${escaped}"]`,
-      `.match-dropzone[data-target="${escaped}"]`,
-      `.drop-target-summary[data-question="${escaped}"]`,
-      `.drop-target-summary[data-question-id="${escaped}"]`,
-      `.dropzone[data-question="${escaped}"]`,
-      `.dropzone[data-question-id="${escaped}"]`,
-      `.dropzone[data-target="${escaped}"]`,
-      `#${escaped}-dropzone`,
-      `#${escaped}-target`
-    ].join(', ')
-    document.querySelectorAll(selector).forEach((direct) => {
-      if (!seen.has(direct)) {
-        seen.add(direct)
-        matches.push(direct)
-      }
-    })
-    const anchor = document.getElementById(`${alias}-anchor`)
-    const anchored = anchor?.querySelector?.('.paragraph-dropzone, .match-dropzone, .drop-target-summary')
-      || anchor?.parentElement?.querySelector?.('.paragraph-dropzone, .match-dropzone, .drop-target-summary')
-    if (anchored && !seen.has(anchored)) {
-      seen.add(anchored)
-      matches.push(anchored)
-    }
-  }
-  return matches
-}
-
-function getNativeDropzoneElement(target) {
-  return target?.closest?.('.paragraph-dropzone, .match-dropzone, .drop-target-summary') || null
-}
-
-function getDragPoolElement(target) {
-  return target?.closest?.('.headings-pool, .options-pool, .cardpool, .option-pool, .pool-items, #word-options, .dragdrop-options') || null
-}
-
-function resolveDropzoneQuestionId(dropzone) {
-  if (!dropzone) {
-    return ''
-  }
-  const dataset = dropzone.dataset || {}
-  const direct = normalizeQuestionId(dataset.sourceQuestionId || dataset.question || dataset.questionId || dataset.target)
-  if (direct) {
-    return direct
-  }
-  const anchor = dropzone.closest?.('[id$="-anchor"]')
-  const match = String(anchor?.id || '').match(/q\d+/i)
-  return match ? normalizeQuestionId(match[0]) : ''
-}
-
-function clearDragHoverState() {
-  document.querySelectorAll('.drag-over, .dragging').forEach((element) => {
-    element.classList.remove('drag-over', 'dragging')
-  })
-}
-
-function setReadOnlyDomControls(readOnly) {
-  if (typeof document === 'undefined') {
-    return
-  }
-  document.querySelectorAll('.question-panel input, .question-panel textarea, .question-panel select').forEach((control) => {
-    control.disabled = Boolean(readOnly)
-  })
-  payload.value?.questionOrder?.forEach((questionId) => {
-    if (isDragDropControl(questionId)) {
-      syncDropzoneControl(questionId)
-    }
   })
 }
 
@@ -3138,51 +2716,9 @@ function getGroupOfficialExplanations(group) {
     .filter((section) => section.text || section.items.length)
 }
 
+
 function resolveAnswerAliases(questionId) {
-  const normalized = normalizeQuestionId(questionId)
-  if (!normalized) return []
-  const numeric = normalized.replace(/^q/i, '')
-  const displayLabel = String(payload.value?.questionDisplayMap?.[normalized] || '').trim()
-  return Array.from(new Set([
-    normalized,
-    numeric,
-    `question${numeric}`,
-    displayLabel,
-    displayLabel ? `q${displayLabel}` : ''
-  ].filter(Boolean)))
-}
-
-function normalizeQuestionId(value) {
-  const raw = String(value || '').trim().toLowerCase()
-  if (!raw) return ''
-  const direct = raw.match(/^q(\d+)$/)
-  if (direct) return `q${Number(direct[1])}`
-  const numeric = raw.match(/^(\d+)$/)
-  return numeric ? `q${Number(numeric[1])}` : raw
-}
-
-function expandQuestionSequence(rawValue) {
-  const value = String(rawValue || '').trim().toLowerCase()
-  const numbers = (value.match(/\d+/g) || []).map((entry) => Number(entry))
-  if ((value.includes('-') || value.includes('–')) && numbers.length === 2 && numbers[1] >= numbers[0]) {
-    const ids = []
-    for (let current = numbers[0]; current <= numbers[1]; current += 1) {
-      ids.push(`q${current}`)
-    }
-    return ids
-  }
-  if ((value.includes('_') || value.includes('-') || value.includes('–')) && numbers.length >= 2) {
-    return numbers.map((entry) => `q${entry}`)
-  }
-  const normalized = normalizeQuestionId(value)
-  return normalized ? [normalized] : []
-}
-
-function escapeCss(value) {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-    return CSS.escape(String(value))
-  }
-  return String(value).replace(/["\\]/g, '\\$&')
+  return resolveAnswerAliasesFromIds(questionId, payload.value?.questionDisplayMap || null)
 }
 
 function getGroupRange(group) {

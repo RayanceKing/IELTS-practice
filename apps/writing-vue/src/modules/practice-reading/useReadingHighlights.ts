@@ -2,7 +2,51 @@ import { reactive, ref } from 'vue'
 import { upsertAnnotation, listAnnotations, lookupDictionary, upsertVocab } from '@/api/enrichment-repository.js'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 
-function normalizeComparableText(value) {
+export interface HighlightRecord {
+  id?: string
+  scope?: string
+  text?: string
+  excerpt?: string
+  kind?: string
+  questionId?: string | null
+  startOffset?: number | null
+  endOffset?: number | null
+  start?: number | null
+  end?: number | null
+  before?: string | null
+  after?: string | null
+  occurrence?: number | null
+  createdAt?: string
+  noteText?: string | null
+  contentFingerprint?: string | null
+  mismatch?: unknown
+  [key: string]: unknown
+}
+
+export interface NormalizedHighlight {
+  scope: 'passage' | 'questions' | 'unknown'
+  text: string
+  kind: 'note' | 'highlight'
+  questionId: string | null
+  startOffset: number | null
+  endOffset: number | null
+  before: string
+  after: string
+  occurrence: number
+  createdAt: string
+}
+
+export interface DictionaryEntry {
+  term?: string
+  meaning?: string
+  definition?: string
+  example?: string
+  phonetic?: string
+  partOfSpeech?: string
+  [key: string]: unknown
+}
+
+function normalizeComparableText(value: unknown): string {
   return String(value || '').replace(/\s+/g, ' ').trim()
 }
 
@@ -15,7 +59,7 @@ function createDictionaryBubbleState() {
     example: '',
     meta: '',
     sourceLine: '',
-    parts: [],
+    parts: [] as string[],
     phonetic: '',
     partOfSpeech: '',
     sourceLabel: '',
@@ -31,10 +75,14 @@ export function useReadingHighlights() {
   const selectionToolbarVisible = ref(false)
   const selectionToolbarStyle = reactive({ top: '0px', left: '0px' })
   const keepSelectionToolbar = ref(false)
-  const highlightSnapshot = ref([])
+  const highlightSnapshot = ref<NormalizedHighlight[]>([])
   const dictionaryBubble = createDictionaryBubbleState()
 
-  async function persistHighlightToStore(assetId, entry, attemptId = null) {
+  async function persistHighlightToStore(
+    assetId: string | null | undefined,
+    entry: HighlightRecord | null | undefined,
+    attemptId: string | null = null
+  ) {
     if (!isTauriRuntime() || !assetId || !entry?.text) return null
     try {
       const { annotation } = await upsertAnnotation({
@@ -53,7 +101,7 @@ export function useReadingHighlights() {
           endOffset: entry.endOffset ?? null,
           contentFingerprint: entry.contentFingerprint || null
         }
-      })
+      }) as { annotation?: unknown }
       return annotation
     } catch (err) {
       console.warn('persist highlight failed', err)
@@ -61,10 +109,31 @@ export function useReadingHighlights() {
     }
   }
 
-  async function loadPersistedHighlights(assetId, attemptId = null) {
-    if (!isTauriRuntime() || !assetId) return []
+  async function loadPersistedHighlights(
+    assetId: string | null | undefined,
+    attemptId: string | null = null
+  ) {
+    if (!isTauriRuntime() || !assetId) return [] as NormalizedHighlight[]
     try {
-      const { items } = await listAnnotations(assetId, attemptId)
+      const { items } = await listAnnotations(assetId, attemptId) as {
+        items?: Array<{
+          id?: string
+          scope?: string
+          kind?: string
+          questionId?: string | null
+          noteText?: string | null
+          createdAt?: string
+          mismatch?: unknown
+          anchor?: {
+            text?: string
+            startOffset?: number | null
+            endOffset?: number | null
+            before?: string | null
+            after?: string | null
+            occurrence?: number | null
+          }
+        }>
+      }
       return normalizeHighlightSnapshot(
         (items || []).map((item) => ({
           scope: item.scope,
@@ -84,22 +153,26 @@ export function useReadingHighlights() {
       )
     } catch (err) {
       console.warn('load highlights failed', err)
-      return []
+      return [] as NormalizedHighlight[]
     }
   }
 
-  async function lookupTermInDictionary(term) {
+  async function lookupTermInDictionary(term: string) {
     if (!isTauriRuntime()) return null
     try {
-      const { entry } = await lookupDictionary(term)
-      return entry
+      const { entry } = await lookupDictionary(term) as { entry?: DictionaryEntry | null }
+      return entry || null
     } catch (err) {
       console.warn('dictionary lookup failed', err)
       return null
     }
   }
 
-  async function saveTermToVocab(entry, assetId = null, attemptId = null) {
+  async function saveTermToVocab(
+    entry: DictionaryEntry | null | undefined,
+    assetId: string | null = null,
+    attemptId: string | null = null
+  ) {
     if (!isTauriRuntime() || !entry?.term) return null
     try {
       const { item } = await upsertVocab({
@@ -111,7 +184,7 @@ export function useReadingHighlights() {
         sourceAssetId: assetId,
         sourceAttemptId: attemptId,
         tags: ['reading']
-      })
+      }) as { item?: unknown }
       return item
     } catch (err) {
       console.warn('save vocab failed', err)
@@ -119,32 +192,33 @@ export function useReadingHighlights() {
     }
   }
 
-  function normalizeHighlightSnapshot(value) {
+  function normalizeHighlightSnapshot(value: unknown): NormalizedHighlight[] {
     if (!Array.isArray(value)) {
       return []
     }
     return value
       .map((entry) => {
         if (!entry || typeof entry !== 'object') return null
-        const text = normalizeComparableText(entry.text || entry.excerpt)
+        const record = entry as HighlightRecord
+        const text = normalizeComparableText(record.text || record.excerpt)
         if (!text) return null
-        const scope = String(entry.scope || '').trim().toLowerCase()
-        const startOffset = Number(entry.startOffset ?? entry.start)
-        const endOffset = Number(entry.endOffset ?? entry.end)
+        const scope = String(record.scope || '').trim().toLowerCase()
+        const startOffset = Number(record.startOffset ?? record.start)
+        const endOffset = Number(record.endOffset ?? record.end)
         return {
-          scope: scope === 'passage' || scope === 'questions' ? scope : 'unknown',
+          scope: (scope === 'passage' || scope === 'questions' ? scope : 'unknown') as NormalizedHighlight['scope'],
           text,
-          kind: entry.kind === 'note' ? 'note' : 'highlight',
-          questionId: entry.questionId ? String(entry.questionId).trim() : null,
+          kind: (record.kind === 'note' ? 'note' : 'highlight') as NormalizedHighlight['kind'],
+          questionId: record.questionId ? String(record.questionId).trim() : null,
           startOffset: Number.isFinite(startOffset) ? startOffset : null,
           endOffset: Number.isFinite(endOffset) ? endOffset : null,
-          before: normalizeComparableText(entry.before),
-          after: normalizeComparableText(entry.after),
-          occurrence: Number.isFinite(Number(entry.occurrence)) ? Math.max(0, Number(entry.occurrence)) : 0,
-          createdAt: entry.createdAt || new Date().toISOString()
+          before: normalizeComparableText(record.before),
+          after: normalizeComparableText(record.after),
+          occurrence: Number.isFinite(Number(record.occurrence)) ? Math.max(0, Number(record.occurrence)) : 0,
+          createdAt: record.createdAt || new Date().toISOString()
         }
       })
-      .filter(Boolean)
+      .filter((entry): entry is NormalizedHighlight => Boolean(entry))
   }
 
   function closeSelectionToolbar() {

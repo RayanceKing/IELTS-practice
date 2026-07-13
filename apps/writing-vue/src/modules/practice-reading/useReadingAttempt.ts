@@ -14,12 +14,100 @@ import {
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 import { READING_ACTIVITY, normalizeReadingRecordId } from './contracts'
 
+type JsonMap = Record<string, unknown>
+
+interface AnswerComparisonEntry {
+  questionId?: string
+  question_id?: string
+  userAnswer?: unknown
+  user_answer?: unknown
+  correctAnswer?: unknown
+  correct_answer?: unknown
+  isCorrect?: boolean | null
+  is_correct?: boolean | null
+  weight?: number
+  matchMode?: string
+  match_mode?: string
+  questionKind?: string | null
+  question_kind?: string | null
+}
+
+interface ReadingAttemptSnapshot {
+  id?: string
+  assetId?: string
+  status?: string
+  correctCount?: number
+  questionCount?: number
+  scoreValue?: number | null
+  durationMs?: number
+  submittedAt?: string | null
+  completedAt?: string | null
+  titleSnapshot?: string | null
+  [key: string]: unknown
+}
+
+interface ReadingScoreSnapshot {
+  correct?: number
+  total?: number
+  accuracy?: number | null
+  percentage?: number | null
+  [key: string]: unknown
+}
+
+interface ReadingSubmitResult {
+  attempt?: ReadingAttemptSnapshot
+  score?: ReadingScoreSnapshot
+  comparisons?: AnswerComparisonEntry[]
+  idempotentReplay?: boolean
+  [key: string]: unknown
+}
+
+interface SubmissionExtras {
+  attemptId?: string | null
+  assetId?: string | null
+  answers?: JsonMap
+  markedQuestions?: string[]
+  durationMs?: number | null
+  titleSnapshot?: string | null
+}
+
+interface PersistDraftInput {
+  attemptId?: string | null
+  assetId: string
+  answers?: JsonMap
+  markedQuestions?: string[]
+  titleSnapshot?: string | null
+  idempotencyKey?: string | null
+}
+
+interface SubmitInput extends PersistDraftInput {
+  assetPayload?: unknown
+  payload?: unknown
+  durationMs?: number | null
+}
+
+interface ReadingAttemptDependencies {
+  listReadingAssets?: typeof listReadingAssets
+  saveReadingDraft?: typeof saveReadingDraft
+  patchReadingAnswer?: typeof patchReadingAnswer
+  submitReadingAttempt?: typeof submitReadingAttempt
+  isTauri?: () => boolean
+}
+
 function newAttemptId() {
   return readingRepository.newKey('attempt')
 }
 
-function comparisonsToMap(comparisons) {
-  const out = {}
+function comparisonsToMap(comparisons: AnswerComparisonEntry[] | null | undefined) {
+  const out: Record<string, {
+    questionId: string
+    userAnswer: unknown
+    correctAnswer: unknown
+    isCorrect: boolean | null
+    weight: number
+    matchMode: string
+    questionKind: string | null
+  }> = {}
   if (!Array.isArray(comparisons)) return out
   for (const entry of comparisons) {
     const qid = String(entry?.questionId || entry?.question_id || '').trim()
@@ -40,7 +128,10 @@ function comparisonsToMap(comparisons) {
 /**
  * Map Tauri ReadingSubmitResult → legacy submission shape used by PracticeReadingPage.
  */
-export function mapSubmitResultToSubmission(result, extras = {}) {
+export function mapSubmitResultToSubmission(
+  result: ReadingSubmitResult | null | undefined,
+  extras: SubmissionExtras = {}
+) {
   if (!result) return null
   const attempt = result.attempt || {}
   const score = result.score || {}
@@ -71,7 +162,7 @@ export function mapSubmitResultToSubmission(result, extras = {}) {
   }
 }
 
-export function useReadingAttempt(options = {}) {
+export function useReadingAttempt(options: ReadingAttemptDependencies = {}) {
   const deps = {
     listReadingAssets: options.listReadingAssets || listReadingAssets,
     saveReadingDraft: options.saveReadingDraft || saveReadingDraft,
@@ -80,7 +171,7 @@ export function useReadingAttempt(options = {}) {
     isTauri: options.isTauri || isTauriRuntime
   }
 
-  function resolveReviewTarget(record) {
+  function resolveReviewTarget(record: JsonMap | null | undefined) {
     const assetId = normalizeReadingRecordId(record?.assetId || record?.examId)
     const sessionId = normalizeReadingRecordId(record?.sessionId || record?.attemptId || record?.id)
     return {
@@ -105,7 +196,7 @@ export function useReadingAttempt(options = {}) {
     markedQuestions,
     titleSnapshot,
     idempotencyKey
-  }) {
+  }: PersistDraftInput) {
     const id = attemptId || newAttemptId()
     return deps.saveReadingDraft({
       attemptId: id,
@@ -117,7 +208,12 @@ export function useReadingAttempt(options = {}) {
     })
   }
 
-  async function patchAnswer(attemptId, questionId, answer, marked = false) {
+  async function patchAnswer(
+    attemptId: string,
+    questionId: string,
+    answer: unknown,
+    marked = false
+  ) {
     return deps.patchReadingAnswer(attemptId, questionId, answer, marked)
   }
 
@@ -135,7 +231,7 @@ export function useReadingAttempt(options = {}) {
     durationMs,
     titleSnapshot,
     idempotencyKey
-  }) {
+  }: SubmitInput) {
     const id = attemptId || newAttemptId()
     const { source, result } = await deps.submitReadingAttempt({
       attemptId: id,
@@ -147,7 +243,7 @@ export function useReadingAttempt(options = {}) {
       durationMs: durationMs ?? null,
       titleSnapshot: titleSnapshot || null,
       idempotencyKey: idempotencyKey || readingRepository.newKey('submit')
-    })
+    }) as { source: string; result: ReadingSubmitResult }
     return {
       source,
       raw: result,

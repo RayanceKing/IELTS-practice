@@ -24,3 +24,10 @@
 - 全量 AI Rust 化完成：provider配置/密钥、连通测试、写作、Reading Coach、失败状态均由 Rust/Tauri 管理；静态门禁 6/6、packaged E2E 5/5。
 - Legacy shipping tree 已删除，根 express 依赖移除；删除后完整 baseline 仍通过。
 - 任务书尚不能整体标记完成：god-page/剩余 strict 类型和外部签名、notarization、updater/真实账号证据仍是明确未完成项。
+
+## 2026-07-13
+- 工作区快照提交：`5037468 native-ai: move providers into Rust and bury shipping legacy`（443 files）。
+- 阶段 5 推进：从 `PracticeReadingPage.vue` 抽出 `readingQuestionIds.ts` + `useReadingInteractions.ts`（交互模型、拖拽、dropzone DOM 同步）。
+- 页面从约 5527 行降到 5063 行；逻辑迁出，CSS 仍占大头。
+- `useReadingAttempt` / `useReadingHighlights` / `useReadingTimer` / interactions 进入 strict typecheck；`useReadingCoach` 仍未纳入。
+- 验证：`npm run typecheck` 通过；Vue production build 通过；static suite `6/6` 通过。
