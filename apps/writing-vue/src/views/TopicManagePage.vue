@@ -211,17 +211,23 @@
 
           <div v-if="editorForm.type === 'task1'" class="form-group">
             <label>题目图片</label>
-            <div class="image-uploader" @click="triggerFileInput" :class="{ 'has-image': editorForm.imagePreview }">
+            <div
+              class="image-uploader"
+              :class="{ 'has-image': editorForm.imagePreview, 'is-disabled': !topicImageUploadEnabled }"
+              @click="topicImageUploadEnabled ? triggerFileInput() : null"
+            >
               <div v-if="editorForm.imagePreview" class="preview-container">
                 <img :src="editorForm.imagePreview" />
-                <button class="remove-btn" @click.stop="removeImage">✕</button>
+                <button v-if="topicImageUploadEnabled" class="remove-btn" @click.stop="removeImage">✕</button>
               </div>
               <div v-else class="upload-placeholder">
                 <span class="upload-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg></span>
-                <p>点击上传图片 (PNG/JPG)</p>
+                <p>{{ topicImageUploadEnabled ? '点击上传图片 (PNG/JPG)' : '桌面版暂不支持题目图片上传' }}</p>
               </div>
             </div>
-            <input 
+            <p v-if="!topicImageUploadEnabled" class="form-hint">可继续保存文字题干；图片能力待 Tauri 资源路径落地后再开。</p>
+            <input
+              v-if="topicImageUploadEnabled"
               ref="fileInput"
               type="file"
               accept="image/png,image/jpeg,image/jpg"
@@ -297,6 +303,9 @@ import { debounce } from '@/utils/debounce.js'
 import { createRequestGate } from '@/utils/request-gate.js'
 import { renderTopicTitle, extractTextFromTiptap } from '@/utils/tiptap-text.js'
 import { getWritingCategoryLabel, getWritingCategoryOptions } from '@/utils/writing-categories.js'
+
+// Tauri shipping path: image upload/path resolve still notImplemented — fail closed in UI.
+const topicImageUploadEnabled = false
 
 // 状态
 const loading = ref(false)
@@ -408,18 +417,16 @@ async function loadTopics() {
     }
     const rawTopics = result.data
     
-    // 批量加载图片 URL（同步化）
+    // Image path resolve is not shipped on Tauri yet — skip dead upload stubs.
     const topicsWithUrls = await Promise.all(
       rawTopics.map(async (topic) => {
-        const nextTopic = { ...topic }
-        if (topic.image_path) {
+        const nextTopic = { ...topic, image_url: null }
+        if (topicImageUploadEnabled && topic.image_path) {
           try {
             nextTopic.image_url = await upload.getImagePath(topic.image_path)
           } catch {
             nextTopic.image_url = null
           }
-        } else {
-          nextTopic.image_url = null
         }
         return nextTopic
       })
@@ -491,9 +498,9 @@ async function saveTopic() {
   const isEditing = Boolean(editingTopic.value)
 
   try {
-    // 上传图片（如果有）
+    // Keep prior image_path on edit; new upload is gated until Tauri image store lands.
     let imagePath = editingTopic.value?.image_path || null
-    if (editorForm.value.imageFile) {
+    if (topicImageUploadEnabled && editorForm.value.imageFile) {
       const imageData = await readFileAsArrayBuffer(editorForm.value.imageFile)
       const uploadResult = await upload.uploadImage({
         name: editorForm.value.imageFile.name,
@@ -501,6 +508,9 @@ async function saveTopic() {
         type: editorForm.value.imageFile.type
       })
       imagePath = uploadResult.image_path
+    } else if (editorForm.value.imageFile) {
+      editorError.value = '桌面版暂不支持题目图片上传，请先去掉图片后再保存'
+      return
     }
 
     // 构建题目数据
@@ -1052,6 +1062,23 @@ onBeforeUnmount(() => {
 .image-uploader:hover {
   border-color: var(--primary-color);
   background: #f0f4ff;
+}
+
+.image-uploader.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.image-uploader.is-disabled:hover {
+  border-color: #ddd;
+  background: #fafafa;
+}
+
+.form-hint {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #6b7280);
+  line-height: 1.4;
 }
 
 .upload-icon { font-size: 2rem; display: block; margin-bottom: 8px; }
