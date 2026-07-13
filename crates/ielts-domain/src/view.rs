@@ -30,6 +30,12 @@ pub struct HistoryListItemVm {
     /// Human label: "Accuracy" or "Overall Band".
     pub score_label: String,
     pub score_display: String,
+    /// Reading/writing asset id when known (field contraction OK if absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
+    /// Session/attempt id used by review routes (same as `id` for current store).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -81,6 +87,8 @@ pub fn history_item_from_attempt(attempt: &AttemptRecord) -> HistoryListItemVm {
         score_scale: attempt.score_scale,
         score_label,
         score_display,
+        asset_id: attempt.asset_id.clone(),
+        session_id: Some(attempt.id.clone()),
     }
 }
 

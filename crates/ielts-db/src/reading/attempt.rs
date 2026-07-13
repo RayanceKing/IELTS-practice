@@ -1,6 +1,6 @@
 //! Reading attempt drafts + idempotent submit with scoring (Phase 6).
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -200,6 +200,112 @@ pub fn submit_reading_attempt(
     tx.commit()?;
 
     Ok(result)
+}
+
+/// Latest draft attempt for an asset, with answers hydrated.
+pub fn get_open_reading_draft(
+    conn: &Connection,
+    asset_id: &str,
+) -> DbResult<Option<AttemptRecord>> {
+    let asset_id = asset_id.trim();
+    if asset_id.is_empty() {
+        return Err(DbError::Validation("asset_id required".into()));
+    }
+    let attempt_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM attempts
+             WHERE activity = 'reading' AND asset_id = ?1 AND lower(status) = 'draft'
+             ORDER BY started_at DESC
+             LIMIT 1",
+            params![asset_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(attempt_id) = attempt_id else {
+        return Ok(None);
+    };
+
+    let mut attempt = conn.query_row(
+        "SELECT id, activity, asset_id, mode, suite_id, status, started_at, submitted_at, completed_at,
+                duration_ms, score_value, score_scale, correct_count, question_count, title_snapshot,
+                prompt_snapshot, content_text, schema_version
+         FROM attempts WHERE id = ?1",
+        params![attempt_id],
+        |row| {
+            let activity = match row.get::<_, String>(1)?.as_str() {
+                "writing" => Activity::Writing,
+                _ => Activity::Reading,
+            };
+            let mode = match row.get::<_, String>(3)?.as_str() {
+                "suite" => AttemptMode::Suite,
+                "endless" => AttemptMode::Endless,
+                "memorize" => AttemptMode::Memorize,
+                "freeform" => AttemptMode::Freeform,
+                "bank" => AttemptMode::Bank,
+                _ => AttemptMode::Single,
+            };
+            let status = match row.get::<_, String>(5)?.as_str() {
+                "submitted" => AttemptStatus::Submitted,
+                "completed" => AttemptStatus::Completed,
+                "cancelled" => AttemptStatus::Cancelled,
+                "failed" => AttemptStatus::Failed,
+                _ => AttemptStatus::Draft,
+            };
+            let score_scale = match row.get::<_, Option<String>>(11)? {
+                Some(ref s) if s == "band9" => Some(ScoreScale::Band9),
+                Some(ref s) if s == "ratio" => Some(ScoreScale::Ratio),
+                _ => None,
+            };
+            Ok(AttemptRecord {
+                schema_version: row.get::<_, i64>(17)? as u32,
+                id: row.get(0)?,
+                activity,
+                asset_id: row.get(2)?,
+                mode,
+                suite_id: row.get(4)?,
+                status,
+                started_at: row.get(6)?,
+                submitted_at: row.get(7)?,
+                completed_at: row.get(8)?,
+                duration_ms: row.get::<_, i64>(9)? as u64,
+                score_value: row.get(10)?,
+                score_scale,
+                correct_count: row.get(12)?,
+                question_count: row.get::<_, Option<i64>>(13)?.map(|v| v as u32),
+                title_snapshot: row.get(14)?,
+                prompt_snapshot: row.get(15)?,
+                content_text: row.get(16)?,
+                answers: vec![],
+                annotations: vec![],
+            })
+        },
+    )?;
+
+    let mut stmt = conn.prepare(
+        "SELECT question_id, answer_json, is_correct, weight, question_kind, change_count, visit_count,
+                elapsed_ms, marked, answered_at
+         FROM attempt_answers WHERE attempt_id = ?1 ORDER BY question_id",
+    )?;
+    let rows = stmt.query_map(params![attempt.id], |row| {
+        let answer_json: String = row.get(1)?;
+        let answer = serde_json::from_str(&answer_json).unwrap_or(Value::Null);
+        Ok(AttemptAnswer {
+            question_id: row.get(0)?,
+            answer,
+            is_correct: row.get::<_, Option<i64>>(2)?.map(|v| v != 0),
+            weight: row.get(3)?,
+            question_kind: row.get(4)?,
+            change_count: row.get::<_, i64>(5)? as u32,
+            visit_count: row.get::<_, i64>(6)? as u32,
+            elapsed_ms: row.get::<_, i64>(7)? as u64,
+            marked: row.get::<_, i64>(8)? != 0,
+            answered_at: row.get(9)?,
+        })
+    })?;
+    for row in rows {
+        attempt.answers.push(row?);
+    }
+    Ok(Some(attempt))
 }
 
 fn lookup_submit_response(conn: &Connection, key: &str) -> DbResult<Option<ReadingSubmitResult>> {

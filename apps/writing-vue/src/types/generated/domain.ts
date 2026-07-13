@@ -188,6 +188,8 @@ export interface HistoryListItemVm {
   scoreScale?: ScoreScale | null;
   scoreLabel: string;
   scoreDisplay: string;
+  assetId?: string | null;
+  sessionId?: string | null;
 }
 
 export interface WritingResultVm {
@@ -257,6 +259,8 @@ export interface HistoryListItemVm {
   scoreScale?: ScoreScale | null
   scoreLabel: string
   scoreDisplay: string
+  assetId?: string | null
+  sessionId?: string | null
 }
 
 export interface ListHistoryPage {

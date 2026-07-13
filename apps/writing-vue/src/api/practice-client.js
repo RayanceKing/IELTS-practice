@@ -19,7 +19,8 @@ import {
   listHistory,
   getHistoryDetail,
   deleteHistoryAttempt,
-  exportHistory
+  exportHistory,
+  mapHistoryDetailToSubmission
 } from '@/api/history-repository.js'
 import {
   ensureCoachThread,
@@ -96,7 +97,17 @@ export const practiceSessions = {
 
   async getState(activity, sessionId) {
     const { detail } = await getHistoryDetail(sessionId)
-    return detail || { id: sessionId, activity, status: 'unknown' }
+    if (!detail) {
+      return { id: sessionId, activity, status: 'unknown' }
+    }
+    const submission = mapHistoryDetailToSubmission(detail)
+    return {
+      ...detail,
+      id: sessionId,
+      activity: activity || detail?.summary?.activity || 'reading',
+      status: detail?.attempt?.status || detail?.summary?.status || 'completed',
+      submission
+    }
   },
 
   async cancel(activity, sessionId) {

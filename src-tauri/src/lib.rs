@@ -84,6 +84,7 @@ pub fn run() {
             commands::reading::reading_list_assets,
             commands::reading::reading_get_asset_payload,
             commands::reading::reading_save_draft,
+            commands::reading::reading_get_open_draft,
             commands::reading::reading_patch_answer,
             commands::reading::reading_submit_attempt,
             commands::modes::suite_create,

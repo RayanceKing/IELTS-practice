@@ -69,6 +69,17 @@ pub async fn writing_start_evaluation(
         Err(error) => return Ok(CommandResponse::failure(map_err(error))),
     };
 
+    // Fail closed when no AI is configured. Deterministic is only for explicit offline mode.
+    if config.provider == "unconfigured" || config.provider.trim().is_empty() {
+        return Ok(CommandResponse::failure(ErrorEnvelope {
+            code: "ai.not_configured".into(),
+            message: "未配置 AI：请先在设置中添加并启用默认模型与 API Key。".into(),
+            retryable: false,
+            context: None,
+            cause_id: None,
+        }));
+    }
+
     if config.provider == "deterministic" {
         return Ok(
             match db.with_conn(|conn| start_evaluation(conn, &cmd, &DeterministicProvider)) {

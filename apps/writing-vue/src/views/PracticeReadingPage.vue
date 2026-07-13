@@ -430,6 +430,7 @@ import {
   resolveAnswerAliases as resolveAnswerAliasesFromIds
 } from '@/modules/practice-reading/readingQuestionIds'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
+import { getOpenReadingDraft } from '@/api/reading-repository.js'
 import { submitSuitePassage as tauriSubmitSuitePassage } from '@/api/modes-repository.js'
 
 const ENDLESS_COUNTDOWN_SEC = 5
@@ -996,6 +997,8 @@ async function loadAsset() {
     }
     if (replaySessionId) {
       await loadSubmittedSession(replaySessionId)
+    } else if (isTauriRuntime() && !isMemorizeMode.value) {
+      await hydrateOpenDraft(normalizedAssetId)
     }
   } catch (loadError) {
     console.error('加载阅读资源失败:', loadError)
@@ -1048,6 +1051,31 @@ async function loadSubmittedSession(sessionId) {
     if (!loadedSubmission.singleAttemptAnalysisLlm && !loadedSubmission.analysisArtifacts?.singleAttemptAnalysisLlm) {
       queueAutomaticReviewRefresh(loadedSubmission.sessionId)
     }
+  }
+}
+
+async function hydrateOpenDraft(assetId) {
+  try {
+    const { attempt } = await getOpenReadingDraft(assetId)
+    if (!attempt?.id) return
+    tauriAttemptId = String(attempt.id)
+    const answers = {}
+    const marked = []
+    for (const entry of attempt.answers || []) {
+      const questionId = String(entry.questionId || entry.question_id || '').trim()
+      if (!questionId) continue
+      answers[questionId] = entry.answer
+      if (entry.marked) marked.push(questionId)
+    }
+    Object.entries(answers).forEach(([questionId, value]) => {
+      assignAnswer(questionId, value)
+    })
+    if (marked.length) {
+      markedQuestions.value = marked
+    }
+    snapshotMessage.value = '已恢复未提交草稿。'
+  } catch (draftError) {
+    console.warn('加载阅读草稿失败:', draftError)
   }
 }
 

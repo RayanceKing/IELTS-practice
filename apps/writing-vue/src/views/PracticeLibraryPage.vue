@@ -1346,8 +1346,8 @@ async function startReadingSuite(event, options = {}) {
 }
 
 function openReadingReview(record) {
-  const assetId = String(record?.assetId || record?.examId || '').trim()
-  const sessionId = String(record?.sessionId || '').trim()
+  const assetId = String(record?.assetId || record?.asset_id || record?.examId || '').trim()
+  const sessionId = String(record?.sessionId || record?.session_id || record?.attemptId || record?.id || '').trim()
   if (!assetId || !sessionId) return
   const suiteSessionId = getReadingHistorySuiteSessionId(record)
   const target = {
@@ -1785,10 +1785,13 @@ function getPdfPath(asset) {
 
 function hasReadingPracticePayload(asset) {
   const metadata = asset?.metadata || {}
+  // Seeded reading index always has contentRef/payloadRef; id alone is enough when activity is reading.
   return Boolean(
     asset?.payloadRef
+    || asset?.contentRef
     || metadata.dataKey
     || metadata.script
+    || (asset?.id && String(asset?.activity || 'reading').toLowerCase() === 'reading')
   )
 }
 

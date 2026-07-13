@@ -204,7 +204,7 @@ pub fn load_provider_config(conn: &rusqlite::Connection) -> DbResult<AiProviderC
             .filter(|value| !value.is_empty()))
     }
 
-    let provider = string_setting(conn, "provider")?.unwrap_or_else(|| "deterministic".into());
+    let provider = string_setting(conn, "provider")?.unwrap_or_else(|| "unconfigured".into());
     let timeout_seconds = get_setting(conn, NS_AI, "timeoutSeconds")?
         .and_then(|entry| entry.value.as_u64())
         .unwrap_or(DEFAULT_TIMEOUT_SECONDS)

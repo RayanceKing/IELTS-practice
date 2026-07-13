@@ -176,7 +176,8 @@ pub fn set_default_ai_config(conn: &Connection, config: Option<&AiConfigDto>) ->
         }
         None => {
             delete_setting(conn, NS_AI, AI_DEFAULT_ID)?;
-            write_ai_runtime_value(conn, "provider", &Value::String("deterministic".into()))?;
+            // Unconfigured is not a silent offline scorer — writing must fail closed.
+            write_ai_runtime_value(conn, "provider", &Value::String("unconfigured".into()))?;
             for key in ["baseUrl", "model", "secretName"] {
                 delete_setting(conn, NS_AI, key)?;
             }

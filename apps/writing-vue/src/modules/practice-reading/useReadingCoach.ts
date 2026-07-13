@@ -570,8 +570,14 @@ export function useReadingCoach(options: ReadingCoachOptions = {}) {
       if (!refreshedSubmission) {
         mergeCoachResultIntoSubmission(response, AUTOMATIC_REVIEW_QUERY, llmPatch, requestPayload, expectedSessionId)
       }
-      llmReviewStatus.value = 'success'
-      llmReviewMessage.value = 'AI 复盘已更新'
+      if (llmPatch || hasLlmReview(submission.value)) {
+        llmReviewStatus.value = 'success'
+        llmReviewMessage.value = 'AI 复盘已更新'
+      } else {
+        // Coach text reply is not structured review — do not fake success.
+        llmReviewStatus.value = 'failed'
+        llmReviewMessage.value = 'AI 已回复，但未返回结构化复盘字段。'
+      }
       options.snapshotSubmission?.()
     } catch (reviewFailure) {
       console.error('自动阅读复盘失败:', reviewFailure)

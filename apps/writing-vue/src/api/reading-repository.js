@@ -41,6 +41,16 @@ export async function saveReadingDraft(payload) {
   return { source: 'tauri', attempt: unwrapCommandResponse(response, 'reading_save_draft') }
 }
 
+export async function getOpenReadingDraft(assetId) {
+  const response = await invokeCommand('reading_get_open_draft', {
+    assetId: String(assetId || '').trim()
+  })
+  return {
+    source: 'tauri',
+    attempt: unwrapCommandResponse(response, 'reading_get_open_draft') || null
+  }
+}
+
 export async function patchReadingAnswer(attemptId, questionId, answer, marked = false) {
   const response = await invokeCommand('reading_patch_answer', {
     attemptId,
@@ -74,6 +84,7 @@ export const readingRepository = {
   listReadingAssets,
   getReadingAssetPayload,
   saveReadingDraft,
+  getOpenReadingDraft,
   patchReadingAnswer,
   submitReadingAttempt,
   newKey,

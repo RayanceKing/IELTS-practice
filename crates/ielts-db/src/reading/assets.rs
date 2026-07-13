@@ -25,6 +25,10 @@ pub struct AssetIndexEntry {
     pub fingerprint: String,
     pub schema_version: u32,
     pub content_ref: Option<String>,
+    /// Vue guards historically looked for payloadRef; keep both names.
+    pub payload_ref: Option<String>,
+    /// Always present so list filters (`activity === 'reading'`) work.
+    pub activity: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,6 +207,7 @@ pub fn list_assets(
     sql.push_str(" ORDER BY category, title");
     let mut stmt = conn.prepare(&sql)?;
     let map_row = |row: &rusqlite::Row<'_>| {
+        let content_ref: Option<String> = row.get(7)?;
         Ok(AssetIndexEntry {
             id: row.get(0)?,
             title: row.get(1)?,
@@ -211,7 +216,9 @@ pub fn list_assets(
             frequency: row.get(4)?,
             fingerprint: row.get(5)?,
             schema_version: row.get::<_, i64>(6)? as u32,
-            content_ref: row.get(7)?,
+            content_ref: content_ref.clone(),
+            payload_ref: content_ref,
+            activity: "reading".into(),
         })
     };
     let rows = if let Some(act) = activity {
