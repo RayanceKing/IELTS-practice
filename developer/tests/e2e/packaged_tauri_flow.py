@@ -8,19 +8,24 @@ on PATH (or set TAURI_DRIVER/TAURI_NATIVE_DRIVER).
 """
 from __future__ import annotations
 
-import json
+import base64
 import hashlib
+import json
+import math
 import os
 import shutil
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 REPORT = ROOT / "developer/tests/e2e/reports/suite-practice-flow-report.json"
+READING_SCREENSHOT = ROOT / "developer/tests/e2e/reports/reading-practice-current.png"
+READING_P95_BUDGET_MS = 3000
 
 
 def sha256_file(path: Path) -> str:
@@ -136,7 +141,9 @@ def blocked(reason: str, missing: list[str]) -> int:
               "status": "blocked", "exitCode": 2, "target": "packaged-tauri-2",
               "reason": reason, "missingDependencies": missing,
               "checks": {"launch": "blocked", "vueRoutes": "blocked", "readingIpc": "blocked",
-                         "bundledResources": "blocked", "readingSubmitBoundary": "blocked",
+                         "bundledResources": "blocked", "readingView": "blocked",
+                         "readingPerformance": "blocked", "notesDialog": "blocked",
+                         "readingSubmitBoundary": "blocked",
                          "sqliteRestart": "blocked"}}
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -164,6 +171,13 @@ class Driver:
     def script(self, source, args=None):
         value = self.call("POST", f"/session/{self.sid}/execute/sync", {"script": source, "args": args or []})
         return value.get("value", value)
+    def screenshot(self, path: Path):
+        value = self.call("GET", f"/session/{self.sid}/screenshot")
+        encoded = value.get("value", value)
+        if not isinstance(encoded, str) or not encoded:
+            raise RuntimeError(f"WebDriver screenshot failed: {value}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(base64.b64decode(encoded))
     def url(self, url): self.call("POST", f"/session/{self.sid}/url", {"url": url})
     def close(self):
         if self.sid:
@@ -188,6 +202,38 @@ def wait_for_vue(driver: Driver, timeout_seconds: int = 30):
             return last
         time.sleep(0.25)
     raise RuntimeError(f"Vue root did not mount: {last}")
+
+
+def wait_for_value(driver: Driver, source: str, timeout_seconds: int = 15):
+    deadline = time.time() + timeout_seconds
+    last = None
+    while time.time() < deadline:
+        last = driver.script(source)
+        if last:
+            return last
+        time.sleep(0.1)
+    raise RuntimeError(f"WebDriver condition timed out: {last}")
+
+
+def wait_for_reading_view(driver: Driver, timeout_seconds: int = 30):
+    deadline = time.time() + timeout_seconds
+    last = None
+    while time.time() < deadline:
+        last = driver.script("""
+            const error = document.querySelector('.inline-message-error');
+            const workspace = document.querySelector('[data-practice-reading-page]');
+            return {
+              ready: !!workspace && workspace.textContent.trim().length > 0,
+              error: error ? error.textContent.trim() : '',
+              hash: location.hash
+            };
+        """)
+        if isinstance(last, dict) and last.get("error"):
+            raise RuntimeError(f"Reading view failed: {last}")
+        if isinstance(last, dict) and last.get("ready"):
+            return last
+        time.sleep(0.1)
+    raise RuntimeError(f"Reading view did not become ready: {last}")
 
 
 def main() -> int:
@@ -252,6 +298,100 @@ def main() -> int:
         if isinstance(payload_data.get("payload"), dict) and "asset" in payload_data["payload"] and "payload" in payload_data["payload"]:
             raise RuntimeError("reading payload is double wrapped")
         checks["bundledResources"] = "passed"
+        navigation_samples = []
+        encoded_asset_id = urllib.parse.quote(str(asset_id), safe="")
+        for sample_index in range(5):
+            driver.script("location.hash = '#/'; return true")
+            wait_for_value(driver, "return !document.querySelector('[data-practice-reading-page]')")
+            route = f"#/reading/{encoded_asset_id}?e2eSample={sample_index}"
+            driver.script(
+                "window.__e2eReadingStart = performance.now(); location.hash = arguments[0]; return true",
+                [route],
+            )
+            wait_for_reading_view(driver)
+            elapsed = driver.script("return performance.now() - window.__e2eReadingStart")
+            navigation_samples.append(round(float(elapsed), 2))
+        p95_index = max(0, math.ceil(len(navigation_samples) * 0.95) - 1)
+        reading_p95_ms = sorted(navigation_samples)[p95_index]
+        metadata["readingNavigationMs"] = navigation_samples
+        metadata["readingP95Ms"] = reading_p95_ms
+        metadata["readingP95BudgetMs"] = READING_P95_BUDGET_MS
+        if reading_p95_ms > READING_P95_BUDGET_MS:
+            raise RuntimeError(
+                f"reading view P95 {reading_p95_ms}ms exceeds {READING_P95_BUDGET_MS}ms"
+            )
+        checks["readingView"] = "passed"
+        checks["readingPerformance"] = "passed"
+        layout = driver.script("""
+            const rect = (selector) => {
+              const element = document.querySelector(selector);
+              if (!element) return null;
+              const value = element.getBoundingClientRect();
+              return {x: value.x, y: value.y, width: value.width, height: value.height};
+            };
+            const workspace = document.querySelector('[data-practice-reading-page]');
+            const style = workspace ? getComputedStyle(workspace) : null;
+            return {
+              viewport: {width: innerWidth, height: innerHeight, devicePixelRatio},
+              workspace: rect('[data-practice-reading-page]'),
+              left: rect('#left'),
+              right: rect('#right'),
+              divider: rect('[data-practice-reading-page] > #reading-divider'),
+              passageHtml: rect('#left .passage-html'),
+              gridTemplateColumns: style?.gridTemplateColumns || '',
+              display: style?.display || '',
+              children: workspace ? Array.from(workspace.children).map((element) => {
+                const childRect = element.getBoundingClientRect();
+                const childStyle = getComputedStyle(element);
+                return {
+                  tag: element.tagName,
+                  id: element.id,
+                  className: element.className,
+                  x: childRect.x,
+                  y: childRect.y,
+                  width: childRect.width,
+                  height: childRect.height,
+                  position: childStyle.position,
+                  gridColumn: childStyle.gridColumn,
+                  gridRow: childStyle.gridRow
+                };
+              }) : []
+            };
+        """)
+        metadata["readingLayout"] = layout
+        if not isinstance(layout, dict):
+            raise RuntimeError(f"reading layout metrics unavailable: {layout}")
+        for pane_name in ("left", "right", "passageHtml"):
+            pane = layout.get(pane_name) or {}
+            if float(pane.get("width") or 0) < 240:
+                raise RuntimeError(f"reading {pane_name} collapsed: {layout}")
+        driver.screenshot(READING_SCREENSHOT)
+        metadata["readingScreenshot"] = str(READING_SCREENSHOT.resolve())
+        driver.script("""
+            const button = document.querySelector('#note-btn');
+            button.focus();
+            button.click();
+            return document.activeElement?.id;
+        """)
+        wait_for_value(
+            driver,
+            "return document.activeElement?.tagName === 'TEXTAREA' && getComputedStyle(document.querySelector('#notes-panel')).display !== 'none'",
+        )
+        tab_target = driver.script("""
+            document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: 'Tab', bubbles: true}));
+            return document.activeElement?.id || '';
+        """)
+        if tab_target != "close-note":
+            raise RuntimeError(f"notes dialog did not trap Tab: {tab_target}")
+        driver.script("""
+            document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+            return true;
+        """)
+        wait_for_value(
+            driver,
+            "return getComputedStyle(document.querySelector('#notes-panel')).display === 'none' && document.activeElement?.id === 'note-btn'",
+        )
+        checks["notesDialog"] = "passed"
         negative = driver.script("""
             return window.__TAURI_INTERNALS__.invoke('reading_submit_attempt', {cmd: {
               attemptId: 'e2e-negative-submit', assetId: arguments[0], answers: {},

@@ -173,12 +173,14 @@
     </div>
 
     <div
+      ref="notesPanel"
       id="notes-panel"
       class="reading-floating-panel reading-notes-panel"
       v-show="notesPanelOpen"
       role="dialog"
       aria-modal="true"
       aria-labelledby="notes-panel-title"
+      @keydown="handleNotesDialogKeydown"
     >
       <header>
         <h3 id="notes-panel-title">Notes</h3>
@@ -275,6 +277,8 @@
       {{ highlightRestoreWarning }}
     </p>
 
+    <p class="sr-only" aria-live="polite">{{ dragInteractionStatus }}</p>
+
     <section
       v-if="!loading && asset && payload"
       class="reading-workspace shell"
@@ -289,7 +293,6 @@
       @dragleave="handleDragLeave"
       @drop="handleDrop"
     >
-      <p class="sr-only" aria-live="polite">{{ dragInteractionStatus }}</p>
       <ReadingPassagePane
         ref="readingPassagePane"
         :passage-blocks="payload.passage.blocks"
@@ -297,7 +300,7 @@
       />
 
       <div
-        id="divider"
+        id="reading-divider"
         :class="{ 'is-dragging': dividerDragging }"
         role="separator"
         aria-orientation="vertical"
@@ -422,6 +425,8 @@ import { useReadingAsset } from '@/modules/practice-reading/useReadingAsset'
 import { useReadingAnswers } from '@/modules/practice-reading/useReadingAnswers'
 import { useReadingCoach } from '@/modules/practice-reading/useReadingCoach'
 import { useReadingHighlights } from '@/modules/practice-reading/useReadingHighlights'
+import { normalizeComparableText } from '@/modules/practice-reading/readingHighlightCore.js'
+import { useReadingModeFlow } from '@/modules/practice-reading/useReadingModeFlow'
 import { useReadingTimer } from '@/modules/practice-reading/useReadingTimer'
 import { useReadingAttempt } from '@/modules/practice-reading/useReadingAttempt'
 import {
@@ -439,16 +444,9 @@ import {
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 import { getOpenReadingDraft } from '@/api/reading-repository.js'
 import {
-  saveSuitePassageDraft,
-  submitSuitePassage as tauriSubmitSuitePassage,
-  submitEndless as tauriSubmitEndless,
-  getEndless as tauriGetEndless,
-  cancelEndless as tauriCancelEndless,
-  createMemorize as tauriCreateMemorize,
-  finishMemorize as tauriFinishMemorize
+  saveSuitePassageDraft
 } from '@/api/modes-repository.js'
 
-const ENDLESS_COUNTDOWN_SEC = 5
 const EXPLANATION_SPLIT_KINDS = new Set([
   'single_choice',
   'multi_choice',
@@ -507,10 +505,6 @@ const readingCoachSettingSaving = ref(false)
 const readingCoachSettingError = ref('')
 const leftPanePercent = ref(50)
 const dividerDragging = ref(false)
-let endlessTimer = null
-let lastSelectionRange = null
-let currentHighlightNode = null
-let highlightPersistGeneration = 0
 let dividerPointerId = null
 const activeQuestionVisit = {
   questionId: '',
@@ -518,11 +512,14 @@ const activeQuestionVisit = {
 }
 const activeQuestionId = ref('')
 const readingPassagePane = ref(null)
-const highlightRestoreWarning = ref('')
+const readingAttempt = useReadingAttempt()
+let tauriAttemptId = ''
+let draftAutosaveTimer = null
 
 const {
   settingsPanelOpen,
   notesPanelOpen,
+  notesPanel,
   notesTextarea,
   notesText,
   notesError,
@@ -534,6 +531,7 @@ const {
   initializeReadingPreferences,
   toggleSettingsPanel,
   toggleNotesPanel,
+  handleNotesDialogKeydown,
   closeFloatingPanels,
   selectReadingFont,
   selectReadingTheme,
@@ -596,14 +594,14 @@ const isMemorizeMode = computed(() => {
   return (mode === 'memorize' || practiceMode === 'memorize') && !props.sessionId
 })
 const activeMemorizeAttemptId = ref(String(readRouteQueryValue('memorizeAttemptId') || '').trim())
-let memorizeFinishRequested = false
 const headerSummary = computed(() => {
   if (!payload.value) return '从统一 Practice API 加载阅读题目。'
   const category = payload.value.meta?.category || asset.value?.category || 'Reading'
+  const questionCount = Number(payload.value.questionCount ?? payload.value.questionOrder?.length) || 0
   const mode = activeSuiteSessionId.value
     ? 'Vue 套题阅读链路'
     : (isEndlessMode.value ? '无尽模式' : (isMemorizeMode.value ? '背题模式' : 'Vue 原生阅读链路'))
-  return `${category} · ${payload.value.questionCount} 题 · ${mode}`
+  return `${category} · ${questionCount} 题 · ${mode}`
 })
 const returnRoute = computed(() => (
   activeSuiteSessionId.value
@@ -757,15 +755,38 @@ const {
   selectionToolbarStyle,
   keepSelectionToolbar,
   highlightSnapshot,
+  highlightRestoreWarning,
   dictionaryBubble,
-  lookupTermInDictionary,
-  saveTermToVocab,
-  persistHighlightToStore,
-  deleteHighlightFromStore,
-  loadPersistedHighlights,
   normalizeHighlightSnapshot: normalizeHighlightSnapshotState,
-  resetHighlightUiState: resetHighlightUiStateFromComposable
-} = useReadingHighlights()
+  resetHighlightUiState: resetHighlightUiStateFromComposable,
+  snapshotHighlights,
+  restoreHighlightsFromRecords,
+  applySelectionHighlight,
+  applySelectionNote,
+  removeSelectionHighlight,
+  saveDictionaryBubbleWord,
+  closeDictionaryBubble,
+  attachHighlightDocumentListeners,
+  detachHighlightDocumentListeners,
+  hydrateHighlightsFromStore,
+  getTextNodes
+} = useReadingHighlights({
+  assetIdSource: () => asset.value?.id || props.assetId,
+  reviewModeSource: () => reviewMode.value,
+  getAttemptId: () => tauriAttemptId,
+  ensureAttemptId: () => {
+    if (!tauriAttemptId) {
+      tauriAttemptId = readingAttempt.newAttemptId()
+    }
+    return tauriAttemptId
+  },
+  onAttemptEnsured: () => {
+    void persistTauriDraft()
+  },
+  onInteraction: () => recordInteraction(),
+  notesText,
+  toggleNotesPanel
+})
 const canSubmit = computed(() => Boolean(asset.value && payload.value && !loading.value && !submitting.value && !readOnlyMode.value))
 const canRecycleSubmittedAttempt = computed(() => Boolean(
   reviewMode.value
@@ -915,8 +936,7 @@ const analysisKindRows = computed(() => {
 
 onMounted(async () => {
   await initializeReadingPreferences()
-  document.addEventListener('selectionchange', handleSelectionChange)
-  document.addEventListener('click', handleDocumentClick, true)
+  attachHighlightDocumentListeners()
   await loadReadingCoachPreference()
   await loadAsset()
 })
@@ -933,8 +953,7 @@ onBeforeUnmount(() => {
     clearTimeout(draftAutosaveTimer)
     draftAutosaveTimer = null
   }
-  document.removeEventListener('selectionchange', handleSelectionChange)
-  document.removeEventListener('click', handleDocumentClick, true)
+  detachHighlightDocumentListeners()
   removeDividerDragListeners()
 })
 
@@ -1004,7 +1023,6 @@ async function loadAsset() {
   resetReadingCoachState()
   closeFloatingPanels()
   resetHighlightUiStateFromComposable()
-  highlightPersistGeneration += 1
   clearReadingNotesDraft()
   clearEndlessTimer()
   resetPracticeTimerClock()
@@ -1040,15 +1058,7 @@ async function loadAsset() {
     if (isTauriRuntime()) {
       const attemptScope = tauriAttemptId || replaySessionId || null
       const passageDocument = String(readingPassagePane.value?.$el?.textContent || '').trim()
-      const loaded = await loadPersistedHighlights(asset.value.id, attemptScope, passageDocument || null)
-      const valid = loaded.filter((entry) => !entry.mismatch)
-      const mismatchCount = loaded.length - valid.length
-      highlightRestoreWarning.value = mismatchCount
-        ? `${mismatchCount} 条高亮因原文变化无法准确恢复，已停止自动定位。`
-        : ''
-      if (valid.length || loaded.length) {
-        highlightSnapshot.value = valid
-      }
+      await hydrateHighlightsFromStore(asset.value.id, attemptScope, passageDocument || null)
     }
     restoreHighlightsFromRecords(highlightSnapshot.value)
     applyMemorizeStudyLayer()
@@ -1077,10 +1087,8 @@ async function loadSubmittedSession(sessionId) {
   fillCorrectAnswersFromPayload(loadedSubmission)
   const attemptScope = String(loadedSubmission.sessionId || loadedSubmission.attemptId || sessionId || '').trim()
   if (isTauriRuntime() && asset.value?.id) {
-    const persisted = await loadPersistedHighlights(asset.value.id, attemptScope || null)
-    if (persisted.length) {
-      highlightSnapshot.value = persisted
-    } else {
+    const persisted = await hydrateHighlightsFromStore(asset.value.id, attemptScope || null)
+    if (!persisted.length) {
       highlightSnapshot.value = normalizeHighlightSnapshotState(
         loadedSubmission.highlights || loadedSubmission.analysisArtifacts?.highlights || []
       )
@@ -1316,9 +1324,8 @@ async function recycleSubmittedAttempt() {
   resetAttemptMetadata()
   initializeReadingAnswers(payload.value, { prefillAnswerKey: isMemorizeMode.value })
   resetHighlightUiStateFromComposable()
-  highlightPersistGeneration += 1
   await nextTick()
-  Object.values(getHighlightRoots()).forEach((root) => unwrapHighlights(root))
+  restoreHighlightsFromRecords([])
   syncDomAnswers()
   setReadOnlyDomControls(false)
   resetPracticeTimerClock()
@@ -1443,599 +1450,6 @@ function syncNativeControl(questionId, explicitValue = getRawAnswer(questionId))
   })
 }
 
-function getHighlightRoots() {
-  if (typeof document === 'undefined') {
-    return {}
-  }
-  return {
-    passage: document.getElementById('left'),
-    questions: document.getElementById('question-groups')
-  }
-}
-
-function isInsideExplanationNode(node) {
-  const element = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node
-  return Boolean(element?.closest?.('.reading-explanation-card, .reading-group-explanation, .reading-question-explanation, .reading-question-explanation-list'))
-}
-
-function getTextNodes(root) {
-  const nodes = []
-  if (!root || typeof document === 'undefined') {
-    return nodes
-  }
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      if (!node.nodeValue || isInsideExplanationNode(node)) {
-        return NodeFilter.FILTER_REJECT
-      }
-      return NodeFilter.FILTER_ACCEPT
-    }
-  })
-  let node = walker.nextNode()
-  while (node) {
-    nodes.push(node)
-    node = walker.nextNode()
-  }
-  return nodes
-}
-
-function getText(root) {
-  return getTextNodes(root).map((node) => node.textContent || '').join('')
-}
-
-function unwrapHighlights(root) {
-  if (!root) {
-    return
-  }
-  root.querySelectorAll('.hl, .memorize-locator-highlight').forEach((highlight) => {
-    if (isInsideExplanationNode(highlight)) {
-      return
-    }
-    const parent = highlight.parentNode
-    if (!parent) return
-    while (highlight.firstChild) {
-      parent.insertBefore(highlight.firstChild, highlight)
-    }
-    parent.removeChild(highlight)
-    parent.normalize()
-  })
-}
-
-function resolveRangeFromOffsets(root, start, end) {
-  const nodes = getTextNodes(root)
-  let offset = 0
-  let startNode = null
-  let endNode = null
-  let startOffset = 0
-  let endOffset = 0
-  nodes.some((node) => {
-    const text = node.textContent || ''
-    const nextOffset = offset + text.length
-    if (!startNode && start >= offset && start <= nextOffset) {
-      startNode = node
-      startOffset = Math.max(0, start - offset)
-    }
-    if (!endNode && end >= offset && end <= nextOffset) {
-      endNode = node
-      endOffset = Math.max(0, end - offset)
-    }
-    offset = nextOffset
-    return Boolean(startNode && endNode)
-  })
-  if (!startNode || !endNode) {
-    return null
-  }
-  const range = document.createRange()
-  range.setStart(startNode, startOffset)
-  range.setEnd(endNode, endOffset)
-  return range
-}
-
-function normalizeComparableText(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim()
-}
-
-function applyHighlightKind(node, kind = 'highlight') {
-  node.classList.add('hl')
-  node.classList.add('review-dictionary-highlight')
-  node.dataset.hlType = kind === 'note' ? 'note' : 'highlight'
-  node.setAttribute('tabindex', '0')
-  node.setAttribute('role', 'button')
-  node.setAttribute('aria-label', `查看释义：${normalizeComparableText(node.textContent)}`)
-}
-
-function normalizeHighlightSnapshot(value) {
-  if (!Array.isArray(value)) {
-    return []
-  }
-  return value
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') return null
-      const text = normalizeComparableText(entry.text || entry.excerpt)
-      if (!text) return null
-      const scope = String(entry.scope || '').trim().toLowerCase()
-      const startOffset = Number(entry.startOffset ?? entry.start)
-      const endOffset = Number(entry.endOffset ?? entry.end)
-      const annotationId = entry.id ?? entry.annotationId
-      return {
-        id: annotationId ? String(annotationId) : null,
-        scope: scope === 'passage' || scope === 'questions' ? scope : 'unknown',
-        text,
-        kind: entry.kind === 'note' ? 'note' : 'highlight',
-        questionId: normalizeQuestionId(entry.questionId) || null,
-        startOffset: Number.isFinite(startOffset) ? startOffset : null,
-        endOffset: Number.isFinite(endOffset) ? endOffset : null,
-        before: normalizeComparableText(entry.before),
-        after: normalizeComparableText(entry.after),
-        occurrence: Number.isFinite(Number(entry.occurrence)) ? Math.max(0, Number(entry.occurrence)) : 0,
-        createdAt: entry.createdAt || new Date().toISOString()
-      }
-    })
-    .filter(Boolean)
-}
-
-function collectHighlightAnnotationIds(entries) {
-  return new Set(
-    (Array.isArray(entries) ? entries : [])
-      .map((entry) => {
-        const raw = entry?.id
-          || entry?.annotationId
-          || entry?.node?.dataset?.annotationId
-        return raw ? String(raw) : ''
-      })
-      .filter(Boolean)
-  )
-}
-
-function snapshotHighlights() {
-  const roots = getHighlightRoots()
-  const records = []
-  Object.entries(roots).forEach(([scope, root]) => {
-    if (!root) return
-    const fullText = getText(root)
-    const cursorByText = new Map()
-    const seenByText = new Map()
-    root.querySelectorAll('.hl').forEach((node) => {
-      if (isInsideExplanationNode(node)) return
-      const text = normalizeComparableText(node.textContent)
-      if (!text) return
-      const key = `${scope}::${text}`
-      const occurrence = seenByText.get(key) || 0
-      seenByText.set(key, occurrence + 1)
-      let cursor = cursorByText.get(key) || 0
-      let hit = -1
-      for (let index = 0; index <= occurrence; index += 1) {
-        hit = fullText.indexOf(text, cursor)
-        if (hit < 0) break
-        cursor = hit + text.length
-      }
-      if (hit < 0) return
-      cursorByText.set(key, cursor)
-      const endOffset = hit + text.length
-      const annotationId = node.dataset.annotationId ? String(node.dataset.annotationId) : null
-      records.push({
-        id: annotationId,
-        scope,
-        text,
-        kind: node.dataset.hlType === 'note' ? 'note' : 'highlight',
-        questionId: resolveHighlightQuestionId(node),
-        startOffset: hit,
-        endOffset,
-        before: fullText.slice(Math.max(0, hit - 20), hit),
-        after: fullText.slice(endOffset, endOffset + 20),
-        occurrence,
-        createdAt: node.dataset.createdAt || new Date().toISOString(),
-        node
-      })
-    })
-  })
-  const previousIds = collectHighlightAnnotationIds(highlightSnapshot.value)
-  highlightSnapshot.value = records.map(({ node, ...rest }) => rest)
-  const persistGeneration = ++highlightPersistGeneration
-  void persistHighlightSnapshotToStore(records, previousIds, persistGeneration)
-  return highlightSnapshot.value
-}
-
-async function persistHighlightSnapshotToStore(records, previousIds = null, generation = highlightPersistGeneration) {
-  if (!isTauriRuntime() || !asset.value?.id || reviewMode.value) return
-  if (!tauriAttemptId) {
-    tauriAttemptId = readingAttempt.newAttemptId()
-    void persistTauriDraft()
-  }
-  const list = Array.isArray(records) ? records : []
-  const keepIds = collectHighlightAnnotationIds(list)
-  const knownIds = previousIds instanceof Set
-    ? previousIds
-    : collectHighlightAnnotationIds(highlightSnapshot.value)
-  // Always apply set-diff deletes for this snapshot generation so a superseded
-  // persist still removes ids that dropped out before a later snapshot ran.
-  for (const id of knownIds) {
-    if (!keepIds.has(id)) {
-      await deleteHighlightFromStore(id)
-    }
-  }
-  if (generation !== highlightPersistGeneration) return
-  for (const entry of list) {
-    // Skip nodes already unwrapped (e.g. rapid remove while upsert is in flight).
-    if (entry?.node && entry.node.isConnected === false) {
-      continue
-    }
-    const annotation = await persistHighlightToStore(asset.value.id, entry, tauriAttemptId || null)
-    if (generation !== highlightPersistGeneration) return
-    const id = annotation?.id ? String(annotation.id) : null
-    if (id) {
-      entry.id = id
-      if (entry.node?.isConnected) {
-        entry.node.dataset.annotationId = id
-      }
-    }
-  }
-  if (generation !== highlightPersistGeneration) return
-  highlightSnapshot.value = list
-    .filter((entry) => !entry?.node || entry.node.isConnected)
-    .map(({ node, ...rest }) => rest)
-}
-
-function resolveHighlightQuestionId(node) {
-  const element = node?.closest?.('[data-answer-question-id], [data-review-question-id], [data-question], [data-question-id], [name]')
-  return normalizeQuestionId(
-    element?.dataset?.answerQuestionId
-    || element?.dataset?.reviewQuestionId
-    || element?.dataset?.question
-    || element?.dataset?.questionId
-    || element?.getAttribute?.('name')
-  ) || null
-}
-
-function restoreHighlightsFromRecords(records = []) {
-  const roots = getHighlightRoots()
-  Object.values(roots).forEach((root) => unwrapHighlights(root))
-  normalizeHighlightSnapshot(records).forEach((record) => {
-    const root = roots[record.scope]
-    if (root) {
-      applyHighlightRecord(root, record)
-    }
-  })
-}
-
-function applyHighlightRecord(root, record) {
-  const fullText = getText(root)
-  if (!fullText || !record?.text) {
-    return false
-  }
-  const candidates = []
-  const start = Number(record.startOffset)
-  const end = Number(record.endOffset)
-  if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
-    candidates.push({ start, end })
-  }
-  let cursor = 0
-  let hit = -1
-  for (let index = 0; index <= (Number(record.occurrence) || 0); index += 1) {
-    hit = fullText.indexOf(record.text, cursor)
-    if (hit < 0) break
-    cursor = hit + record.text.length
-  }
-  if (hit >= 0) {
-    candidates.push({ start: hit, end: hit + record.text.length })
-  }
-  const normalizedNeedle = normalizeComparableText(record.text)
-  if (normalizedNeedle && hit < 0) {
-    const pattern = new RegExp(normalizedNeedle.split(/\s+/).map(escapeRegExp).join('\\s+'), 'g')
-    const matched = pattern.exec(fullText)
-    if (matched) {
-      candidates.push({ start: matched.index, end: matched.index + matched[0].length })
-    }
-  }
-  for (const candidate of candidates) {
-    const range = resolveRangeFromOffsets(root, candidate.start, candidate.end)
-    if (!range || range.collapsed) continue
-    const span = document.createElement('span')
-    applyHighlightKind(span, record.kind)
-    span.dataset.createdAt = record.createdAt || new Date().toISOString()
-    if (record.id) span.dataset.annotationId = String(record.id)
-    try {
-      range.surroundContents(span)
-      return true
-    } catch (_) {}
-  }
-  return false
-}
-
-function escapeRegExp(value) {
-  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function closeSelectionToolbar() {
-  selectionToolbarVisible.value = false
-  keepSelectionToolbar.value = false
-  lastSelectionRange = null
-  currentHighlightNode = null
-}
-
-function handleSelectionChange() {
-  window.setTimeout(() => {
-    if (keepSelectionToolbar.value) return
-    const selection = window.getSelection?.()
-    if (!selection || !selection.rangeCount || selection.isCollapsed) {
-      if (!currentHighlightNode) {
-        selectionToolbarVisible.value = false
-      }
-      return
-    }
-    const range = selection.getRangeAt(0)
-    const container = range.commonAncestorContainer.nodeType === Node.TEXT_NODE
-      ? range.commonAncestorContainer.parentElement
-      : range.commonAncestorContainer
-    const roots = Object.values(getHighlightRoots()).filter(Boolean)
-    const insideRoot = roots.some((root) => root.contains(container))
-    const highlightNode = container?.closest?.('.hl') || null
-    if (!insideRoot && !highlightNode) {
-      closeSelectionToolbar()
-      return
-    }
-    lastSelectionRange = range.cloneRange()
-    currentHighlightNode = highlightNode
-    positionSelectionToolbar(range.getBoundingClientRect())
-  }, 10)
-}
-
-function positionSelectionToolbar(rect) {
-  const top = window.scrollY + rect.top - 44
-  const left = window.scrollX + rect.left + (rect.width / 2) - 110
-  selectionToolbarStyle.top = `${Math.max(8, Math.round(top > 0 ? top : window.scrollY + rect.bottom + 8))}px`
-  selectionToolbarStyle.left = `${Math.max(8, Math.round(left))}px`
-  selectionToolbarVisible.value = true
-}
-
-function applySelectionHighlight(kind = 'highlight') {
-  if (!lastSelectionRange || lastSelectionRange.collapsed || currentHighlightNode) {
-    return
-  }
-  const span = document.createElement('span')
-  applyHighlightKind(span, kind)
-  span.dataset.createdAt = new Date().toISOString()
-  try {
-    lastSelectionRange.surroundContents(span)
-  } catch (_) {
-    return
-  }
-  window.getSelection?.()?.removeAllRanges()
-  snapshotHighlights()
-  recordInteraction()
-  closeSelectionToolbar()
-}
-
-function applySelectionNote() {
-  if (currentHighlightNode) {
-    applyHighlightKind(currentHighlightNode, 'note')
-    appendNoteText(currentHighlightNode.textContent)
-    snapshotHighlights()
-    recordInteraction()
-    closeSelectionToolbar()
-    toggleNotesPanel()
-    return
-  }
-  const selectedText = normalizeComparableText(lastSelectionRange?.toString?.())
-  applySelectionHighlight('note')
-  if (selectedText) {
-    appendNoteText(selectedText)
-    toggleNotesPanel()
-  }
-}
-
-function appendNoteText(text) {
-  const value = normalizeComparableText(text)
-  if (!value) return
-  notesText.value += `${notesText.value ? '\n\n' : ''}> ${value}\n`
-}
-
-function removeSelectionHighlight() {
-  let target = currentHighlightNode
-  if (!target && lastSelectionRange) {
-    const ancestor = lastSelectionRange.commonAncestorContainer
-    target = (ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor)?.closest?.('.hl') || null
-  }
-  if (target?.parentNode) {
-    const annotationId = target.dataset?.annotationId
-      ? String(target.dataset.annotationId)
-      : null
-    const parent = target.parentNode
-    while (target.firstChild) {
-      parent.insertBefore(target.firstChild, target)
-    }
-    parent.removeChild(target)
-    parent.normalize()
-    if (annotationId) {
-      void deleteHighlightFromStore(annotationId)
-    }
-    snapshotHighlights()
-    recordInteraction()
-  }
-  window.getSelection?.()?.removeAllRanges()
-  closeSelectionToolbar()
-}
-
-function handleDocumentClick(event) {
-  const target = event.target
-  const highlight = target?.closest?.('.hl')
-  if (highlight && Object.values(getHighlightRoots()).some((root) => root?.contains(highlight))) {
-    openDictionaryBubble(highlight)
-    return
-  }
-  if (target?.closest?.('#selbar, #review-highlight-dictionary-bubble, #settings-panel, #notes-panel, #settings-btn, #note-btn')) {
-    return
-  }
-  if (!keepSelectionToolbar.value) {
-    selectionToolbarVisible.value = false
-  }
-  closeDictionaryBubble()
-}
-
-function closeDictionaryBubble() {
-  dictionaryBubble.visible = false
-  dictionaryBubble.term = ''
-  dictionaryBubble.meaning = ''
-  dictionaryBubble.definition = ''
-  dictionaryBubble.example = ''
-  dictionaryBubble.meta = ''
-  dictionaryBubble.sourceLine = ''
-  dictionaryBubble.parts = []
-  dictionaryBubble.phonetic = ''
-  dictionaryBubble.partOfSpeech = ''
-  dictionaryBubble.sourceLabel = ''
-  dictionaryBubble.license = ''
-  dictionaryBubble.found = false
-  dictionaryBubble.saved = false
-  currentHighlightNode = null
-}
-
-async function openDictionaryBubble(highlight) {
-  const term = normalizeComparableText(highlight?.textContent)
-  if (!term) return
-  const rect = highlight.getBoundingClientRect()
-  dictionaryBubble.term = term
-  dictionaryBubble.meaning = '正在加载本地词典...'
-  dictionaryBubble.definition = ''
-  dictionaryBubble.example = ''
-  dictionaryBubble.meta = '本地词典'
-  dictionaryBubble.sourceLine = ''
-  dictionaryBubble.parts = []
-  dictionaryBubble.phonetic = ''
-  dictionaryBubble.partOfSpeech = ''
-  dictionaryBubble.sourceLabel = ''
-  dictionaryBubble.license = ''
-  dictionaryBubble.found = false
-  dictionaryBubble.saved = false
-  dictionaryBubble.left = Math.max(12, Math.round(Math.min(rect.left, window.innerWidth - 360)))
-  dictionaryBubble.top = Math.max(12, Math.round(rect.bottom + 8))
-  dictionaryBubble.visible = true
-  currentHighlightNode = highlight
-  const lookup = await lookupTermInDictionary(term)
-  if (currentHighlightNode !== highlight || !dictionaryBubble.visible) {
-    return
-  }
-  applyDictionaryLookupToBubble(lookup, term)
-}
-
-function formatDictionaryLookupMeaning(result) {
-  if (!result || typeof result !== 'object') {
-    return ''
-  }
-  if (Array.isArray(result.parts) && result.parts.length) {
-    return result.parts
-      .map((part) => {
-        const label = normalizeComparableText(part.term || part.lemma || part.requested)
-        const meaning = normalizeComparableText(part.zh || part.meaning || part.en || part.definition)
-        return [label, meaning].filter(Boolean).join(': ')
-      })
-      .filter(Boolean)
-      .join('；')
-  }
-  return normalizeComparableText(result.zh || result.meaning || result.en || result.definition || result.example)
-}
-
-function formatDictionaryLookupMeta(result) {
-  if (!result || typeof result !== 'object') {
-    return ''
-  }
-  return [
-    result.phonetic ? `/${normalizeComparableText(result.phonetic)}/` : '',
-    normalizeComparableText(result.pos || result.partOfSpeech),
-    normalizeComparableText(result.sourceLabel || (result.source === 'ecdict' ? 'ECDICT' : '本地词典'))
-  ].filter(Boolean).join(' · ')
-}
-
-function normalizeDictionaryLookupPart(part) {
-  if (!part || typeof part !== 'object') {
-    return null
-  }
-  const term = normalizeComparableText(part.term || part.lemma || part.requested)
-  const meaning = normalizeComparableText(part.zh || part.meaning)
-  const definition = normalizeComparableText(part.en || part.definition)
-  if (!term && !meaning && !definition) {
-    return null
-  }
-  return {
-    term: term || '高亮词',
-    meta: formatDictionaryLookupMeta(part),
-    meaning,
-    definition
-  }
-}
-
-function normalizeDictionaryLookupResult(result, fallbackTerm) {
-  if (!result || typeof result !== 'object') {
-    return {
-      found: false,
-      term: normalizeComparableText(fallbackTerm),
-      meaning: '',
-      definition: '',
-      example: '',
-      meta: '本地词典',
-      sourceLine: '',
-      parts: [],
-      phonetic: '',
-      partOfSpeech: '',
-      sourceLabel: '本地词典',
-      license: ''
-    }
-  }
-  const parts = Array.isArray(result.parts)
-    ? result.parts.map(normalizeDictionaryLookupPart).filter(Boolean)
-    : []
-  const sourceLabel = normalizeComparableText(result.sourceLabel || (result.source === 'ecdict' ? 'ECDICT' : '本地词典'))
-  const license = normalizeComparableText(result.license)
-  return {
-    found: Boolean(result.found),
-    term: normalizeComparableText(result.term || result.lemma || result.requested || fallbackTerm),
-    meaning: normalizeComparableText(result.zh || result.meaning),
-    definition: normalizeComparableText(result.en || result.definition),
-    example: normalizeComparableText(result.example),
-    meta: parts.length ? '' : formatDictionaryLookupMeta({ ...result, sourceLabel }),
-    sourceLine: sourceLabel ? [sourceLabel, license].filter(Boolean).join(' · ') : '',
-    parts,
-    phonetic: normalizeComparableText(result.phonetic),
-    partOfSpeech: normalizeComparableText(result.pos || result.partOfSpeech),
-    sourceLabel,
-    license
-  }
-}
-
-function applyDictionaryLookupToBubble(lookup, fallbackTerm) {
-  const normalized = normalizeDictionaryLookupResult(lookup, fallbackTerm)
-  dictionaryBubble.term = normalized.term || normalizeComparableText(fallbackTerm)
-  dictionaryBubble.meaning = normalized.meaning || (normalized.parts.length ? '' : normalized.definition)
-  dictionaryBubble.definition = normalized.parts.length ? '' : normalized.definition
-  dictionaryBubble.example = normalized.example
-  dictionaryBubble.meta = normalized.meta || (normalized.found ? normalized.sourceLabel : '本地词典')
-  dictionaryBubble.sourceLine = normalized.sourceLine
-  dictionaryBubble.parts = normalized.parts
-  dictionaryBubble.phonetic = normalized.phonetic
-  dictionaryBubble.partOfSpeech = normalized.partOfSpeech
-  dictionaryBubble.sourceLabel = normalized.sourceLabel
-  dictionaryBubble.license = normalized.license
-  dictionaryBubble.found = normalized.found
-}
-
-async function saveDictionaryBubbleWord() {
-  const word = normalizeComparableText(dictionaryBubble.term)
-  if (!word) return
-  const item = await saveTermToVocab({
-    term: word,
-    meaning: dictionaryBubble.meaning || dictionaryBubble.definition || '待补充释义',
-    definition: dictionaryBubble.definition || dictionaryBubble.meaning || '待补充释义',
-    example: dictionaryBubble.example || '',
-    phonetic: dictionaryBubble.phonetic || null,
-    partOfSpeech: dictionaryBubble.partOfSpeech || null
-  }, asset.value?.id || null, tauriAttemptId || null)
-  dictionaryBubble.saved = Boolean(item)
-}
-
-const readingAttempt = useReadingAttempt()
-let tauriAttemptId = ''
-let draftAutosaveTimer = null
-
 function scheduleDraftAutosave() {
   if (!isTauriRuntime() || reviewMode.value || isMemorizeMode.value) {
     return
@@ -2089,331 +1503,70 @@ function toggleTimer() {
   }
 }
 
-async function submitAnswers() {
-  if (!canSubmit.value) {
-    return
-  }
-  submitting.value = true
-  submitError.value = ''
-  snapshotMessage.value = ''
-  flushActiveQuestionVisit()
-  stopPracticeTimer()
-  try {
-    const timerSnapshot = getPracticeTimerSnapshot()
-    const timing = resolvePracticeTiming(1, timerSnapshot)
-    const endTime = new Date(timing.endTimeMs).toISOString()
-    const effectiveEndTime = new Date(timing.effectiveEndTimeMs).toISOString()
-    const durationSec = timing.duration
-    const attempt = {
-      answers: snapshotAnswerMap(),
-      markedQuestions: markedQuestions.value.slice(),
-      highlights: snapshotHighlights(),
-      questionTimelineLite: buildQuestionTimelineLite(),
-      interactionCount: interactionCount.value,
-      startTime: new Date(timing.startTimeMs).toISOString(),
-      endTime,
-      durationSec,
-      timerSnapshot,
-      effectiveEndTime,
-      effectiveEndTimeMs: timing.effectiveEndTimeMs,
-      scrollY: getCurrentScrollY()
-    }
-    let result = null
-    if (isTauriRuntime() && activeSuiteSessionId.value) {
-      const suiteResult = await tauriSubmitSuitePassage({
-        suiteId: activeSuiteSessionId.value,
-        assetId: asset.value.id,
-        assetRevision: asset.value.schemaVersion ?? null,
-        assetFingerprint: asset.value.fingerprint || null,
-        answers: attempt.answers,
-        markedQuestions: attempt.markedQuestions,
-        questionTimeline: buildPersistedQuestionTimeline(attempt.questionTimelineLite),
-        durationMs: Math.round((durationSec || 0) * 1000),
-        titleSnapshot: asset.value.title || asset.value.name || null,
-        timerSnapshot: attempt.timerSnapshot || null
-      })
-      const rawSub = suiteResult.result && suiteResult.result.submission
-      const submission = rawSub
-        ? {
-            sessionId: rawSub.attempt && rawSub.attempt.id,
-            attemptId: rawSub.attempt && rawSub.attempt.id,
-            assetId: asset.value.id,
-            activity: 'reading',
-            status: 'submitted',
-            score: rawSub.score && rawSub.score.accuracy,
-            correctCount: rawSub.score && rawSub.score.correct,
-            questionCount: rawSub.score && rawSub.score.total,
-            percentage: rawSub.score && rawSub.score.percentage,
-            duration: Math.round((durationSec || 0)),
-            answers: attempt.answers,
-            markedQuestions: attempt.markedQuestions,
-            answerComparison: Object.fromEntries(
-              (rawSub.comparisons || []).map((entry) => [
-                entry.questionId,
-                {
-                  questionId: entry.questionId,
-                  userAnswer: entry.userAnswer,
-                  correctAnswer: entry.correctAnswer,
-                  isCorrect: entry.isCorrect,
-                  weight: entry.weight,
-                  matchMode: entry.matchMode
-                }
-              ])
-            ),
-            source: 'tauri'
-          }
-        : null
-      result = {
-        submission,
-        suiteSession: (suiteResult.result && suiteResult.result.suiteSession) || null
-      }
-    } else if (isTauriRuntime() && isEndlessMode.value && activeEndlessSessionId.value) {
-      const endlessResult = await tauriSubmitEndless({
-        sessionId: activeEndlessSessionId.value,
-        assetId: asset.value.id,
-        assetRevision: asset.value.schemaVersion ?? null,
-        assetFingerprint: asset.value.fingerprint || null,
-        answers: attempt.answers,
-        markedQuestions: attempt.markedQuestions,
-        questionTimeline: buildPersistedQuestionTimeline(attempt.questionTimelineLite),
-        durationMs: Math.round((durationSec || 0) * 1000),
-        titleSnapshot: asset.value.title || asset.value.name || null
-      })
-      const rawSub = endlessResult.result && endlessResult.result.submission
-      const submission = rawSub
-        ? {
-            sessionId: rawSub.attempt && rawSub.attempt.id,
-            attemptId: rawSub.attempt && rawSub.attempt.id,
-            assetId: asset.value.id,
-            activity: 'reading',
-            status: 'submitted',
-            score: rawSub.score && rawSub.score.accuracy,
-            correctCount: rawSub.score && rawSub.score.correct,
-            questionCount: rawSub.score && rawSub.score.total,
-            percentage: rawSub.score && rawSub.score.percentage,
-            duration: Math.round((durationSec || 0)),
-            answers: attempt.answers,
-            markedQuestions: attempt.markedQuestions,
-            answerComparison: Object.fromEntries(
-              (rawSub.comparisons || []).map((entry) => [
-                entry.questionId,
-                {
-                  questionId: entry.questionId,
-                  userAnswer: entry.userAnswer,
-                  correctAnswer: entry.correctAnswer,
-                  isCorrect: entry.isCorrect,
-                  weight: entry.weight,
-                  matchMode: entry.matchMode
-                }
-              ])
-            ),
-            source: 'tauri-endless'
-          }
-        : null
-      const nextId = endlessResult.result?.nextAssetId
-        || endlessResult.result?.session?.currentAssetId
-        || null
-      result = {
-        submission,
-        endlessSession: endlessResult.result?.session || null,
-        nextEndlessAssetId: nextId
-      }
-    } else if (isTauriRuntime()) {
-      if (!tauriAttemptId) tauriAttemptId = readingAttempt.newAttemptId()
-      const tauriResult = await readingAttempt.submit({
-        attemptId: tauriAttemptId,
-        assetId: asset.value.id,
-        assetRevision: asset.value.schemaVersion ?? null,
-        assetFingerprint: asset.value.fingerprint || null,
-        answers: attempt.answers,
-        markedQuestions: attempt.markedQuestions,
-        questionTimeline: buildPersistedQuestionTimeline(attempt.questionTimelineLite),
-        durationMs: Math.round((durationSec || 0) * 1000),
-        titleSnapshot: asset.value.title || asset.value.name || null
-      })
-      result = { submission: tauriResult.submission }
-    } else {
-      result = activeSuiteSessionId.value
-        ? await practiceReadingSuite.submitPassage(activeSuiteSessionId.value, asset.value.id, { attempt })
-        : await practiceSessions.create({
-          activity: 'reading',
-          assetId: asset.value.id,
-          attempt
-        })
-    }
-    submission.value = result?.submission || null
-    setReadingCoachOpen(Boolean(submission.value && readingCoachEnabled.value))
-    suiteSession.value = result?.suiteSession || suiteSession.value
-    if (submission.value?.answers) {
-      Object.entries(submission.value.answers).forEach(([questionId, value]) => {
-        assignAnswer(questionId, value)
-      })
-    }
-    await nextTick()
-    syncDomAnswers()
-    setReadOnlyDomControls(true)
-    restoreHighlightsFromRecords(submission.value?.highlights || submission.value?.analysisArtifacts?.highlights || highlightSnapshot.value)
-    setPracticeTimerElapsedSeconds(Math.max(durationSec, Number(submission.value?.duration || 0)))
-    snapshotSubmission()
-    if (readingCoachEnabled.value) {
-      const reviewPromise = runAutomaticReviewCoach({ expectedSessionId: submission.value?.sessionId })
-      await reviewPromise
-    }
-    maybeAdvanceSuitePassage()
-    scheduleEndlessNext(result?.nextEndlessAssetId || null)
-  } catch (submitFailure) {
-    console.error('提交阅读练习失败:', submitFailure)
-    submitError.value = submitFailure?.message
-      ? `阅读提交失败：${submitFailure.message}`
-      : '阅读提交失败，请稍后重试'
-    if (!reviewMode.value) {
-      startPracticeTimer()
-    }
-  } finally {
-    submitting.value = false
-  }
-}
+const modeFlow = useReadingModeFlow({
+  router,
+  routeQuerySource: () => route.query,
+  assetSource: () => asset.value,
+  submission,
+  suiteSession,
+  submitting,
+  submitError,
+  snapshotMessage,
+  endlessCountdown,
+  endlessNextAssetId,
+  activeMemorizeAttemptId,
+  activeSuiteSessionId,
+  activeEndlessSessionId,
+  isEndlessMode,
+  isMemorizeMode,
+  reviewMode,
+  canSubmit,
+  canRecycleSubmittedAttempt,
+  readingCoachEnabled,
+  suiteAutoAdvance,
+  suiteSequence,
+  currentSuitePassageIndex,
+  returnRoute,
+  getAttemptId: () => tauriAttemptId,
+  setAttemptId: (id) => { tauriAttemptId = id },
+  newAttemptId: () => readingAttempt.newAttemptId(),
+  submitSingleAttempt: (input) => readingAttempt.submit(input),
+  snapshotAnswerMap,
+  markedQuestions,
+  interactionCount,
+  snapshotHighlights,
+  highlightSnapshot,
+  buildQuestionTimelineLite,
+  buildPersistedQuestionTimeline,
+  getPracticeTimerSnapshot,
+  resolvePracticeTiming,
+  getCurrentScrollY,
+  flushActiveQuestionVisit,
+  stopPracticeTimer,
+  startPracticeTimer,
+  setPracticeTimerElapsedSeconds,
+  assignAnswer,
+  syncDomAnswers,
+  setReadOnlyDomControls,
+  restoreHighlightsFromRecords,
+  setReadingCoachOpen,
+  runAutomaticReviewCoach,
+  resetAnswers,
+  recycleSubmittedAttempt
+})
 
-function snapshotSubmission() {
-  // Submission truth lives in SQLite via reading session APIs; no Web Storage mirror.
-}
-
-function clearSubmissionSnapshot() {
-  // No-op: sessionStorage submission cache removed.
-}
-
-function clearEndlessTimer() {
-  if (endlessTimer) {
-    window.clearInterval(endlessTimer)
-    endlessTimer = null
-  }
-  endlessCountdown.value = 0
-}
-
-async function scheduleEndlessNext(preferredNextId = null) {
-  if (!isEndlessMode.value || activeSuiteSessionId.value) {
-    return
-  }
-  try {
-    let nextId = String(preferredNextId || '').trim()
-    if (!nextId && activeEndlessSessionId.value && isTauriRuntime()) {
-      try {
-        const { session } = await tauriGetEndless(activeEndlessSessionId.value)
-        nextId = String(session?.currentAssetId || '').trim()
-      } catch (err) {
-        console.warn('load endless session failed', err)
-      }
-    }
-    if (!nextId) {
-      await stopEndlessMode()
-      submitError.value = '无尽模式：题库已刷完或为空，已退出。'
-      return
-    }
-    endlessNextAssetId.value = nextId
-    clearEndlessTimer()
-    endlessCountdown.value = ENDLESS_COUNTDOWN_SEC
-    endlessTimer = window.setInterval(() => {
-      endlessCountdown.value -= 1
-      if (endlessCountdown.value <= 0) {
-        goToNextEndlessAsset()
-      }
-    }, 1000)
-  } catch (error) {
-    console.error('无尽模式续题失败:', error)
-    submitError.value = error?.message ? `无尽模式续题失败：${error.message}` : '无尽模式续题失败，请返回总览重试'
-  }
-}
-
-function findNextSuitePassage() {
-  const sequence = Array.isArray(suiteSession.value?.sequence) ? suiteSession.value.sequence : []
-  return sequence.find((entry) => entry?.status === 'active' && String(entry.assetId || '').trim() !== String(asset.value?.id || '').trim()) || null
-}
-
-function findSuiteReviewNavigationTarget(direction) {
-  const currentIndex = currentSuitePassageIndex.value
-  const offset = direction === 'prev' ? -1 : 1
-  const targetIndex = currentIndex + offset
-  const entry = suiteSequence.value[targetIndex]
-  const assetId = String(entry?.assetId || entry?.examId || '').trim()
-  const sessionId = String(entry?.sessionId || entry?.attemptId || entry?.attempt_id || '').trim()
-  if (currentIndex < 0 || !assetId) {
-    return null
-  }
-  if (entry.status === 'submitted' && sessionId) {
-    return {
-      name: 'PracticeReadingReview',
-      params: {
-        assetId,
-        sessionId
-      },
-      query: {
-        suiteSessionId: activeSuiteSessionId.value
-      }
-    }
-  }
-  if (entry.status === 'active') {
-    return {
-      name: 'PracticeReading',
-      params: { assetId },
-      query: {
-        suiteSessionId: activeSuiteSessionId.value
-      }
-    }
-  }
-  return null
-}
-
-function navigateSuiteReview(direction) {
-  const target = findSuiteReviewNavigationTarget(direction)
-  if (target) {
-    router.push(target)
-  }
-}
-
-function maybeAdvanceSuitePassage() {
-  if (!activeSuiteSessionId.value || !suiteAutoAdvance.value) {
-    return
-  }
-  const nextPassage = findNextSuitePassage()
-  if (!nextPassage?.assetId) {
-    return
-  }
-  router.push({
-    name: 'PracticeReading',
-    params: { assetId: nextPassage.assetId },
-    query: { suiteSessionId: activeSuiteSessionId.value }
-  })
-}
-
-function goToNextEndlessAsset() {
-  const nextAssetId = String(endlessNextAssetId.value || '').trim()
-  if (!nextAssetId) return
-  clearEndlessTimer()
-  const endlessSessionId = activeEndlessSessionId.value
-  router.push({
-    name: 'PracticeReading',
-    params: { assetId: nextAssetId },
-    query: endlessSessionId
-      ? { mode: 'endless', endlessSessionId }
-      : { mode: 'endless' }
-  })
-}
-
-async function stopEndlessMode() {
-  clearEndlessTimer()
-  endlessNextAssetId.value = ''
-  const sessionId = activeEndlessSessionId.value
-  if (sessionId && isTauriRuntime()) {
-    try {
-      await tauriCancelEndless(sessionId)
-    } catch (error) {
-      console.warn('cancel endless session failed', error)
-    }
-  }
-  router.push({
-    name: 'PracticeLibrary'
-  })
-}
+function submitAnswers() { return modeFlow.submitAnswers() }
+function snapshotSubmission() { return modeFlow.snapshotSubmission() }
+function clearSubmissionSnapshot() { return modeFlow.clearSubmissionSnapshot() }
+function clearEndlessTimer() { return modeFlow.clearEndlessTimer() }
+function findSuiteReviewNavigationTarget(direction) { return modeFlow.findSuiteReviewNavigationTarget(direction) }
+function navigateSuiteReview(direction) { return modeFlow.navigateSuiteReview(direction) }
+function goToNextEndlessAsset() { return modeFlow.goToNextEndlessAsset() }
+function stopEndlessMode() { return modeFlow.stopEndlessMode() }
+function handleResetButton() { return modeFlow.handleResetButton() }
+function handlePrimaryButton() { return modeFlow.handlePrimaryButton() }
+function ensureMemorizeSession() { return modeFlow.ensureMemorizeSession() }
+function finishActiveMemorizeSession() { return modeFlow.finishActiveMemorizeSession() }
 
 function startDividerDrag(event) {
   if (!event || (Number.isFinite(Number(event.button)) && event.button > 0)) {
@@ -2448,7 +1601,7 @@ function stopDividerDrag(event) {
     return
   }
   dividerDragging.value = false
-  const divider = document.getElementById('divider')
+  const divider = document.getElementById('reading-divider')
   try {
     if (divider && dividerPointerId != null) {
       divider.releasePointerCapture?.(dividerPointerId)
@@ -2480,61 +1633,6 @@ function handleDividerKeydown(event) {
   } else if (event.key === 'End') {
     event.preventDefault()
     leftPanePercent.value = 60
-  }
-}
-
-async function handleResetButton() {
-  if (isMemorizeMode.value) {
-    await finishActiveMemorizeSession()
-    router.push({
-      name: 'PracticeReading',
-      params: { assetId: asset.value?.id || props.assetId },
-      query: activeSuiteSessionId.value ? { suiteSessionId: activeSuiteSessionId.value } : {}
-    })
-    return
-  }
-  if (canRecycleSubmittedAttempt.value) {
-    recycleSubmittedAttempt()
-    return
-  }
-  resetAnswers()
-  restoreHighlightsFromRecords(highlightSnapshot.value)
-}
-
-async function handlePrimaryButton() {
-  if (isMemorizeMode.value) {
-    await finishActiveMemorizeSession()
-    router.push(returnRoute.value)
-    return
-  }
-  submitAnswers()
-}
-
-async function ensureMemorizeSession() {
-  if (!isMemorizeMode.value || activeMemorizeAttemptId.value || !asset.value?.id || !isTauriRuntime()) return
-  const { session } = await tauriCreateMemorize({
-    assetId: String(asset.value.id),
-    titleSnapshot: asset.value.title || null
-  })
-  const attemptId = String(session?.attempt?.id || '').trim()
-  if (!attemptId) throw new Error('memorize session missing attempt id')
-  activeMemorizeAttemptId.value = attemptId
-  await router.replace({
-    name: 'PracticeReading',
-    params: { assetId: asset.value.id },
-    query: { ...route.query, mode: 'memorize', practiceMode: 'memorize', memorizeAttemptId: attemptId }
-  })
-}
-
-async function finishActiveMemorizeSession() {
-  const attemptId = activeMemorizeAttemptId.value
-  if (!attemptId || memorizeFinishRequested || !isTauriRuntime()) return
-  memorizeFinishRequested = true
-  try {
-    await tauriFinishMemorize(attemptId)
-  } catch (error) {
-    memorizeFinishRequested = false
-    console.warn('finish memorize session failed', error)
   }
 }
 
@@ -4131,7 +3229,7 @@ function getQuestionKindLabel(kind) {
   min-width: 0;
 }
 
-#divider {
+#reading-divider {
   border-right: 1px solid var(--reading-line);
   border-left: 1px solid var(--reading-line);
   background: linear-gradient(180deg, #e2e8f0 0%, #cbd5e1 100%);
@@ -4142,7 +3240,7 @@ function getQuestionKindLabel(kind) {
   user-select: none;
 }
 
-#divider::before {
+#reading-divider::before {
   content: "";
   position: absolute;
   top: 50%;
@@ -4155,9 +3253,9 @@ function getQuestionKindLabel(kind) {
   transform: translate(-50%, -50%);
 }
 
-#divider:hover,
-#divider:focus-visible,
-#divider.is-dragging {
+#reading-divider:hover,
+#reading-divider:focus-visible,
+#reading-divider.is-dragging {
   border-color: #60a5fa;
   background: linear-gradient(180deg, #dbeafe 0%, #93c5fd 100%);
 }
@@ -4168,19 +3266,19 @@ function getQuestionKindLabel(kind) {
   padding: 12px 14px;
 }
 
-.reading-page.dark-mode #divider {
+.reading-page.dark-mode #reading-divider {
   border-color: var(--reading-line);
   background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
 }
 
-.reading-page.dark-mode #divider::before {
+.reading-page.dark-mode #reading-divider::before {
   background: rgba(203, 213, 225, 0.62);
   box-shadow: -3px 0 0 rgba(203, 213, 225, 0.32), 3px 0 0 rgba(203, 213, 225, 0.32);
 }
 
-.reading-page.dark-mode #divider:hover,
-.reading-page.dark-mode #divider:focus-visible,
-.reading-page.dark-mode #divider.is-dragging {
+.reading-page.dark-mode #reading-divider:hover,
+.reading-page.dark-mode #reading-divider:focus-visible,
+.reading-page.dark-mode #reading-divider.is-dragging {
   border-color: #60a5fa;
   background: linear-gradient(180deg, #1e3a8a 0%, #1d4ed8 100%);
 }
@@ -5305,7 +4403,7 @@ function getQuestionKindLabel(kind) {
     flex: none;
   }
 
-  #divider {
+  #reading-divider {
     display: none;
   }
 

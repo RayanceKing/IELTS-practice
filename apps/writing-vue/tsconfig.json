@@ -27,7 +27,6 @@
     "src/modules/practice-reading/useReadingAsset.ts",
     "src/modules/practice-reading/useReadingAttempt.ts",
     "src/modules/practice-reading/useReadingCoach.ts",
-    "src/modules/practice-reading/useReadingEndlessState.ts",
     "src/modules/practice-reading/useReadingHighlights.ts",
     "src/modules/practice-reading/useReadingHistory.ts",
     "src/modules/practice-reading/useReadingInteractions.ts",

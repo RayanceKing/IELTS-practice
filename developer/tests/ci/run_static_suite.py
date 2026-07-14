@@ -104,6 +104,14 @@ def main() -> int:
             "Reading drag keyboard behavior",
             ["node", "developer/tests/js/readingDragSelection.test.mjs"],
         ),
+        run_command(
+            "Reading highlight core",
+            ["node", "developer/tests/js/readingHighlightCore.test.mjs"],
+        ),
+        run_command(
+            "Reading mode flow core",
+            ["node", "developer/tests/js/readingModeFlowCore.test.mjs"],
+        ),
         run_command("Vue production build", ["npm.cmd", "--prefix", "apps/writing-vue", "run", "build"]),
         run_command("Rust workspace check", ["cargo", "check", "--workspace", "--locked"]),
         run_command(
