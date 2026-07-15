@@ -470,7 +470,7 @@ async def run_flow() -> dict:
         await install_api_stub(page)
 
         await page.goto(entry_url)
-        await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Practice")', timeout=20000)
+        await page.wait_for_selector('[data-practice-reading-home][data-library-ready]', timeout=20000)
         await accept_license_modal(page)
         await page.locator('[data-start-reading-suite]').click()
         await page.wait_for_selector('#suite-mode-selector-modal.show', timeout=10000)

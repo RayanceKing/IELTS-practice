@@ -1,6 +1,8 @@
 use ielts_db::{
-    delete_secret_ref, get_setting, list_secret_refs, migrate::open_and_migrate, put_secret_ref,
-    set_default_ai_config, upsert_ai_config, upsert_setting, NS_AI,
+    delete_secret_ref, get_setting, list_ai_configs, list_ai_configs_with_secret_availability,
+    list_secret_refs, migrate::open_and_migrate, put_secret_ref, reconcile_default_ai_config,
+    reconcile_default_ai_config_with_secret_availability, set_default_ai_config, upsert_ai_config,
+    upsert_setting, NS_AI,
 };
 use ielts_domain::dto::AiConfigDto;
 use serde_json::json;
@@ -47,8 +49,8 @@ fn active_runtime_config_is_complete_and_contains_only_a_secret_name() {
         has_secret: true,
     };
     upsert_ai_config(&conn, &config).unwrap();
-    set_default_ai_config(&conn, Some(&config)).unwrap();
     put_secret_ref(&conn, "ai.config.legacy-openai", "keyring:legacy-openai").unwrap();
+    set_default_ai_config(&conn, Some(&config)).unwrap();
 
     for key in [
         "provider",
@@ -70,7 +72,7 @@ fn active_runtime_config_is_complete_and_contains_only_a_secret_name() {
         )
         .unwrap();
     assert!(!dump.contains("sk-"));
-    assert!(dump.contains("legacy-openai.api_key"));
+    assert!(dump.contains("ai.config.legacy-openai"));
 }
 
 #[test]
@@ -85,4 +87,133 @@ fn deleting_secret_reference_removes_only_the_reference_record() {
     let refs = list_secret_refs(&conn).unwrap();
     assert_eq!(refs.len(), 1);
     assert_eq!(refs[0].name, "second.api_key");
+}
+
+#[test]
+fn default_config_cannot_trust_a_forged_has_secret_flag_without_a_reference() {
+    let dir = tempdir().unwrap();
+    let conn = open_and_migrate(&dir.path().join("v2.db")).unwrap();
+    let config = AiConfigDto {
+        id: "forged".into(),
+        config_name: "Forged metadata".into(),
+        provider: "openai".into(),
+        base_url: "https://api.openai.com/v1".into(),
+        default_model: "gpt-4o-mini".into(),
+        is_default: false,
+        is_enabled: true,
+        has_secret: true,
+    };
+    upsert_ai_config(&conn, &config).unwrap();
+
+    assert!(set_default_ai_config(&conn, Some(&config)).is_err());
+    assert!(get_setting(&conn, NS_AI, "defaultConfigId")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn default_config_is_always_enabled_and_backed_by_a_secret_reference() {
+    let dir = tempdir().unwrap();
+    let conn = open_and_migrate(&dir.path().join("v2.db")).unwrap();
+    let primary = AiConfigDto {
+        id: "primary".into(),
+        config_name: "Primary".into(),
+        provider: "openai".into(),
+        base_url: "https://api.openai.com/v1".into(),
+        default_model: "gpt-4o-mini".into(),
+        is_default: false,
+        is_enabled: true,
+        has_secret: false,
+    };
+    upsert_ai_config(&conn, &primary).unwrap();
+    put_secret_ref(&conn, "ai.config.primary.api_key", "keyring:primary").unwrap();
+    let primary = list_ai_configs(&conn).unwrap().pop().unwrap();
+    set_default_ai_config(&conn, Some(&primary)).unwrap();
+
+    let mut disabled = primary.clone();
+    disabled.is_enabled = false;
+    upsert_ai_config(&conn, &disabled).unwrap();
+    assert!(reconcile_default_ai_config(&conn).unwrap().is_none());
+    assert!(get_setting(&conn, NS_AI, "defaultConfigId")
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        get_setting(&conn, NS_AI, "provider")
+            .unwrap()
+            .unwrap()
+            .value,
+        json!("unconfigured")
+    );
+
+    let secondary = AiConfigDto {
+        id: "secondary".into(),
+        config_name: "Secondary".into(),
+        provider: "openai".into(),
+        base_url: "https://api.openai.com/v1".into(),
+        default_model: "gpt-4o-mini".into(),
+        is_default: false,
+        is_enabled: true,
+        has_secret: false,
+    };
+    upsert_ai_config(&conn, &secondary).unwrap();
+    assert!(reconcile_default_ai_config(&conn).unwrap().is_none());
+
+    put_secret_ref(&conn, "ai.config.secondary.api_key", "keyring:secondary").unwrap();
+    let selected = reconcile_default_ai_config(&conn).unwrap().unwrap();
+    assert_eq!(selected.id, "secondary");
+    assert!(selected.is_default);
+
+    let mut invalid = selected.clone();
+    invalid.has_secret = false;
+    assert!(set_default_ai_config(&conn, Some(&invalid)).is_err());
+}
+
+#[test]
+fn reference_without_a_local_vault_secret_is_not_available_or_default() {
+    let dir = tempdir().unwrap();
+    let conn = open_and_migrate(&dir.path().join("v2.db")).unwrap();
+    let config = AiConfigDto {
+        id: "restored".into(),
+        config_name: "Restored OpenAI".into(),
+        provider: "openai".into(),
+        base_url: "https://api.openai.com/v1".into(),
+        default_model: "gpt-4o-mini".into(),
+        is_default: false,
+        is_enabled: true,
+        has_secret: false,
+    };
+    upsert_ai_config(&conn, &config).unwrap();
+    put_secret_ref(&conn, "ai.config.restored.api_key", "keyring:source-device").unwrap();
+    let stored = list_ai_configs(&conn).unwrap().pop().unwrap();
+    set_default_ai_config(&conn, Some(&stored)).unwrap();
+
+    let visible = list_ai_configs_with_secret_availability(&conn, |_| false).unwrap();
+    assert_eq!(visible.len(), 1);
+    assert!(
+        !visible[0].has_secret,
+        "a reference is not a local credential"
+    );
+    assert!(
+        visible[0].is_default,
+        "the raw backup metadata still records its former default"
+    );
+
+    assert!(
+        reconcile_default_ai_config_with_secret_availability(&conn, |_| false)
+            .unwrap()
+            .is_none()
+    );
+    let reconciled = list_ai_configs_with_secret_availability(&conn, |_| false).unwrap();
+    assert!(!reconciled[0].has_secret);
+    assert!(!reconciled[0].is_default);
+    assert!(get_setting(&conn, NS_AI, "defaultConfigId")
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        get_setting(&conn, NS_AI, "provider")
+            .unwrap()
+            .unwrap()
+            .value,
+        json!("unconfigured")
+    );
 }

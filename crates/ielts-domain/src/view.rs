@@ -3,7 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{Activity, AttemptMode, AttemptStatus, EvaluationStatus, ScoreScale};
+use crate::domain::{
+    Activity, AttemptMode, AttemptStatus, EvaluationStatus, ScoreScale, WritingTaskType,
+};
 use crate::dto::{AttemptRecord, WritingEvaluationV4, WritingScoreV4};
 
 #[cfg(feature = "ts-export")]
@@ -39,6 +41,10 @@ pub struct HistoryListItemVm {
     /// Suite session id when this attempt is part of a reading suite.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suite_id: Option<String>,
+    /// Persisted writing classification. `None` means a legacy writing record
+    /// cannot be classified safely; clients must display it as unlabelled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<WritingTaskType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,6 +99,7 @@ pub fn history_item_from_attempt(attempt: &AttemptRecord) -> HistoryListItemVm {
         asset_id: attempt.asset_id.clone(),
         session_id: Some(attempt.id.clone()),
         suite_id: attempt.suite_id.clone(),
+        task_type: attempt.task_type,
     }
 }
 

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
+use crate::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale, WritingTaskType};
 
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
@@ -42,6 +42,11 @@ pub struct AttemptRecord {
     pub prompt_snapshot: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_text: Option<String>,
+    /// Canonical writing task classification. Reading attempts never set this;
+    /// legacy writing attempts can remain unlabelled when the source did not
+    /// preserve a trustworthy task type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<WritingTaskType>,
     #[serde(default)]
     pub answers: Vec<AttemptAnswer>,
     #[serde(default)]

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -29,7 +30,10 @@ pub struct AssetIndexEntry {
     pub payload_ref: Option<String>,
     /// Always present so list filters (`activity === 'reading'`) work.
     pub activity: String,
+    pub pdf_only: bool,
 }
+
+const MAX_PDF_BYTES: usize = 20 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -198,7 +202,7 @@ pub fn list_assets(
     activity: Option<Activity>,
 ) -> DbResult<Vec<AssetIndexEntry>> {
     let mut sql = String::from(
-        "SELECT id, title, category, difficulty, frequency, fingerprint, schema_version, content_ref
+        "SELECT id, title, category, difficulty, frequency, fingerprint, schema_version, content_ref, pdf_only
          FROM practice_assets",
     );
     if activity.is_some() {
@@ -219,6 +223,7 @@ pub fn list_assets(
             content_ref: content_ref.clone(),
             payload_ref: content_ref,
             activity: "reading".into(),
+            pdf_only: row.get::<_, i64>(8)? != 0,
         })
     };
     let rows = if let Some(act) = activity {
@@ -235,6 +240,41 @@ pub fn list_assets(
         out.push(r?);
     }
     Ok(out)
+}
+
+/// Return a verified PDF-only resource as a data URL for the packaged Tauri
+/// webview. Vue receives no filesystem path and cannot ask for arbitrary files.
+pub fn load_pdf_data_url(conn: &Connection, asset_id: &str) -> DbResult<String> {
+    let (activity, pdf_only, content_ref): (String, i64, Option<String>) = conn
+        .query_row(
+            "SELECT activity, pdf_only, content_ref FROM practice_assets WHERE id = ?1",
+            params![asset_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => {
+                DbError::Validation(format!("reading asset not found: {asset_id}"))
+            }
+            other => DbError::Sqlite(other),
+        })?;
+    if activity != "reading" || pdf_only == 0 {
+        return Err(DbError::Validation(format!(
+            "asset is not a PDF-only reading resource: {asset_id}"
+        )));
+    }
+    let path = content_ref.ok_or_else(|| {
+        DbError::Validation(format!("PDF reading asset has no content_ref: {asset_id}"))
+    })?;
+    let bytes = fs::read(path)?;
+    if bytes.is_empty() || bytes.len() > MAX_PDF_BYTES || !bytes.starts_with(b"%PDF-") {
+        return Err(DbError::Validation(format!(
+            "PDF reading asset is invalid or exceeds {MAX_PDF_BYTES} bytes: {asset_id}"
+        )));
+    }
+    Ok(format!(
+        "data:application/pdf;base64,{}",
+        STANDARD.encode(bytes)
+    ))
 }
 
 /// Load the complete JSON payload for one reading asset.

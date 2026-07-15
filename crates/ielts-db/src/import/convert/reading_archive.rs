@@ -84,6 +84,7 @@ pub fn reading_submission_to_attempt(raw: &Value) -> DomainResult<AttemptRecord>
         title_snapshot: Some(title),
         prompt_snapshot: None,
         content_text: None,
+        task_type: None,
         answers,
         annotations,
     })

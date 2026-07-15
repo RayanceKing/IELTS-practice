@@ -53,7 +53,7 @@ interface AssignAnswerOptions {
 
 interface ReadingInteractionsOptions {
   payloadSource?: MaybeRefOrGetter<ReadingInteractionPayload | null | undefined>
-  reviewModeSource?: MaybeRefOrGetter<boolean | undefined>
+  readOnlyModeSource?: MaybeRefOrGetter<boolean | undefined>
   getAnswerValue: (questionId: string) => string
   getRawAnswer: (questionId: string) => ReadingAnswerValue
   assignAnswer: (questionId: string, value: ReadingAnswerValue, options?: AssignAnswerOptions) => void
@@ -72,7 +72,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
   const selectedDragOption = ref<DragPayload | null>(null)
   const dragInteractionStatus = ref('')
   const selectionController = createDragSelectionController({
-    isReview: () => reviewMode(),
+    isReadOnly: () => readOnlyMode(),
     onStatus: (message: string) => { dragInteractionStatus.value = message },
     onChange: (payload: DragPayload | null) => {
       selectedDragOption.value = payload
@@ -84,8 +84,8 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
     return resolveSource(options.payloadSource) || null
   }
 
-  function reviewMode() {
-    return Boolean(resolveSource(options.reviewModeSource))
+  function readOnlyMode() {
+    return Boolean(resolveSource(options.readOnlyModeSource))
   }
 
   function getInteraction(questionId: string): ReadingInteraction | null {
@@ -160,7 +160,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
   }
 
   function setDragDropAnswer(questionId: string, value: unknown, assignOptions: AssignAnswerOptions = {}) {
-    if (reviewMode()) {
+    if (readOnlyMode()) {
       return
     }
     const normalizedValue = String(value || '').trim()
@@ -185,7 +185,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
   }
 
   function clearDragDropAnswer(questionId: string) {
-    if (reviewMode()) {
+    if (readOnlyMode()) {
       return
     }
     options.assignAnswer(questionId, '', { syncNative: true, track: true })
@@ -194,7 +194,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
   }
 
   function dropOnAnswerSlot(questionId: string, event: DragEvent) {
-    if (reviewMode()) {
+    if (readOnlyMode()) {
       return
     }
     const dragPayload = getDragPayloadFromEvent(event)
@@ -208,6 +208,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
   }
 
   function handleWorkspaceClick(event: MouseEvent) {
+    if (readOnlyMode()) return
     const target = event.target as Element | null
     const clearTarget = target?.closest?.('[data-dropzone-clear]') as HTMLElement | null
     if (clearTarget) {
@@ -215,7 +216,6 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
       if (questionId) clearDragDropAnswer(questionId)
       return
     }
-    if (reviewMode()) return
     const dropzone = getNativeDropzoneElement(target)
     if (dropzone) {
       placeSelectedDragOption(resolveDropzoneQuestionId(dropzone))
@@ -227,6 +227,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
   }
 
   function handleWorkspaceKeydown(event: KeyboardEvent) {
+    if (readOnlyMode()) return
     const target = event.target as HTMLElement | null
     if (!target) return
     if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName)) return
@@ -261,7 +262,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
   }
 
   function handleDragStart(event: DragEvent) {
-    if (reviewMode()) {
+    if (readOnlyMode()) {
       event.preventDefault()
       return
     }
@@ -288,7 +289,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
   }
 
   function handleDragOver(event: DragEvent) {
-    if (reviewMode()) {
+    if (readOnlyMode()) {
       return
     }
     const dropzone = getNativeDropzoneElement(event.target)
@@ -313,7 +314,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
   }
 
   function handleDrop(event: DragEvent) {
-    if (reviewMode()) {
+    if (readOnlyMode()) {
       return
     }
     const dragPayload = getDragPayloadFromEvent(event)
@@ -559,6 +560,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
   function syncDragSelectionDomState() {
     if (typeof document === 'undefined') return
     const selected = selectionController.getSelected()
+    const readOnly = readOnlyMode()
     document.querySelectorAll(
       '[data-drag-value], [data-answer-value], .drag-item, .draggable-word, .card'
     ).forEach((node) => {
@@ -571,11 +573,13 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
         && selected.sourceQuestionId === payload.sourceQuestionId
       )
       if (!['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(element.tagName)) {
-        element.tabIndex = reviewMode() ? -1 : 0
+        element.tabIndex = readOnly ? -1 : 0
         element.setAttribute('role', 'button')
+      } else if ('disabled' in element) {
+        ;(element as HTMLButtonElement).disabled = readOnly
       }
       element.setAttribute('aria-pressed', active ? 'true' : 'false')
-      element.setAttribute('aria-disabled', reviewMode() ? 'true' : 'false')
+      element.setAttribute('aria-disabled', readOnly ? 'true' : 'false')
       element.classList.toggle('drag-option-selected', active)
     })
     document.querySelectorAll(
@@ -584,9 +588,9 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
       const dropzone = node as HTMLElement
       const questionId = resolveDropzoneQuestionId(dropzone)
       if (!questionId || !isDragDropControl(questionId)) return
-      dropzone.tabIndex = reviewMode() ? -1 : 0
+      dropzone.tabIndex = readOnly ? -1 : 0
       dropzone.setAttribute('role', 'button')
-      dropzone.setAttribute('aria-disabled', reviewMode() ? 'true' : 'false')
+      dropzone.setAttribute('aria-disabled', readOnly ? 'true' : 'false')
       dropzone.setAttribute(
         'aria-label',
         `第 ${getDisplayLabel(questionId)} 题目标，当前${getSelectedOptionLabel(questionId)}`
@@ -602,6 +606,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
     const value = String(Array.isArray(explicitValue) ? explicitValue[0] || '' : explicitValue || '').trim()
     const option = getOptions(questionId).find((entry) => String(entry.value || '').trim() === value)
     const label = option?.label || value
+    const readOnly = readOnlyMode()
     dropzones.forEach((dropzone) => {
       dropzone.dataset.answerValue = value
       dropzone.dataset.answerLabel = label
@@ -609,8 +614,8 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
       dropzone.setAttribute('data-vue-dropzone', 'true')
       dropzone.classList.toggle('dropzone-filled', Boolean(value))
       dropzone.classList.toggle('dropzone-empty', !value)
-      dropzone.setAttribute('aria-disabled', reviewMode() ? 'true' : 'false')
-      dropzone.tabIndex = reviewMode() ? -1 : 0
+      dropzone.setAttribute('aria-disabled', readOnly ? 'true' : 'false')
+      dropzone.tabIndex = readOnly ? -1 : 0
       dropzone.setAttribute('role', 'button')
       dropzone.setAttribute('aria-label', `第 ${getDisplayLabel(questionId)} 题目标，当前${label || '未作答'}`)
       clearDropzoneInlineStyle(dropzone)
@@ -632,8 +637,8 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
       chip.dataset.answerLabel = label
       chip.dataset.sourceQuestionId = questionId
       chip.dataset.dropzoneClear = 'true'
-      chip.draggable = !reviewMode()
-      chip.disabled = reviewMode()
+      chip.draggable = !readOnly
+      chip.disabled = readOnly
       holder.appendChild(chip)
     })
   }
@@ -642,8 +647,14 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
     if (typeof document === 'undefined') {
       return
     }
+    if (readOnly) {
+      selectionController.clear()
+    }
     document.querySelectorAll('.question-panel input, .question-panel textarea, .question-panel select').forEach((control) => {
-      ;(control as HTMLInputElement).disabled = Boolean(readOnly)
+      const element = control as HTMLInputElement
+      element.disabled = Boolean(readOnly)
+      element.tabIndex = readOnly ? -1 : 0
+      element.setAttribute('aria-disabled', readOnly ? 'true' : 'false')
     })
     payload()?.questionOrder?.forEach((questionId) => {
       if (isDragDropControl(questionId)) {

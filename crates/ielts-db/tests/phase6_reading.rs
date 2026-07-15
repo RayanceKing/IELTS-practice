@@ -4,8 +4,8 @@ use serde_json::json;
 use tempfile::tempdir;
 
 use ielts_db::{
-    compare_answer, import_asset_payload_file, load_practice_asset_payload, migrate,
-    open_connection, patch_reading_answer, save_reading_draft, score_attempt,
+    compare_answer, import_asset_payload_file, load_pdf_data_url, load_practice_asset_payload,
+    migrate, open_connection, patch_reading_answer, save_reading_draft, score_attempt,
     submit_reading_attempt, DbOpenOptions, MatchMode, ReadingDraftCommand, ReadingQuestionProgress,
     ReadingSubmitCommand,
 };
@@ -39,6 +39,28 @@ fn complete_asset_payload_rejects_missing_index_entry() {
     let (_dir, conn) = open_db();
     let err = load_practice_asset_payload(&conn, "missing").unwrap_err();
     assert!(err.to_string().contains("asset not found"));
+}
+
+#[test]
+fn pdf_only_asset_is_served_through_a_native_data_url() {
+    let (dir, conn) = open_db();
+    let pdf = dir.path().join("p1.pdf");
+    std::fs::write(&pdf, b"%PDF-1.4\nminimal fixture").unwrap();
+    conn.execute(
+        "INSERT INTO practice_assets (
+            id, activity, source_kind, source_key, title, category, difficulty, frequency,
+            content_ref, schema_version, fingerprint, pdf_only, metadata_json, created_at, updated_at
+         ) VALUES (
+            'pdf-p1', 'reading', 'imported', 'pdf-p1', 'PDF P1', 'P1', NULL, NULL,
+            ?1, 1, 'pdf-fixture', 1, NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+         )",
+        [pdf.display().to_string()],
+    )
+    .unwrap();
+
+    let data_url = load_pdf_data_url(&conn, "pdf-p1").unwrap();
+    assert!(data_url.starts_with("data:application/pdf;base64,"));
+    assert!(load_pdf_data_url(&conn, "missing").is_err());
 }
 
 fn sample_payload() -> serde_json::Value {

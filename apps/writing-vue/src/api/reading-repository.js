@@ -29,6 +29,17 @@ export async function getReadingAssetPayload(assetId) {
   )
 }
 
+export async function getReadingPdfDataUrl(assetId) {
+  const normalizedAssetId = String(assetId || '').trim()
+  if (!normalizedAssetId) {
+    throw new Error('reading_get_pdf_data_url: assetId is required')
+  }
+  const response = await invokeCommand('reading_get_pdf_data_url', {
+    assetId: normalizedAssetId
+  })
+  return unwrapCommandResponse(response, 'reading_get_pdf_data_url')
+}
+
 /**
  * Normalize the canonical `{ asset, payload }` DTO. One nested envelope is
  * accepted for old in-memory/cache entries created by the former adapter.
@@ -105,6 +116,7 @@ export async function submitReadingAttempt(payload) {
 export const readingRepository = {
   listReadingAssets,
   getReadingAssetPayload,
+  getReadingPdfDataUrl,
   normalizeReadingAssetEnvelope,
   saveReadingDraft,
   getOpenReadingDraft,

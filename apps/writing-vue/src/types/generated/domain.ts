@@ -167,6 +167,7 @@ export interface AttemptRecord {
   titleSnapshot?: string;
   promptSnapshot?: string;
   contentText?: string;
+  taskType?: WritingTaskType;
   answers: AttemptAnswer[];
   annotations: AttemptAnnotationDto[];
 }
@@ -192,6 +193,7 @@ export interface HistoryListItemVm {
   assetId?: string | null;
   sessionId?: string | null;
   suiteId?: string | null;
+  taskType?: WritingTaskType | null;
 }
 
 export interface WritingResultVm {
@@ -247,6 +249,8 @@ export interface ListHistoryQuery {
   endDate?: string | null
   minScore?: number | null
   maxScore?: number | null
+  scoreScale?: ScoreScale | null
+  taskType?: WritingTaskType | null
 }
 
 export interface HistoryListItemVm {
@@ -264,6 +268,7 @@ export interface HistoryListItemVm {
   assetId?: string | null
   sessionId?: string | null
   suiteId?: string | null
+  taskType?: WritingTaskType | null
 }
 
 export interface ListHistoryPage {
@@ -337,6 +342,7 @@ export interface SaveDraftCommand {
   assetId?: string | null
   contentText?: string | null
   promptSnapshot?: string | null
+  taskType?: WritingTaskType | null
   idempotencyKey: string
 }
 

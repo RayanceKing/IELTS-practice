@@ -480,13 +480,18 @@ export function adaptWritingHistoryDetail(detail) {
     topic_text: topicText
   })
 
-  const taskType = normalizeTaskType(
-    evaluationPayload.taskType
-    || evaluationPayload.task_type
-    || attempt.taskType
+  const normalizedTaskType = normalizeTaskType(
+    attempt.taskType
     || attempt.task_type
+    || summary.taskType
+    || summary.task_type
+    || evaluationPayload.taskType
+    || evaluationPayload.task_type
     || detail.task_type
-  ) || 'task2'
+  )
+  const taskType = normalizedTaskType === 'task1' || normalizedTaskType === 'task2'
+    ? normalizedTaskType
+    : null
 
   const wordCount = coerceInteger(
     attempt.wordCount

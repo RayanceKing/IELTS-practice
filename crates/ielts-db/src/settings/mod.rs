@@ -117,7 +117,35 @@ pub fn delete_setting(conn: &Connection, namespace: &str, key: &str) -> DbResult
     Ok(n > 0)
 }
 
+/// List configurations whose `has_secret` bit means that an opaque secret
+/// reference exists in SQLite. This is deliberately metadata-only: callers
+/// that expose a configuration to the user or use it for a request must use
+/// `list_ai_configs_with_secret_availability` with a local vault check.
 pub fn list_ai_configs(conn: &Connection) -> DbResult<Vec<AiConfigDto>> {
+    list_ai_configs_by_secret_availability(conn, |_| true)
+}
+
+/// List configurations whose `has_secret` bit means that the corresponding
+/// local credential is actually available. The callback is intentionally
+/// supplied by the host because the OS credential store is not SQLite state
+/// and must never be copied into a backup.
+pub fn list_ai_configs_with_secret_availability<F>(
+    conn: &Connection,
+    secret_is_available: F,
+) -> DbResult<Vec<AiConfigDto>>
+where
+    F: FnMut(&SecretRef) -> bool,
+{
+    list_ai_configs_by_secret_availability(conn, secret_is_available)
+}
+
+fn list_ai_configs_by_secret_availability<F>(
+    conn: &Connection,
+    mut secret_is_available: F,
+) -> DbResult<Vec<AiConfigDto>>
+where
+    F: FnMut(&SecretRef) -> bool,
+{
     let default_id = get_setting(conn, NS_AI, AI_DEFAULT_ID)?
         .and_then(|entry| entry.value.as_str().map(str::to_owned));
     let refs = list_secret_refs(conn)?;
@@ -129,14 +157,27 @@ pub fn list_ai_configs(conn: &Connection) -> DbResult<Vec<AiConfigDto>> {
         let mut config: AiConfigDto = serde_json::from_value(entry.value)
             .map_err(|e| DbError::Validation(format!("AI config json: {e}")))?;
         config.is_default = default_id.as_deref() == Some(config.id.as_str());
-        config.has_secret = refs.iter().any(|item| {
-            item.name == ai_secret_name(&config.id)
-                || item.name == legacy_ai_secret_name(&config.id)
-        });
+        config.has_secret =
+            ai_secret_ref_from_refs(&refs, &config.id).is_some_and(&mut secret_is_available);
         configs.push(config);
     }
     configs.sort_by(|a, b| a.config_name.cmp(&b.config_name).then(a.id.cmp(&b.id)));
     Ok(configs)
+}
+
+/// Resolve the persisted secret reference for an AI configuration. Canonical
+/// names win over the pre-migration name when both records exist.
+pub fn ai_secret_ref_for_config(conn: &Connection, id: &str) -> DbResult<Option<SecretRef>> {
+    let refs = list_secret_refs(conn)?;
+    Ok(ai_secret_ref_from_refs(&refs, id).cloned())
+}
+
+fn ai_secret_ref_from_refs<'a>(refs: &'a [SecretRef], id: &str) -> Option<&'a SecretRef> {
+    let canonical = ai_secret_name(id);
+    let legacy = legacy_ai_secret_name(id);
+    refs.iter()
+        .find(|item| item.name == canonical)
+        .or_else(|| refs.iter().find(|item| item.name == legacy))
 }
 
 pub fn upsert_ai_config(conn: &Connection, config: &AiConfigDto) -> DbResult<()> {
@@ -157,19 +198,65 @@ pub fn delete_ai_config(conn: &Connection, id: &str) -> DbResult<bool> {
     delete_setting(conn, NS_AI, &format!("{AI_CONFIG_PREFIX}{id}"))
 }
 
+/// Make the persisted default and the runtime mirror agree on one invariant:
+/// a default must be both enabled and backed by an opaque secret reference.
+/// If no such config exists, the scorer is explicitly unconfigured.
+pub fn reconcile_default_ai_config(conn: &Connection) -> DbResult<Option<AiConfigDto>> {
+    reconcile_default_ai_config_with_secret_availability(conn, |_| true)
+}
+
+/// Reconcile the persisted default against both SQLite metadata and a caller
+/// supplied local-credential check. A backup can restore a secret reference on
+/// a different machine, but that reference alone must never make a config
+/// usable or default.
+pub fn reconcile_default_ai_config_with_secret_availability<F>(
+    conn: &Connection,
+    secret_is_available: F,
+) -> DbResult<Option<AiConfigDto>>
+where
+    F: FnMut(&SecretRef) -> bool,
+{
+    let configured_default = get_setting(conn, NS_AI, AI_DEFAULT_ID)?
+        .and_then(|entry| entry.value.as_str().map(str::to_owned));
+    let configs = list_ai_configs_with_secret_availability(conn, secret_is_available)?;
+    let mut selected = configured_default
+        .as_deref()
+        .and_then(|id| configs.iter().find(|config| config.id == id))
+        .filter(|config| config.is_enabled && config.has_secret)
+        .cloned()
+        .or_else(|| {
+            configs
+                .iter()
+                .find(|config| config.is_enabled && config.has_secret)
+                .cloned()
+        });
+
+    match selected.as_mut() {
+        Some(config) => {
+            set_default_ai_config(conn, Some(config))?;
+            config.is_default = true;
+        }
+        None => set_default_ai_config(conn, None)?,
+    }
+    Ok(selected)
+}
+
 pub fn set_default_ai_config(conn: &Connection, config: Option<&AiConfigDto>) -> DbResult<()> {
     match config {
         Some(config) => {
-            let refs = list_secret_refs(conn)?;
-            let legacy_name = legacy_ai_secret_name(&config.id);
-            let canonical_name = ai_secret_name(&config.id);
-            let secret_name = if refs.iter().any(|item| item.name == legacy_name)
-                && !refs.iter().any(|item| item.name == canonical_name)
-            {
-                legacy_name
-            } else {
-                canonical_name
-            };
+            if !config.is_enabled {
+                return Err(DbError::Validation(
+                    "disabled AI config cannot be the default".into(),
+                ));
+            }
+            if !config.has_secret {
+                return Err(DbError::Validation(
+                    "AI config without an API key cannot be the default".into(),
+                ));
+            }
+            let secret_name = ai_secret_ref_for_config(conn, &config.id)?
+                .map(|reference| reference.name)
+                .ok_or_else(|| DbError::Validation("AI config has no API key reference".into()))?;
             upsert_setting(
                 conn,
                 NS_AI,
@@ -448,6 +535,7 @@ mod ai_config_tests {
         let conn = connection();
         let value = config("primary");
         upsert_ai_config(&conn, &value).unwrap();
+        put_secret_ref(&conn, "ai.config.primary.api_key", "keyring:primary").unwrap();
         set_default_ai_config(&conn, Some(&value)).unwrap();
         assert_eq!(
             get_setting(&conn, NS_AI, "provider")

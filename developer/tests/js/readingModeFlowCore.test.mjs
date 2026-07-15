@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {
   buildEndlessNextRoute,
   buildSuiteReviewNavigationTarget,
+  canSnapshotReadingAnswers,
   findNextActiveSuitePassage,
   mapTauriSubmissionToUi
 } from '../../../apps/writing-vue/src/modules/practice-reading/readingModeFlowCore.js'
@@ -76,5 +77,21 @@ assert.deepEqual(endlessRoute, {
   query: { mode: 'endless', endlessSessionId: 'endless-1' }
 })
 assert.equal(buildEndlessNextRoute(''), null)
+
+const snapshotBase = {
+  isTauriRuntime: true,
+  hasAsset: true,
+  hasPayload: true,
+  loading: false,
+  submitting: false,
+  leaving: false,
+  readOnly: false,
+  isEndlessMode: false
+}
+assert.equal(canSnapshotReadingAnswers(snapshotBase), true)
+assert.equal(canSnapshotReadingAnswers({ ...snapshotBase, readOnly: true }), false)
+assert.equal(canSnapshotReadingAnswers({ ...snapshotBase, isEndlessMode: true }), false)
+assert.equal(canSnapshotReadingAnswers({ ...snapshotBase, leaving: true }), false)
+assert.equal(canSnapshotReadingAnswers({ ...snapshotBase, isTauriRuntime: false }), false)
 
 console.log('reading mode flow core: ok')

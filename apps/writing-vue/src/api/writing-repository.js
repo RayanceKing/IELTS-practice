@@ -4,19 +4,25 @@
 
 import { Channel } from '@tauri-apps/api/core'
 import { invokeCommand, isTauriRuntime, unwrapCommandResponse } from '@/api/tauri-bridge.js'
+import { requireWritingAttemptMode } from '@/api/writing-mode.js'
 
 export function newIdempotencyKey(prefix = 'w') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 export async function saveDraft(payload) {
+  const taskType = String(payload.taskType ?? payload.task_type ?? '').trim().toLowerCase()
+  if (taskType !== 'task1' && taskType !== 'task2') {
+    throw new TypeError('writing task type must be task1 or task2')
+  }
   const cmd = {
     attemptId: payload.attemptId,
     activity: 'writing',
-    mode: payload.mode || 'bank',
+    mode: requireWritingAttemptMode(payload.mode),
     assetId: payload.assetId || null,
     contentText: payload.contentText || '',
     promptSnapshot: payload.promptSnapshot || null,
+    taskType,
     idempotencyKey: payload.idempotencyKey || newIdempotencyKey('draft')
   }
   const response = await invokeCommand('writing_save_draft', { cmd })

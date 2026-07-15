@@ -3,7 +3,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use serde_json::Value;
 
-use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
+use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale, WritingTaskType};
 use ielts_domain::dto::AttemptRecord;
 
 use crate::attempts::{ensure_asset_stub, upsert_attempt};
@@ -152,8 +152,19 @@ fn import_practice_record(conn: &Connection, raw: &Value) -> DbResult<()> {
         title_snapshot: Some(title),
         prompt_snapshot: None,
         content_text: None,
+        task_type: writing_task_type_from_record(raw, activity),
         answers,
         annotations: vec![],
     };
     upsert_attempt(conn, &attempt)
+}
+
+fn writing_task_type_from_record(raw: &Value, activity: Activity) -> Option<WritingTaskType> {
+    if activity != Activity::Writing {
+        return None;
+    }
+    raw.get("taskType")
+        .or_else(|| raw.get("task_type"))
+        .and_then(Value::as_str)
+        .and_then(WritingTaskType::parse_loose)
 }

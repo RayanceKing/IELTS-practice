@@ -13,7 +13,7 @@ use serde::Serialize;
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 
-use crate::app::state::{AppDb, AppPaths};
+use crate::app::state::{AppDb, AppPaths, AppVault};
 
 const BACKUP_GRANT_TTL: Duration = Duration::from_secs(15 * 60);
 const MAX_BACKUP_BYTES: u64 = 512 * 1024 * 1024;
@@ -260,6 +260,7 @@ pub fn pick_backup_import_path(
 #[tauri::command]
 pub fn import_backup_path(
     db: State<'_, AppDb>,
+    vault: State<'_, AppVault>,
     grants: State<'_, BackupImportGrants>,
     grant_id: String,
     dry_run: bool,
@@ -272,7 +273,38 @@ pub fn import_backup_path(
         Ok(p) => p,
         Err(e) => return CommandResponse::failure(map_db_err(e)),
     };
-    match db.with_conn(|conn| ielts_db::import_backup(conn, &package, dry_run)) {
+    match db.with_conn(|conn| {
+        let mut report = ielts_db::import_backup(conn, &package, dry_run)?;
+        if report.ok && report.secret_refs_imported > 0 {
+            report.warnings.push(
+                "备份只包含 API Key 的引用，不包含密钥本身：同一设备且本机凭据记录仍在时可继续使用；换设备后必须重新填写 API Key。"
+                    .into(),
+            );
+        }
+        if report.ok && !dry_run {
+            match crate::commands::ai::list_ai_configs_with_vault(conn, vault.inner()) {
+                Ok(configs) => {
+                    let unavailable = configs.iter().filter(|config| !config.has_secret).count();
+                    if unavailable > 0 {
+                        report.warnings.push(format!(
+                            "恢复后有 {unavailable} 个 AI 配置在本机没有可用 API Key，已取消默认状态，重新填写后才能评测。"
+                        ));
+                    }
+                }
+                Err(_) => {
+                    // `import_backup` has already committed its validated
+                    // snapshot. Never turn that into a false failed restore;
+                    // instead disable AI until the user repairs the metadata.
+                    ielts_db::set_default_ai_config(conn, None)?;
+                    report.warnings.push(
+                        "恢复后的 AI 配置无法在本机验证，已取消默认状态；请在设置中检查并重新填写 API Key。"
+                            .into(),
+                    );
+                }
+            }
+        }
+        Ok(report)
+    }) {
         Ok(report) => CommandResponse::success(report),
         Err(e) => CommandResponse::failure(map_db_err(e)),
     }

@@ -1,7 +1,10 @@
 use ielts_db::{
-    create_backup_package, import_backup, migrate, open_connection, put_secret_ref, DbOpenOptions,
+    create_backup_package, import_backup, list_ai_configs,
+    list_ai_configs_with_secret_availability, migrate, open_connection, put_secret_ref,
+    reconcile_default_ai_config_with_secret_availability, set_default_ai_config, upsert_ai_config,
+    DbOpenOptions,
 };
-use ielts_domain::dto::{BackupPackage, BackupSqlValue};
+use ielts_domain::dto::{AiConfigDto, BackupPackage, BackupSqlValue};
 use rusqlite::Connection;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -24,6 +27,13 @@ fn seed_complete_user_state(conn: &Connection) {
            'C:/fixtures/reading.json', 2, 'fp-reading', 0, '{"revision":2}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
           ('asset-writing', 'writing', 'freeform', 'writing:1', 'Writing One', NULL, NULL, NULL,
            NULL, 2, 'fp-writing', 0, '{"taskType":"task2"}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+
+        INSERT INTO writing_topics (
+          asset_id, task_type, title_json, image_path, is_official, created_at, updated_at
+        ) VALUES (
+          'asset-writing', 'task2', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Writing One"}]}]}',
+          NULL, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+        );
 
         INSERT INTO reading_suites (
           id, mode, flow_mode, status, current_index, timer_policy_json, created_at, updated_at,
@@ -176,7 +186,7 @@ fn full_backup_roundtrip_preserves_every_user_truth_table() {
     seed_complete_user_state(&source);
 
     let package = create_backup_package(&source, "roundtrip-test").unwrap();
-    assert_eq!(package.manifest.schema_version, 2);
+    assert_eq!(package.manifest.schema_version, 4);
     assert_eq!(
         package.manifest.table_count as usize,
         package.database.len()
@@ -365,6 +375,52 @@ fn legacy_v1_package_is_read_explicitly_as_partial_compatibility_import() {
 }
 
 #[test]
+fn legacy_v2_snapshot_without_writing_topics_remains_restorable() {
+    let dir = tempdir().unwrap();
+    let source = open_v2(dir.path().join("source.db"));
+    seed_complete_user_state(&source);
+    let mut legacy = create_backup_package(&source, "v2-source").unwrap();
+
+    legacy.manifest.schema_version = 2;
+    legacy.manifest.database_schema_version = 5;
+    legacy
+        .database
+        .retain(|table| table.name != "writing_topics" && table.name != "history_retention_policy");
+    legacy.manifest.table_count = legacy.database.len() as u32;
+    legacy.manifest.row_count = legacy
+        .database
+        .iter()
+        .map(|table| table.rows.len() as u64)
+        .sum::<u64>()
+        + legacy.secret_refs.len() as u64;
+    rechecksum(&mut legacy);
+
+    let target = open_v2(dir.path().join("target.db"));
+    seed_complete_user_state(&target);
+    let report = import_backup(&target, &legacy, false).unwrap();
+    assert!(report.ok, "{:?}", report.errors);
+    assert_eq!(report.tables_imported, legacy.manifest.table_count);
+    assert_eq!(
+        target
+            .query_row("SELECT COUNT(*) FROM writing_topics", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0,
+        "a v2 backup has no topic projection and must not retain target-only rows"
+    );
+    assert_eq!(
+        target
+            .query_row(
+                "SELECT COUNT(*) FROM practice_assets WHERE id = 'asset-writing'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
 fn backup_creation_refuses_plaintext_secret_even_if_sql_bypassed_settings_api() {
     let dir = tempdir().unwrap();
     let conn = open_v2(dir.path().join("secret-leak.db"));
@@ -379,4 +435,53 @@ fn backup_creation_refuses_plaintext_secret_even_if_sql_bypassed_settings_api() 
 
     let error = create_backup_package(&conn, "secret-policy-test").unwrap_err();
     assert!(error.to_string().contains("secret material"));
+}
+
+#[test]
+fn cross_device_restore_keeps_ai_reference_unavailable_until_key_is_reentered() {
+    let dir = tempdir().unwrap();
+    let source = open_v2(dir.path().join("source.db"));
+    let config = AiConfigDto {
+        id: "portable-openai".into(),
+        config_name: "Portable OpenAI".into(),
+        provider: "openai".into(),
+        base_url: "https://api.openai.com/v1".into(),
+        default_model: "gpt-4o-mini".into(),
+        is_default: false,
+        is_enabled: true,
+        has_secret: false,
+    };
+    upsert_ai_config(&source, &config).unwrap();
+    put_secret_ref(
+        &source,
+        "ai.config.portable-openai.api_key",
+        "keyring:source-device-only",
+    )
+    .unwrap();
+    let configured = list_ai_configs(&source).unwrap().pop().unwrap();
+    set_default_ai_config(&source, Some(&configured)).unwrap();
+    let package = create_backup_package(&source, "cross-device").unwrap();
+
+    let serialized = serde_json::to_string(&package).unwrap();
+    assert!(
+        !serialized.contains("sk-"),
+        "backups never carry API key bytes"
+    );
+    assert!(serialized.contains("keyring:source-device-only"));
+
+    let target = open_v2(dir.path().join("target.db"));
+    let report = import_backup(&target, &package, false).unwrap();
+    assert!(report.ok, "{:?}", report.errors);
+
+    // A different device has no matching OS-vault entry. The copied reference
+    // remains metadata for same-device recovery, but cannot grant runtime use.
+    assert!(
+        reconcile_default_ai_config_with_secret_availability(&target, |_| false)
+            .unwrap()
+            .is_none()
+    );
+    let configs = list_ai_configs_with_secret_availability(&target, |_| false).unwrap();
+    assert_eq!(configs.len(), 1);
+    assert!(!configs[0].has_secret);
+    assert!(!configs[0].is_default);
 }

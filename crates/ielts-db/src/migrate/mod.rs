@@ -45,6 +45,16 @@ fn migrations() -> &'static [Migration] {
                 name: "writing_topics",
                 sql: include_str!("../../migrations/0006_writing_topics.sql"),
             },
+            Migration {
+                version: 7,
+                name: "attempt_writing_task_type",
+                sql: include_str!("../../migrations/0007_attempt_writing_task_type.sql"),
+            },
+            Migration {
+                version: 8,
+                name: "history_retention_policy",
+                sql: include_str!("../../migrations/0008_history_retention_policy.sql"),
+            },
         ]
     })
 }

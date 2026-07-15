@@ -32,8 +32,7 @@
       <section class="hero-panel hero-section data-management-panel">
         <h3 class="heading-serif">本机数据备份</h3>
         <p class="hero-panel__muted">
-          完整备份写入应用 backups 目录（练习记录 + 设置元数据；不含明文 API Key）。
-          写作设置快照为局部导出，不含练习记录与密钥明文。
+          完整备份由 Rust 写入应用 backups 目录，包含练习记录与设置元数据；不含明文 API Key。
         </p>
         <div class="hero-settings-actions">
           <button class="btn btn-brand hero-btn data-mgmt-btn" id="create-backup-btn" type="button" :disabled="backupBusy" @click="createFullAppBackup">
@@ -45,13 +44,6 @@
           <button class="btn hero-btn data-mgmt-btn" id="backup-list-btn" type="button" :disabled="backupBusy" @click="showNativeBackupList">
             备份列表
           </button>
-          <button class="btn hero-btn data-mgmt-btn" id="export-data-btn" type="button" @click="exportSettingsData">
-            导出写作设置快照
-          </button>
-          <button class="btn hero-btn data-mgmt-btn" id="import-data-btn" type="button" @click="triggerSettingsImport">
-            导入写作设置快照
-          </button>
-          <input ref="settingsImportInput" class="settings-file-input" type="file" accept="application/json,.json" @change="handleSettingsImport" />
         </div>
         <div v-if="lastBackupPath" class="settings-backup-result hero-surface" role="status">
           <div class="settings-backup-result__label">最近完整备份已写入</div>
@@ -63,13 +55,10 @@
 
       <section class="hero-panel hero-section system-management-panel">
         <h3 class="heading-serif">系统与外观</h3>
-        <p class="hero-panel__muted">统一 Liquid Glass 视觉、缓存、引导与题库工具。</p>
+        <p class="hero-panel__muted">统一 Liquid Glass 视觉、写作题库入口、引导与原生更新工具。</p>
         <div class="hero-settings-actions">
-          <button class="btn btn-warning hero-btn hero-btn--warn" id="clear-cache-btn" type="button" @click="clearAppCache">
-            清除缓存
-          </button>
           <button class="btn btn-warning hero-btn hero-btn--warn" id="load-library-btn" type="button" @click="openWritingTopicLibrary">
-            加载题库
+            打开写作题库
           </button>
           <p class="visual-system-note" role="status">Liquid Glass 视觉已统一</p>
           <button class="btn btn-warning hero-btn hero-btn--warn" id="show-onboarding-btn" type="button" @click="startOnboardingTour">
@@ -77,9 +66,6 @@
           </button>
           <button class="btn btn-warning hero-btn hero-btn--warn" id="library-config-btn" type="button" data-action="library-config" @click="openWritingLibraryConfig">
             提示词设置
-          </button>
-          <button class="btn btn-warning hero-btn hero-btn--warn" id="force-refresh-btn" type="button" data-action="force-refresh" @click="refreshWritingLibrary">
-            强制刷新题库
           </button>
           <button class="btn btn-warning hero-btn hero-btn--warn" id="check-updates-btn" type="button" data-update-action="open-modal" @click="openUpdateManager">
             检查更新
@@ -151,7 +137,7 @@
           <div class="settings-panel__head">
             <div>
               <h3>评测通道</h3>
-              <p>至少保留一个启用配置；默认配置必须保持启用。</p>
+              <p>默认配置必须启用且本机可读取 API Key。完整备份只恢复引用：同一设备且本机凭据记录仍在时可复用，换设备必须重新填写 Key。</p>
             </div>
             <div class="settings-badges">
               <span class="settings-badge">{{ totalConfigCount }} 个配置</span>
@@ -172,6 +158,7 @@
                   <span :class="['settings-badge', item.is_enabled ? 'settings-badge--success' : 'settings-badge--muted']">
                     {{ item.is_enabled ? '启用' : '禁用' }}
                   </span>
+                  <span v-if="!item.has_secret" class="settings-badge settings-badge--muted">需重新填写 Key</span>
                 </div>
                 <div class="settings-list__meta">
                   <span>{{ item.provider }}</span>
@@ -180,14 +167,20 @@
               </div>
               <div class="settings-actions">
                 <button class="btn-text" type="button" @click="editConfig(item)">编辑</button>
-                <button class="btn-text" type="button" @click="testConfig(item.id)" :disabled="testingConfigId === item.id">
+                <button
+                  class="btn-text"
+                  type="button"
+                  :disabled="testingConfigId === item.id || !item.has_secret"
+                  :title="item.has_secret ? '' : '此设备没有该配置的 API Key，请先编辑并重新填写'"
+                  @click="testConfig(item.id)"
+                >
                     {{ testingConfigId === item.id ? '测试中' : '测试' }}
                 </button>
                 <button
                     class="btn-text"
                     type="button"
-                    :disabled="item.is_default || !item.is_enabled"
-                    :title="item.is_default ? '当前已是默认配置' : (!item.is_enabled ? '禁用配置不能设为默认' : '')"
+                    :disabled="item.is_default || !item.is_enabled || !item.has_secret"
+                    :title="item.is_default ? '当前已是默认配置' : (!item.is_enabled ? '禁用配置不能设为默认' : (!item.has_secret ? '请先在此设备重新填写 API Key' : ''))"
                     @click="setDefaultConfig(item.id)"
                   >
                     设默认
@@ -219,7 +212,7 @@
           <div class="settings-panel__head">
             <div>
               <h3>{{ apiForm.id ? '编辑配置' : '新建配置' }}</h3>
-              <p>{{ apiForm.id ? 'API Key 留空时保持原值。' : '新建配置必须填写 API Key。' }}</p>
+              <p>{{ apiForm.id ? (editingConfigNeedsKey ? '该配置来自备份，但此设备无法读取 API Key；请重新填写后保存。' : 'API Key 留空时保持原值。') : '新建配置必须填写 API Key。' }}</p>
             </div>
           </div>
           <div class="settings-form-grid">
@@ -392,23 +385,27 @@
           <div class="settings-panel__head">
             <div>
               <h3>历史记录</h3>
-              <p>控制本地历史记录自动清理上限。</p>
+              <p>由本机 SQLite 在写入终态练习时执行的历史保留策略；草稿、进行中和评测中的记录不会被清理。</p>
             </div>
-            <span class="settings-badge">{{ dataSettings.history_limit }} 条</span>
+            <span class="settings-badge">{{ historyRetentionLabel }}</span>
           </div>
           <div v-if="sectionMessages.data.message" :class="['inline-message', `inline-message-${sectionMessages.data.type}`]">
             {{ sectionMessages.data.message }}
           </div>
           
           <div class="setting-control">
-            <div class="setting-control__copy">
-              <strong>自动保留最近记录数量</strong>
-              <span>超过上限后，系统自动清理最早记录，避免历史数据无限增长。</span>
-            </div>
+              <div class="setting-control__copy">
+                <strong>自动保留最近记录数量</strong>
+                <span>仅终态记录（完成、取消、失败或中断）会按完成时间裁剪；不限时不自动清理。</span>
+              </div>
             <label class="setting-control__input">
+              <input v-model="dataSettings.unlimited" type="checkbox" />
+              <span>不限</span>
+            </label>
+            <label v-if="!dataSettings.unlimited" class="setting-control__input">
               <input
                 type="number"
-                v-model.number="dataSettings.history_limit"
+                v-model.number="dataSettings.max_terminal_attempts"
                 min="50"
                 max="500"
                 step="50"
@@ -417,7 +414,7 @@
             </label>
           </div>
           <div class="settings-savebar">
-            <span>允许范围 50-500，按 50 递增。</span>
+            <span>{{ dataSettings.unlimited ? '不限：不自动清理历史。' : '允许范围 50-500，按 50 递增。' }}</span>
             <button class="btn btn-brand" type="button" @click="saveDataSettings" :disabled="dataSaving">
               {{ dataSaving ? '保存中...' : '保存' }}
             </button>
@@ -452,36 +449,6 @@
           </div>
         </section>
 
-        <section v-if="activeTab === 'data' && settingsSnapshotListOpen" class="settings-panel" data-writing-settings-snapshot-list>
-          <div class="settings-panel__head">
-            <div>
-              <h3>写作设置快照</h3>
-              <p>仅含温度/历史上限与提示词元数据；不是完整库备份，API Key 不会恢复。</p>
-            </div>
-            <span class="settings-badge">{{ settingsBackups.length }} 个快照</span>
-          </div>
-          <div v-if="!settingsBackups.length" class="settings-empty">暂无写作设置快照。</div>
-          <div v-else class="settings-list">
-            <div v-for="backup in settingsBackups" :key="backup.id" class="settings-list__row">
-              <div class="settings-list__main">
-                <div class="settings-list__title">
-                  <strong>{{ backup.id }}</strong>
-                  <span class="settings-badge settings-badge--muted">{{ formatSettingsBackupDate(backup) }}</span>
-                </div>
-                <div class="settings-list__meta">
-                  <span>{{ backup.promptCount }} 个提示词版本</span>
-                  <span>{{ backup.apiConfigCount }} 个 API 元数据（无密钥）</span>
-                </div>
-              </div>
-              <div class="settings-actions">
-                <button class="btn-text" type="button" @click="restoreSettingsBackup(backup)">恢复快照</button>
-                <button class="btn-text" type="button" @click="downloadSettingsBackup(backup)">下载</button>
-                <button class="btn-text danger" type="button" @click="deleteSettingsBackup(backup.id)">删除</button>
-              </div>
-            </div>
-          </div>
-        </section>
-
         <section v-if="activeTab === 'data'" class="settings-panel danger-zone">
           <div class="settings-panel__head">
             <div>
@@ -505,26 +472,33 @@
         <section v-if="activeTab === 'about'" class="settings-panel about-section">
           <div class="about-identity">
             <div class="app-icon">
-              <img
+              <svg
                 class="app-icon__image"
-                :src="appLogoSrc"
-                alt="IELTS Practice Logo"
-                loading="eager"
-              />
+                viewBox="0 0 72 72"
+                role="img"
+                aria-label="IELTS Practice"
+              >
+                <rect x="4" y="4" width="64" height="64" rx="18" fill="var(--atlas-accent)" />
+                <path d="M22 20h8v32h-8zM35 52l10-32h7l10 32h-8l-2-7H43l-2 7zm10-14h5l-2.5-9z" fill="#fff" />
+              </svg>
             </div>
             <div>
-              <h2 class="heading-serif">雅思写作 AI 评判</h2>
-              <p class="version">Version 0.3.1</p>
+              <h2 class="heading-serif">IELTS Practice</h2>
+              <p class="version">版本 {{ appVersion }}</p>
             </div>
           </div>
           
           <div class="about-info">
             <div class="info-row">
-              <span class="label">开发阶段</span>
-              <span class="value">Phase 05 - 收口与交付准备</span>
+              <span class="label">应用形态</span>
+              <span class="value">Tauri 2 原生桌面客户端</span>
             </div>
             <div class="info-row">
-              <span class="label">Host</span>
+              <span class="label">业务与数据内核</span>
+              <span class="value">Rust + SQLite</span>
+            </div>
+            <div class="info-row">
+              <span class="label">桌面宿主</span>
               <span class="value">{{ hostName }}</span>
             </div>
             <div class="info-row">
@@ -542,18 +516,14 @@
           </div>
 
           <div class="about-features">
-            <h3>当前已实现功能</h3>
+            <h3>产品能力</h3>
             <ul>
-              <li><span>已完成</span>AI 作文评分（Task 1 & Task 2）</li>
-              <li><span>已完成</span>详细评分报告与反馈</li>
-              <li><span>已完成</span>写作页题库选题（自由写作 / 题库模式）</li>
-              <li><span>已完成</span>题目管理（CRUD + 批量导入）</li>
-              <li><span>已完成</span>默认官方题库 seed（Task 2 全量 + Task 1 最小样本）</li>
-              <li><span>已完成</span>历史记录管理（筛选 + 导出CSV）</li>
-              <li><span>已完成</span>历史统计对比（雷达图 + 范围切换）</li>
-              <li><span>已完成</span>草稿自动保存与恢复</li>
-              <li><span>已完成</span>模型参数配置</li>
-              <li><span>收口中</span>写作专属自动化报告 / 打包验收</li>
+              <li><span>写作</span>题库与自由写作、草稿恢复、AI 评测</li>
+              <li><span>阅读</span>套题、无尽模式、作答与复盘</li>
+              <li><span>数据</span>Rust/SQLite 统一保存练习、设置与历史</li>
+              <li><span>安全</span>API Key 存于系统密钥环，不进入普通备份</li>
+              <li><span>备份</span>原生完整备份、校验和文件恢复</li>
+              <li><span>更新</span>发布配置可启用 Tauri 原生更新检查</li>
             </ul>
           </div>
         </section>
@@ -654,10 +624,16 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { Channel } from '@tauri-apps/api/core'
 import { settings, essays, configs, prompts, topics } from '@/api/client.js'
-import { listSettings, upsertSetting, createBackup, listBackups, pickBackupImportPath, importBackupPath } from '@/api/settings-repository.js'
+import {
+  getHistoryRetentionPolicy,
+  setHistoryRetentionPolicy,
+  createBackup,
+  listBackups,
+  pickBackupImportPath,
+  importBackupPath
+} from '@/api/settings-repository.js'
 import { invokeCommand } from '@/api/tauri-bridge.js'
 import { createRequestGate } from '@/utils/request-gate.js'
-import { useTauriPreferences } from '@/composables/useTauriPreferences.js'
 import {
   isProviderDefaultUrl,
   resolveProviderBaseUrlOnChange
@@ -709,10 +685,10 @@ const tabs = [
   {
     key: 'data',
     label: '数据管理',
-    summary: '历史上限与清理',
+    summary: '历史上限与原生备份',
     kicker: 'Storage',
     title: '数据管理',
-    description: '控制历史记录保留策略，并处理不可恢复的数据操作。',
+    description: '控制历史记录保留策略，并通过 Rust 管理完整应用备份。',
     icon: icons.data
   },
   {
@@ -720,26 +696,20 @@ const tabs = [
     label: '关于',
     summary: '版本、运行环境、能力',
     kicker: 'About',
-    title: '关于写作模块',
-    description: '查看当前版本、Tauri 环境和写作模块能力范围。',
+    title: '关于产品',
+    description: '查看 Tauri 桌面客户端、Rust 数据内核和本机数据路径。',
     icon: icons.about
   }
 ]
-const appLogoSrc = '../../assets/images/herbal_green_flat_logo_1776094316057.png?v=20260414b'
 
 const router = useRouter()
-const preferences = useTauriPreferences()
-const WRITING_SETTINGS_BACKUP_STORAGE_KEY = 'ielts_writing_settings_backups_v1'
-const MAX_SETTINGS_BACKUPS = 10
 const activeTab = ref('model')
 const settingsDetailOpen = ref(false)
 const modelSaving = ref(false)
 const dataSaving = ref(false)
 const apiLoading = ref(false)
 const promptLoading = ref(false)
-const settingsImportInput = ref(null)
 const settingsBackupListOpen = ref(false)
-const settingsBackups = ref([])
 const onboardingOpen = ref(false)
 const onboardingStep = ref(0)
 const updateDialogOpen = ref(false)
@@ -825,8 +795,10 @@ const modelSettings = ref({
 })
 
 const dataSettings = ref({
-  history_limit: 100
+  max_terminal_attempts: 100,
+  unlimited: false
 })
+const persistedHistoryRetention = ref(null)
 
 const apiConfigs = ref([])
 const testingConfigId = ref(null)
@@ -869,7 +841,6 @@ const pathsResolved = ref(false)
 const backupBusy = ref(false)
 const lastBackupPath = ref('')
 const nativeBackups = ref([])
-const settingsSnapshotListOpen = ref(false)
 const pathsLoadingLabel = computed(() => (pathsResolved.value ? '未获取' : '加载中...'))
 
 async function loadTauriAboutInfo() {
@@ -985,9 +956,23 @@ const enabledConfigCount = computed(() => (
 
 const totalConfigCount = computed(() => apiConfigs.value.length)
 
+const editingConfigNeedsKey = computed(() => {
+  const id = apiForm.value.id
+  if (!id) return false
+  return apiConfigs.value.find((item) => item.id === id)?.has_secret === false
+})
+
 const activePromptCount = computed(() => (
   promptEntries.value.filter((item) => item.is_active).length
 ))
+
+const historyRetentionLabel = computed(() => {
+  const policy = persistedHistoryRetention.value
+  if (!policy) return '未读取'
+  return policy.maxTerminalAttempts == null
+    ? '不限'
+    : `${policy.maxTerminalAttempts} 条`
+})
 
 const activeTabMeta = computed(() => (
   tabs.find((tab) => tab.key === activeTab.value) || tabs[0]
@@ -1106,6 +1091,10 @@ async function saveApiConfig() {
     }
 
     if (apiForm.value.id) {
+      if (editingConfigNeedsKey.value && !payload.api_key) {
+        setSectionMessage('api', 'error', '该配置在此设备没有可用 API Key，请重新填写后保存')
+        return
+      }
       await configs.update(apiForm.value.id, payload)
     } else {
       if (!payload.api_key) {
@@ -1186,6 +1175,16 @@ async function toggleConfig(id) {
 }
 
 async function testConfig(id) {
+  const target = apiConfigs.value.find((item) => item.id === id)
+  if (!target) {
+    setSectionMessage('api', 'error', '要测试的 API 配置不存在')
+    return
+  }
+  if (!target.has_secret) {
+    editConfig(target)
+    setSectionMessage('api', 'error', '该配置在此设备没有可用 API Key，请重新填写后再测试')
+    return
+  }
   testingConfigId.value = id
   clearSectionMessage('api')
   try {
@@ -1292,14 +1291,45 @@ async function loadSettings() {
     if (allSettings.temperature_task2 !== undefined && allSettings.temperature_task2 !== null) {
       modelSettings.value.temperature_task2 = normalizeTemperatureValue(allSettings.temperature_task2, 0.5)
     }
-    if (allSettings.history_limit) {
-      dataSettings.value.history_limit = allSettings.history_limit
-    }
   } catch (error) {
     if (!settingsRequestGate.isCurrent(requestId)) return
     console.error('加载设置失败:', error)
     setSectionMessage('model', 'error', '加载设置失败: ' + error.message)
-    setSectionMessage('data', 'error', '加载设置失败: ' + error.message)
+  }
+  await loadHistoryRetentionPolicy()
+}
+
+function normalizeHistoryRetentionPolicy(policy) {
+  const hasCamel = Object.prototype.hasOwnProperty.call(policy || {}, 'maxTerminalAttempts')
+  const hasSnake = Object.prototype.hasOwnProperty.call(policy || {}, 'max_terminal_attempts')
+  if (!hasCamel && !hasSnake) {
+    throw new Error('历史保留策略响应缺少 maxTerminalAttempts')
+  }
+  const raw = hasCamel ? policy.maxTerminalAttempts : policy.max_terminal_attempts
+  if (raw === null || raw === undefined) return null
+  const value = Number(raw)
+  if (!Number.isInteger(value)) {
+    throw new Error('历史保留策略返回了无效上限')
+  }
+  return value
+}
+
+function applyHistoryRetentionPolicy(policy) {
+  const maxTerminalAttempts = normalizeHistoryRetentionPolicy(policy)
+  persistedHistoryRetention.value = { maxTerminalAttempts }
+  dataSettings.value = {
+    max_terminal_attempts: maxTerminalAttempts ?? 100,
+    unlimited: maxTerminalAttempts === null
+  }
+}
+
+async function loadHistoryRetentionPolicy() {
+  try {
+    const policy = await getHistoryRetentionPolicy()
+    applyHistoryRetentionPolicy(policy)
+  } catch (error) {
+    persistedHistoryRetention.value = null
+    setSectionMessage('data', 'error', '历史保留策略加载失败: ' + error.message)
   }
 }
 
@@ -1337,19 +1367,24 @@ async function saveModelSettings() {
 
 // 保存数据设置
 async function saveDataSettings() {
-  // 验证范围
-  if (dataSettings.value.history_limit < 50 || dataSettings.value.history_limit > 500) {
-    setSectionMessage('data', 'error', '记录保留数量必须在 50-500 之间')
+  const unlimited = dataSettings.value.unlimited === true
+  const limit = unlimited ? null : Number(dataSettings.value.max_terminal_attempts)
+  if (!unlimited && (!Number.isInteger(limit) || limit < 50 || limit > 500 || limit % 50 !== 0)) {
+    setSectionMessage('data', 'error', '记录保留数量必须是 50-500 之间、且按 50 递增的整数')
     return
   }
 
   dataSaving.value = true
   clearSectionMessage('data')
   try {
-    await settings.update({
-      history_limit: dataSettings.value.history_limit
-    })
-    setSectionMessage('data', 'success', '数据设置已保存')
+    const result = await setHistoryRetentionPolicy(limit)
+    applyHistoryRetentionPolicy(result.policy)
+    const pruned = Number(result.prunedAttemptCount ?? result.pruned_attempt_count ?? 0)
+    const actualLimit = persistedHistoryRetention.value?.maxTerminalAttempts ?? null
+    const policyLabel = actualLimit === null
+      ? '已改为不限，不会自动清理历史'
+      : `已保留最近 ${actualLimit} 条终态记录`
+    setSectionMessage('data', 'success', pruned > 0 ? `${policyLabel}；已清理 ${pruned} 条旧记录` : policyLabel)
   } catch (error) {
     console.error('保存失败:', error)
     setSectionMessage('data', 'error', '保存失败: ' + error.message)
@@ -1398,17 +1433,6 @@ async function executeConfirmAction() {
     } else if (kind === 'clear-history') {
       await essays.deleteAll()
       setSectionMessage('data', 'success', '已清空所有历史记录')
-    } else if (kind === 'restore-settings-backup') {
-      const normalized = normalizeSettingsBackupEntry(payload?.backup)
-      if (!normalized) {
-        throw new Error('备份数据无效')
-      }
-      const result = await applySettingsImportPayload(normalized.archive)
-      await loadApiConfigs()
-      setGlobalMessage(
-        'success',
-        `写作设置快照已恢复（局部，不含 API Key）：${result.settingsCount} 项设置，${result.promptCount} 个提示词，${result.apiConfigCount || 0} 个 API 元数据。`
-      )
     } else if (kind === 'restore-full-backup') {
       const grantId = String(payload?.grantId || '').trim()
       if (!grantId) throw new Error('缺少备份文件授权')
@@ -1422,11 +1446,9 @@ async function executeConfirmAction() {
       ? '删除 API 配置失败'
       : kind === 'delete-prompt'
         ? '删除提示词失败'
-        : kind === 'restore-settings-backup'
-          ? '恢复快照失败'
-          : kind === 'restore-full-backup'
-            ? '恢复完整备份失败'
-            : '清空失败'
+        : kind === 'restore-full-backup'
+          ? '恢复完整备份失败'
+          : '清空失败'
     setSectionMessage(section, 'error', `${errorLabel}: ${error.message}`)
   }
 }
@@ -1438,38 +1460,6 @@ function setGlobalMessage(type, message) {
 
 function handleSettingsKeydown(event) {
   if (event?.key === 'Escape' && settingsDetailOpen.value) hideSettingsDetail()
-}
-
-function downloadJsonFile(filename, payload) {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  anchor.click()
-  URL.revokeObjectURL(url)
-}
-
-function clearAppCache() {
-  const removablePrefixes = [
-    'evaluation_',
-    'ielts_writing_draft_',
-    'writing_draft_',
-    'practice_reading_answers_',
-    'practice_reading_submission_'
-  ]
-  let removed = 0
-  ;[window.sessionStorage, window.localStorage].forEach((store) => {
-    if (!store) return
-    for (let index = store.length - 1; index >= 0; index -= 1) {
-      const key = store.key(index) || ''
-      if (removablePrefixes.some((prefix) => key.startsWith(prefix))) {
-        store.removeItem(key)
-        removed += 1
-      }
-    }
-  })
-  setGlobalMessage('success', `缓存已清除：${removed} 项。`)
 }
 
 async function startOnboardingTour(event) {
@@ -1562,170 +1552,6 @@ function openWritingLibraryConfig() {
   setGlobalMessage('success', '已切换到写作提示词与题库相关配置。')
 }
 
-function refreshWritingLibrary() {
-  try {
-    sessionStorage.removeItem('writing_topics_cache')
-    sessionStorage.removeItem('topic_bank_cache')
-    sessionStorage.removeItem('compose_topics_cache')
-  } catch (_) {}
-  loadTopicLibraryStats()
-  setGlobalMessage('success', '写作题库缓存已刷新；进入写作题库时会重新拉取。')
-}
-
-function normalizeSettingsBackupEntry(entry) {
-  if (!entry || typeof entry !== 'object') return null
-  const archive = entry.archive && typeof entry.archive === 'object' ? entry.archive : null
-  if (!archive) return null
-  const createdAt = String(entry.createdAt || archive.exportedAt || '').trim() || new Date().toISOString()
-  const id = String(entry.id || `writing-settings-${createdAt}`).trim()
-  return {
-    id,
-    createdAt,
-    archive,
-    apiConfigCount: Number.isFinite(Number(entry.apiConfigCount))
-      ? Number(entry.apiConfigCount)
-      : Array.isArray(archive.apiConfigs)
-        ? archive.apiConfigs.length
-        : 0,
-    promptCount: Number.isFinite(Number(entry.promptCount))
-      ? Number(entry.promptCount)
-      : Array.isArray(archive.prompts)
-        ? archive.prompts.length
-        : 0
-  }
-}
-
-function readSettingsBackups() {
-  const parsed = preferences.get(WRITING_SETTINGS_BACKUP_STORAGE_KEY, [])
-  if (!Array.isArray(parsed)) return []
-  return parsed
-    .map((entry) => normalizeSettingsBackupEntry(entry))
-    .filter(Boolean)
-    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-    .slice(0, MAX_SETTINGS_BACKUPS)
-}
-
-function persistSettingsBackups(backups) {
-  const normalized = Array.isArray(backups)
-    ? backups.map((entry) => normalizeSettingsBackupEntry(entry)).filter(Boolean)
-    : []
-  const nextBackups = normalized
-    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-    .slice(0, MAX_SETTINGS_BACKUPS)
-  settingsBackups.value = nextBackups
-  preferences.set(WRITING_SETTINGS_BACKUP_STORAGE_KEY, nextBackups)
-  return nextBackups
-}
-
-function formatSettingsBackupDate(backup) {
-  const timestamp = new Date(backup?.createdAt || backup?.archive?.exportedAt || '')
-  if (Number.isNaN(timestamp.getTime())) return '时间未知'
-  return timestamp.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
-
-async function collectSettingsExportPayload() {
-  const allSettings = await settings.getAll()
-  return {
-    exportedAt: new Date().toISOString(),
-    version: '0.3.1',
-    settings: allSettings,
-    apiConfigs: apiConfigs.value.map((item) => ({
-      id: item.id,
-      config_name: item.config_name,
-      provider: item.provider,
-      base_url: item.base_url,
-      default_model: item.default_model,
-      is_default: Boolean(item.is_default),
-      is_enabled: Boolean(item.is_enabled)
-    })),
-    prompts: promptEntries.value
-  }
-}
-
-async function applySettingsImportPayload(payload) {
-  const importedSettings = payload?.settings && typeof payload.settings === 'object'
-    ? payload.settings
-    : payload
-  const allowedKeys = ['temperature_mode', 'temperature_task1', 'temperature_task2', 'history_limit']
-  const updates = {}
-  allowedKeys.forEach((key) => {
-    if (Object.prototype.hasOwnProperty.call(importedSettings || {}, key)) {
-      updates[key] = importedSettings[key]
-    }
-  })
-
-  const promptPayload = Array.isArray(payload?.prompts)
-    ? payload.prompts
-    : null
-  const apiPayload = Array.isArray(payload?.apiConfigs)
-    ? payload.apiConfigs
-    : []
-
-  if (!Object.keys(updates).length && !promptPayload?.length && !apiPayload.length) {
-    throw new Error('文件不包含可导入的写作设置、API 元数据或提示词')
-  }
-
-  if (Object.keys(updates).length) {
-    await settings.update(updates)
-    await loadSettings()
-  }
-  if (promptPayload?.length) {
-    await prompts.import(promptPayload)
-    await loadPromptList()
-  }
-
-  let apiConfigCount = 0
-  // Metadata-only restore: never invent API keys. User must re-enter secrets.
-  for (const item of apiPayload) {
-    const id = String(item?.id || '').trim()
-    if (!id) continue
-    try {
-      await configs.update(id, {
-        config_name: item.config_name || item.configName || id,
-        provider: item.provider || 'openai-compatible',
-        base_url: item.base_url || item.baseUrl || '',
-        default_model: item.default_model || item.defaultModel || '',
-        is_default: Boolean(item.is_default ?? item.isDefault),
-        is_enabled: item.is_enabled ?? item.isEnabled ?? true,
-        api_key: ''
-      })
-      apiConfigCount += 1
-    } catch (error) {
-      // Create if missing
-      try {
-        await configs.create({
-          id,
-          config_name: item.config_name || item.configName || id,
-          provider: item.provider || 'openai-compatible',
-          base_url: item.base_url || item.baseUrl || '',
-          default_model: item.default_model || item.defaultModel || '',
-          is_default: Boolean(item.is_default ?? item.isDefault),
-          is_enabled: item.is_enabled ?? item.isEnabled ?? true,
-          api_key: ''
-        })
-        apiConfigCount += 1
-      } catch (createError) {
-        console.warn('import api config metadata failed', id, createError)
-      }
-    }
-  }
-  if (apiConfigCount) {
-    await loadApiConfigs()
-  }
-
-  return {
-    settingsCount: Object.keys(updates).length,
-    promptCount: promptPayload?.length || 0,
-    apiConfigCount
-  }
-}
-
 async function createFullAppBackup() {
   if (backupBusy.value) return
   backupBusy.value = true
@@ -1765,8 +1591,6 @@ async function refreshNativeBackupList() {
 async function showNativeBackupList() {
   await refreshNativeBackupList()
   settingsBackupListOpen.value = true
-  settingsSnapshotListOpen.value = true
-  settingsBackups.value = readSettingsBackups()
   openSettingsDetail('data')
 }
 
@@ -1807,6 +1631,7 @@ async function previewAndConfirmRestore(grant) {
       throw new Error((report.errors || []).join('; ') || '备份校验失败')
     }
     const secretRefs = report?.secretRefsImported ?? report?.secret_refs_imported ?? 0
+    const warnings = Array.isArray(report?.warnings) ? report.warnings.filter(Boolean) : []
     openConfirmDialog({
       kind: 'restore-full-backup',
       section: 'data',
@@ -1816,7 +1641,8 @@ async function previewAndConfirmRestore(grant) {
         `预检通过，将合并写入练习 ${report?.attemptImported ?? report?.attempt_imported ?? 0} 条、`,
         `设置 ${report?.settingsImported ?? report?.settings_imported ?? 0} 项`,
         secretRefs > 0 ? `、密钥引用元数据 ${secretRefs} 条` : '',
-        '。不会恢复明文 API Key / 系统密钥环内容；已有同 id 记录会被覆盖。'
+        '。不会恢复明文 API Key / 系统密钥环内容；已有同 id 记录会被覆盖。',
+        warnings.length ? `\n${warnings.join('\n')}` : ''
       ].join(''),
       confirmLabel: '确认恢复',
       danger: true,
@@ -1838,104 +1664,11 @@ async function applyFullBackupRestore(grantId) {
   await loadApiConfigs()
   await loadPromptList()
   await refreshNativeBackupList()
+  const unavailableConfigs = apiConfigs.value.filter((item) => !item.has_secret).length
   setGlobalMessage(
     'success',
-    `完整备份已恢复：练习 ${report.attemptImported ?? report.attempt_imported ?? 0} · 设置 ${report.settingsImported ?? report.settings_imported ?? 0}（未恢复明文 API Key）`
+    `完整备份已恢复：练习 ${report.attemptImported ?? report.attempt_imported ?? 0} · 设置 ${report.settingsImported ?? report.settings_imported ?? 0}（未恢复明文 API Key）${unavailableConfigs ? `；${unavailableConfigs} 个 AI 配置需重新填写 Key 后才能评测` : ''}`
   )
-}
-
-/** @deprecated name kept for any residual callers — creates writing settings snapshot only */
-async function createSettingsBackup() {
-  try {
-    const archive = await collectSettingsExportPayload()
-    const backup = normalizeSettingsBackupEntry({
-      id: `writing-settings-${Date.now()}`,
-      createdAt: archive.exportedAt || new Date().toISOString(),
-      archive
-    })
-    persistSettingsBackups([backup, ...readSettingsBackups()])
-    settingsSnapshotListOpen.value = true
-    openSettingsDetail('data')
-    downloadJsonFile(`ielts-writing-settings-snapshot-${Date.now()}.json`, archive)
-    setGlobalMessage('success', '写作设置快照已保存（不含 API Key / 不含练习记录）。')
-  } catch (error) {
-    setGlobalMessage('error', '创建设置快照失败: ' + error.message)
-  }
-}
-
-function showSettingsBackupList() {
-  showNativeBackupList()
-}
-
-function downloadSettingsBackup(backup) {
-  const normalized = normalizeSettingsBackupEntry(backup)
-  if (!normalized) {
-    setGlobalMessage('error', '快照数据无效，无法下载。')
-    return
-  }
-  const safeId = normalized.id.replace(/[^a-zA-Z0-9._-]+/g, '-')
-  downloadJsonFile(`${safeId}.json`, normalized.archive)
-}
-
-function restoreSettingsBackup(backup) {
-  const normalized = normalizeSettingsBackupEntry(backup)
-  if (!normalized) {
-    setGlobalMessage('error', '快照数据无效，无法恢复。')
-    return
-  }
-  openConfirmDialog({
-    kind: 'restore-settings-backup',
-    section: 'data',
-    title: '恢复写作设置快照',
-    message: `恢复快照 ${formatSettingsBackupDate(normalized)}？将导入温度/历史上限、提示词与 API 元数据（不含密钥）。`,
-    confirmLabel: '确认恢复',
-    danger: false,
-    payload: { backup: normalized }
-  })
-}
-
-function deleteSettingsBackup(id) {
-  const normalizedId = String(id || '').trim()
-  if (!normalizedId) return
-  persistSettingsBackups(readSettingsBackups().filter((backup) => backup.id !== normalizedId))
-  setGlobalMessage('success', '写作设置快照已删除。')
-}
-
-async function exportSettingsData() {
-  try {
-    downloadJsonFile('ielts-writing-settings-export.json', await collectSettingsExportPayload())
-    setGlobalMessage('success', '写作设置快照已导出（局部：温度/历史上限/提示词/API 元数据；不含 API Key 与练习记录）。')
-  } catch (error) {
-    setGlobalMessage('error', '导出失败: ' + error.message)
-  }
-}
-
-function triggerSettingsImport() {
-  settingsImportInput.value?.click()
-}
-
-async function handleSettingsImport(event) {
-  const file = event?.target?.files?.[0]
-  if (!file) return
-  try {
-    const raw = await file.text()
-    const parsed = JSON.parse(raw)
-    // Full app backup package shape: { manifest, attempts, settings, secretRefs }
-    if (parsed?.manifest && Array.isArray(parsed?.attempts)) {
-      throw new Error('这是完整应用备份。请使用「从备份恢复…」选择文件路径导入。')
-    }
-    const result = await applySettingsImportPayload(parsed)
-    setGlobalMessage(
-      'success',
-      `写作设置快照已导入（局部）：${result.settingsCount} 项设置，${result.promptCount} 个提示词，${result.apiConfigCount || 0} 个 API 元数据（无密钥）。`
-    )
-  } catch (error) {
-    setGlobalMessage('error', '导入失败: ' + error.message)
-  } finally {
-    if (event?.target) {
-      event.target.value = ''
-    }
-  }
 }
 
 function formatNativeBackupDate(backup) {
@@ -1954,13 +1687,11 @@ function formatBytes(n) {
 
 // 初始化
 onMounted(async () => {
-  await preferences.hydrate()
   loadSettings()
   getUserDataPath()
   loadTopicLibraryStats()
   loadApiConfigs()
   loadPromptList()
-  settingsBackups.value = readSettingsBackups()
   document.addEventListener('keydown', handleSettingsKeydown)
 })
 
@@ -3514,23 +3245,8 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-.settings-page#settings-view #clear-cache-btn {
-  color: var(--bauhaus-accent-red);
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(220, 38, 38, 0.2);
-}
-
-.settings-page#settings-view #clear-cache-btn:hover {
-  color: #fff;
-  background: var(--bauhaus-accent-red);
-  border-color: transparent;
-  box-shadow: 0 12px 24px rgba(220, 38, 38, 0.3);
-}
-
 .settings-page#settings-view #load-library-btn,
 .settings-page#settings-view #library-config-btn,
-.settings-page#settings-view #force-refresh-btn,
-.settings-page#settings-view #theme-switcher-btn-entry,
 .settings-page#settings-view #show-onboarding-btn,
 .settings-page#settings-view #check-updates-btn {
   color: var(--bauhaus-text-main);
@@ -3540,8 +3256,6 @@ onBeforeUnmount(() => {
 
 .settings-page#settings-view #load-library-btn:hover,
 .settings-page#settings-view #library-config-btn:hover,
-.settings-page#settings-view #force-refresh-btn:hover,
-.settings-page#settings-view #theme-switcher-btn-entry:hover,
 .settings-page#settings-view #show-onboarding-btn:hover,
 .settings-page#settings-view #check-updates-btn:hover {
   color: #fff;
@@ -3606,14 +3320,6 @@ onBeforeUnmount(() => {
 
 .settings-page#settings-view .settings-credit a:hover {
   opacity: 0.72;
-}
-
-.settings-page#settings-view .settings-file-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
 }
 
 .settings-page#settings-view .settings-detail-modal {

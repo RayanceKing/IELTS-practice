@@ -1,6 +1,8 @@
 //! Phase 5: writing draft, evaluation state machine, checkpoints, idempotency.
 
-use ielts_domain::domain::{Activity, AttemptMode, EvaluationStage, EvaluationStatus};
+use ielts_domain::domain::{
+    Activity, AttemptMode, AttemptStatus, EvaluationStage, EvaluationStatus,
+};
 use ielts_domain::dto::{SaveDraftCommand, SubmitAttemptCommand, WritingEvaluationV4};
 use tempfile::tempdir;
 
@@ -29,6 +31,7 @@ fn draft_cmd(id: &str, text: &str, key: &str) -> SaveDraftCommand {
         asset_id: None,
         content_text: Some(text.into()),
         prompt_snapshot: Some("Discuss both views.".into()),
+        task_type: Some(WritingTaskType::Task2),
         idempotency_key: key.into(),
     }
 }
@@ -40,6 +43,7 @@ fn draft_and_idempotent_submit() {
     save_writing_draft(&conn, &draft_cmd("a1", &essay, "draft-1")).unwrap();
     let d = get_writing_draft(&conn, "a1").unwrap().unwrap();
     assert!(d.word_count > 10);
+    assert_eq!(d.mode, Some(AttemptMode::Bank));
 
     let submitted = submit_writing_attempt(
         &conn,
@@ -63,6 +67,196 @@ fn draft_and_idempotent_submit() {
     )
     .unwrap();
     assert_eq!(again.id, submitted.id);
+}
+
+#[test]
+fn writing_draft_and_submit_never_reopen_a_closed_attempt() {
+    let (_dir, conn) = open_db();
+    let original = "A submitted essay is an immutable evaluation snapshot. ".repeat(25);
+    let stale_autosave = "This stale autosave must not replace the submitted essay.";
+    let attempt_id = "writing-state-monotonic";
+    save_writing_draft(&conn, &draft_cmd(attempt_id, &original, "draft-open")).unwrap();
+    submit_writing_attempt(
+        &conn,
+        &SubmitAttemptCommand {
+            attempt_id: attempt_id.into(),
+            idempotency_key: "submit-open".into(),
+        },
+    )
+    .unwrap();
+
+    let mut stale = draft_cmd(attempt_id, stale_autosave, "draft-stale");
+    let save_error = save_writing_draft(&conn, &stale).unwrap_err();
+    assert!(save_error
+        .to_string()
+        .contains("only an open writing attempt may be changed"));
+    let submit_error = submit_writing_attempt(
+        &conn,
+        &SubmitAttemptCommand {
+            attempt_id: attempt_id.into(),
+            idempotency_key: "submit-stale".into(),
+        },
+    )
+    .unwrap_err();
+    assert!(submit_error
+        .to_string()
+        .contains("only an open writing attempt may be changed"));
+
+    let submitted = get_history_detail(&conn, attempt_id).unwrap().attempt;
+    assert_eq!(submitted.status, AttemptStatus::Submitted);
+    assert_eq!(submitted.content_text.as_deref(), Some(original.as_str()));
+    assert_eq!(
+        get_writing_draft(&conn, attempt_id)
+            .unwrap()
+            .unwrap()
+            .content_text,
+        original
+    );
+
+    // Evaluation moves the attempt into `reviewing` before provider I/O. A
+    // delayed frontend autosave must not roll that projection back to draft.
+    prepare_evaluation(
+        &conn,
+        &StartEvaluationCommand {
+            attempt_id: attempt_id.into(),
+            idempotency_key: "evaluate-open".into(),
+            task_type: Some("task2".into()),
+            retry_of: None,
+        },
+        "deterministic",
+        "test-model",
+    )
+    .unwrap();
+    let reviewing = get_history_detail(&conn, attempt_id).unwrap().attempt;
+    assert_eq!(reviewing.status, AttemptStatus::Reviewing);
+    stale.idempotency_key = "draft-during-evaluation".into();
+    let reviewing_save_error = save_writing_draft(&conn, &stale).unwrap_err();
+    assert!(reviewing_save_error
+        .to_string()
+        .contains("only an open writing attempt may be changed"));
+    assert_eq!(
+        get_history_detail(&conn, attempt_id)
+            .unwrap()
+            .attempt
+            .content_text
+            .as_deref(),
+        Some(original.as_str())
+    );
+}
+
+#[test]
+fn autosaving_an_active_writing_attempt_preserves_its_open_status() {
+    let (_dir, conn) = open_db();
+    let attempt_id = "writing-active-autosave";
+    save_writing_draft(
+        &conn,
+        &draft_cmd(attempt_id, "The first open draft.", "draft-active-first"),
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE attempts SET status = 'active' WHERE id = ?1",
+        rusqlite::params![attempt_id],
+    )
+    .unwrap();
+
+    save_writing_draft(
+        &conn,
+        &draft_cmd(
+            attempt_id,
+            "The latest autosave keeps the attempt active.",
+            "draft-active-second",
+        ),
+    )
+    .unwrap();
+
+    let attempt = get_history_detail(&conn, attempt_id).unwrap().attempt;
+    assert_eq!(attempt.status, AttemptStatus::Active);
+    assert_eq!(
+        attempt.content_text.as_deref(),
+        Some("The latest autosave keeps the attempt active.")
+    );
+}
+
+#[test]
+fn completed_writing_attempt_rejects_a_stale_draft_save() {
+    let (_dir, conn) = open_db();
+    let original = "A completed evaluation keeps its submitted source immutable. ".repeat(25);
+    let attempt_id = "writing-completed-state-monotonic";
+    save_writing_draft(&conn, &draft_cmd(attempt_id, &original, "draft-completed")).unwrap();
+    submit_writing_attempt(
+        &conn,
+        &SubmitAttemptCommand {
+            attempt_id: attempt_id.into(),
+            idempotency_key: "submit-completed".into(),
+        },
+    )
+    .unwrap();
+
+    let provider = DeterministicProvider;
+    let evaluation = start_evaluation(
+        &conn,
+        &StartEvaluationCommand {
+            attempt_id: attempt_id.into(),
+            idempotency_key: "evaluate-completed".into(),
+            task_type: Some("task2".into()),
+            retry_of: None,
+        },
+        &provider,
+    )
+    .unwrap();
+    assert!(matches!(
+        evaluation.evaluation.status,
+        EvaluationStatus::Completed | EvaluationStatus::Degraded
+    ));
+    assert_eq!(
+        get_history_detail(&conn, attempt_id)
+            .unwrap()
+            .attempt
+            .status,
+        AttemptStatus::Completed
+    );
+
+    let error = save_writing_draft(
+        &conn,
+        &draft_cmd(
+            attempt_id,
+            "This content must never replace a completed evaluation input.",
+            "draft-after-completed",
+        ),
+    )
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("only an open writing attempt may be changed"));
+    assert_eq!(
+        get_history_detail(&conn, attempt_id)
+            .unwrap()
+            .attempt
+            .content_text
+            .as_deref(),
+        Some(original.as_str())
+    );
+}
+
+#[test]
+fn writing_draft_requires_an_explicit_writing_source_mode() {
+    let (_dir, conn) = open_db();
+    let essay = "A freeform draft has a durable mode rather than a UI default.";
+    let mut freeform = draft_cmd("freeform-mode", essay, "freeform-key");
+    freeform.mode = AttemptMode::Freeform;
+    save_writing_draft(&conn, &freeform).unwrap();
+    assert_eq!(
+        get_writing_draft(&conn, "freeform-mode")
+            .unwrap()
+            .unwrap()
+            .mode,
+        Some(AttemptMode::Freeform)
+    );
+
+    let mut invalid = draft_cmd("invalid-mode", essay, "invalid-key");
+    invalid.mode = AttemptMode::Single;
+    let error = save_writing_draft(&conn, &invalid).unwrap_err();
+    assert!(error.to_string().contains("mode=freeform or mode=bank"));
 }
 
 #[test]

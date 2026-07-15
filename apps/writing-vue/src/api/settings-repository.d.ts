@@ -29,6 +29,15 @@ export interface AiProviderTestResult {
 
 export function listSettings(namespace?: string | null): Promise<{ source: 'tauri'; items: unknown[] }>
 export function upsertSetting(namespace: string, key: string, value: unknown): Promise<unknown>
+export interface HistoryRetentionPolicy {
+  maxTerminalAttempts?: number | null
+}
+export interface SetHistoryRetentionPolicyResult {
+  policy: HistoryRetentionPolicy
+  prunedAttemptCount: number
+}
+export function getHistoryRetentionPolicy(): Promise<HistoryRetentionPolicy>
+export function setHistoryRetentionPolicy(maxTerminalAttempts: number | null): Promise<SetHistoryRetentionPolicyResult>
 export function migrateLocalPreferences(prefs: unknown): Promise<{ source: 'tauri'; count: number }>
 export function setSecret(name: string, secret: string): Promise<unknown>
 export function listSecretRefs(): Promise<unknown[]>
@@ -36,7 +45,7 @@ export function listAiConfigs(): Promise<AiProviderConfig[]>
 export function upsertAiConfig(cmd: UpsertAiProviderConfigCommand): Promise<AiProviderConfig>
 export function deleteAiConfig(id: string): Promise<unknown>
 export function setDefaultAiConfig(id: string): Promise<unknown>
-export function testAiProvider(): Promise<AiProviderTestResult>
+export function testAiProvider(configId: string): Promise<AiProviderTestResult>
 export function createBackup(appVersion?: string | null): Promise<{ source: 'tauri'; manifest: unknown; path?: string | null }>
 export function listBackups(): Promise<{ source: 'tauri'; items: Array<{ name: string; path: string; modifiedAt?: string | null; sizeBytes?: number }> }>
 export interface BackupImportGrant {

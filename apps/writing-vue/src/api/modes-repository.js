@@ -3,6 +3,7 @@
  */
 
 import { invokeCommand, isTauriRuntime, unwrapCommandResponse } from '@/api/tauri-bridge.js'
+import { endlessSubmitIdempotencyKey } from './mode-idempotency.js'
 
 function newKey(prefix = 'mode') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
@@ -106,10 +107,12 @@ export async function cancelEndless(sessionId) {
 }
 
 export async function submitEndless(payload) {
+  const sessionId = String(payload.sessionId || '').trim()
+  const assetId = String(payload.assetId || '').trim()
   const response = await invokeCommand('endless_submit', {
     cmd: {
-      sessionId: payload.sessionId,
-      assetId: payload.assetId,
+      sessionId,
+      assetId,
       assetRevision: payload.assetRevision ?? null,
       assetFingerprint: payload.assetFingerprint || null,
       answers: payload.answers || {},
@@ -117,7 +120,9 @@ export async function submitEndless(payload) {
       questionTimeline: payload.questionTimeline || [],
       durationMs: payload.durationMs ?? null,
       titleSnapshot: payload.titleSnapshot || null,
-      idempotencyKey: payload.idempotencyKey || newKey('endless-submit')
+      // A lost IPC response is a retry of this exact session passage, not a
+      // new submission. The server owns replay; this key must survive reload.
+      idempotencyKey: payload.idempotencyKey || endlessSubmitIdempotencyKey(sessionId, assetId)
     }
   })
   return { source: 'tauri', result: unwrapCommandResponse(response, 'endless_submit') }

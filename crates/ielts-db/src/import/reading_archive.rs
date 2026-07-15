@@ -2,42 +2,18 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::import::repository::import_reading_submission_json;
+use crate::reading::{
+    import_reading_archive_value as import_canonical_reading_archive, ReadingArchiveImportResult,
+};
 use crate::sqlite::{DbError, DbResult};
 use rusqlite::Connection;
 
-#[derive(Debug, Default)]
-pub struct ImportReport {
-    pub imported: usize,
-    pub failed: usize,
-    pub errors: Vec<String>,
-    pub attempt_ids: Vec<String>,
-}
+/// Compatibility name for migration callers. Product code uses
+/// `ReadingArchiveImportResult` from `reading::archive` directly.
+pub type ImportReport = ReadingArchiveImportResult;
 
 pub fn import_reading_archive_value(conn: &Connection, doc: &Value) -> DbResult<ImportReport> {
-    // Product archives use submissions[]; cold fixtures use records[].
-    let records = doc
-        .get("submissions")
-        .or_else(|| doc.get("records"))
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| {
-            DbError::Import("reading archive missing submissions[]/records[]".into())
-        })?;
-
-    let mut report = ImportReport::default();
-    for (idx, record) in records.iter().enumerate() {
-        match import_reading_submission_json(conn, record) {
-            Ok(id) => {
-                report.imported += 1;
-                report.attempt_ids.push(id);
-            }
-            Err(err) => {
-                report.failed += 1;
-                report.errors.push(format!("records[{idx}]: {err}"));
-            }
-        }
-    }
-    Ok(report)
+    import_canonical_reading_archive(conn, doc)
 }
 
 pub fn import_reading_archive_file(conn: &Connection, path: &Path) -> DbResult<ImportReport> {

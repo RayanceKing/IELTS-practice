@@ -30,10 +30,24 @@
   --atlas-line: rgba(92, 109, 164, 0.2);
   --atlas-shadow: 0 18px 42px rgba(42, 57, 108, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.88);
   --atlas-shadow-high: 0 28px 68px rgba(38, 49, 101, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.92);
+  --atlas-canvas: radial-gradient(circle at 7% -12%, rgba(129, 92, 246, 0.52), transparent 39rem), radial-gradient(circle at 96% 2%, rgba(59, 130, 246, 0.42), transparent 36rem), radial-gradient(circle at 51% 112%, rgba(124, 58, 237, 0.22), transparent 44rem), linear-gradient(145deg, #e8edff 0%, #edf2ff 46%, #dbeafe 100%);
+  --atlas-canvas-overlay: linear-gradient(115deg, rgba(255, 255, 255, 0.4), transparent 38%), repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.16) 0, rgba(255, 255, 255, 0.16) 1px, transparent 1px, transparent 94px);
+  --atlas-canvas-orb: radial-gradient(circle, rgba(255, 255, 255, 0.92), rgba(190, 205, 255, 0.18) 46%, transparent 72%);
+  --atlas-canvas-solid: #edf2ff;
+  --atlas-nav-active-bg: rgba(255, 255, 255, 0.58);
+  --atlas-nav-active-shadow: 0 1px 4px rgba(37, 35, 44, 0.08);
+  --atlas-button-brand-overlay: rgba(255, 255, 255, 0.42);
+  --atlas-button-brand-border: rgba(255, 255, 255, 0.62);
   --atlas-radius-sm: 12px;
   --atlas-radius-md: 18px;
   --atlas-radius-lg: 26px;
   --atlas-radius-xl: 34px;
+  --atlas-library-surface: linear-gradient(145deg, rgba(255, 255, 255, 0.74), rgba(236, 241, 255, 0.44));
+  --atlas-library-surface-soft: linear-gradient(145deg, rgba(255, 255, 255, 0.62), rgba(242, 246, 255, 0.36));
+  --atlas-library-selected: linear-gradient(145deg, rgba(109, 93, 252, 0.18), rgba(49, 133, 255, 0.14));
+  --atlas-library-muted: rgba(236, 241, 255, 0.62);
+  --atlas-library-danger: rgba(186, 59, 93, 0.1);
+  --atlas-library-success: rgba(49, 133, 255, 0.13);
 
   /* Foundational compatibility scale. Names survive the migration; physical
    * values live here only so legacy component structure cannot spawn a theme. */
@@ -210,6 +224,49 @@
   min-height: 100vh;
   color: var(--atlas-ink);
   font-family: var(--font-family-base);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root,
+  .atlas-source-ui {
+    color-scheme: dark;
+    --atlas-ink: #edf2ff;
+    --atlas-ink-soft: #b9c6e4;
+    --atlas-ink-faint: #8d9bb9;
+    --atlas-accent: #aaa0ff;
+    --atlas-accent-strong: #c1bbff;
+    --atlas-accent-alt: #78b6ff;
+    --atlas-accent-soft: rgba(170, 160, 255, 0.18);
+    --atlas-accent-ring: rgba(170, 160, 255, 0.72);
+    --atlas-glass: rgba(18, 27, 57, 0.62);
+    --atlas-glass-elevated: rgba(24, 35, 70, 0.78);
+    --atlas-glass-pressed: rgba(71, 86, 139, 0.5);
+    --atlas-rim: rgba(229, 237, 255, 0.2);
+    --atlas-line: rgba(188, 204, 242, 0.2);
+    --atlas-shadow: 0 18px 42px rgba(0, 0, 0, 0.32), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+    --atlas-shadow-high: 0 28px 68px rgba(0, 0, 0, 0.48), inset 0 1px 1px rgba(255, 255, 255, 0.12);
+    --atlas-canvas: radial-gradient(circle at 7% -12%, rgba(113, 84, 223, 0.38), transparent 39rem), radial-gradient(circle at 96% 2%, rgba(39, 111, 202, 0.3), transparent 36rem), linear-gradient(145deg, #0b1024 0%, #101a37 52%, #14254a 100%);
+    --atlas-canvas-overlay: linear-gradient(115deg, rgba(255, 255, 255, 0.06), transparent 38%), repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0, rgba(255, 255, 255, 0.035) 1px, transparent 1px, transparent 94px);
+    --atlas-canvas-orb: radial-gradient(circle, rgba(189, 211, 255, 0.22), rgba(72, 93, 163, 0.08) 46%, transparent 72%);
+    --atlas-canvas-solid: #101a37;
+    --atlas-nav-active-bg: rgba(255, 255, 255, 0.12);
+    --atlas-nav-active-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+    --atlas-button-brand-overlay: rgba(255, 255, 255, 0.1);
+    --atlas-button-brand-border: rgba(255, 255, 255, 0.28);
+    --color-white: #f4f7ff;
+    --color-gray-50: #e9efff;
+    --color-gray-100: #d5dff7;
+    --color-gray-200: #b9c6e4;
+    --color-gray-300: #98a8c8;
+    --color-gray-400: #7e8ead;
+    --color-gray-500: #aab7d2;
+    --color-gray-600: #bdc9e7;
+    --color-gray-700: #d9e2f7;
+    --color-gray-800: #e8efff;
+    --lg-bg-toolbar: rgba(13, 22, 49, 0.64);
+    --lg-bg-interactive: rgba(255, 255, 255, 0.1);
+    --lg-bg-scrim: rgba(2, 7, 20, 0.64);
+  }
 }
 
 .atlas-source-ui :is(.glass-toolbar, .atlas-glass-panel, .card, .surface, .shell, .hero-panel, .dialog, .settings-detail-panel) {
@@ -567,37 +624,266 @@
   color: var(--atlas-accent);
 }
 
-.atlas-source-ui .practice-library-open-source.practice-library-open-source .category-card {
-  border-color: var(--atlas-rim);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.74), rgba(236, 241, 255, 0.44));
-  background-image:
-    radial-gradient(circle at 0 0, rgba(109, 93, 252, 0.16), transparent 54%),
-    radial-gradient(circle at 100% 100%, rgba(49, 133, 255, 0.14), transparent 56%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.74), rgba(236, 241, 255, 0.44));
-  box-shadow: var(--atlas-shadow);
-}
-
-.atlas-source-ui .practice-library-open-source.practice-library-open-source .category-card::before {
-  height: 3px;
-  background: var(--color-brand-gradient);
-  opacity: 0.86;
-}
-
-.atlas-source-ui .practice-library-open-source.practice-library-open-source .category-card::after {
-  background: linear-gradient(145deg, rgba(109, 93, 252, 0.08), rgba(49, 133, 255, 0.08));
-  mix-blend-mode: normal;
-}
-
-.atlas-source-ui .practice-library-open-source.practice-library-open-source .category-card:hover {
-  border-color: rgba(109, 93, 252, 0.28);
-  box-shadow: var(--atlas-shadow-high);
-}
-
-.atlas-source-ui .practice-library-open-source.practice-library-open-source .category-card .btn[data-action="browse-category"],
-.atlas-source-ui .practice-library-open-source.practice-library-open-source .category-card .btn[data-action="start-random-practice"] {
-  border-color: var(--atlas-rim);
-  background: rgba(255, 255, 255, 0.62);
+/* Reading library: one local workspace below the product NavBar. The page
+ * stylesheet owns geometry only; this block is its sole visual owner. */
+.atlas-source-ui .practice-library {
+  --library-panel: var(--atlas-library-surface);
+  --library-panel-soft: var(--atlas-library-surface-soft);
+  --library-line: var(--atlas-line);
+  --library-rim: var(--atlas-rim);
+  --library-muted: var(--atlas-library-muted);
+  --library-selected: var(--atlas-library-selected);
+  --library-shadow: var(--atlas-shadow);
   color: var(--atlas-ink);
+}
+
+.atlas-source-ui .practice-library .library-workspace-header {
+  padding: 4px 2px;
+}
+
+.atlas-source-ui .practice-library .library-workspace-header__eyebrow {
+  color: var(--atlas-accent);
+}
+
+.atlas-source-ui .practice-library .library-view-tabs {
+  padding: 5px;
+  border: 1px solid var(--library-rim);
+  border-radius: 999px;
+  background: var(--lg-bg-interactive);
+  box-shadow: var(--lg-shadow-subtle);
+  backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+}
+
+.atlas-source-ui .practice-library .library-view-tabs__button {
+  color: var(--atlas-ink-soft);
+  border-radius: 999px;
+  background: transparent;
+  font-weight: 700;
+  transition:
+    color var(--lg-duration-fast) var(--lg-easing-spring),
+    background var(--lg-duration-fast) var(--lg-easing-spring),
+    box-shadow var(--lg-duration-fast) var(--lg-easing-spring);
+}
+
+.atlas-source-ui .practice-library .library-view-tabs__button:hover,
+.atlas-source-ui .practice-library .library-view-tabs__button.active {
+  color: var(--atlas-ink);
+  background: var(--lg-bg-elevated);
+  box-shadow: var(--lg-shadow-subtle);
+}
+
+.atlas-source-ui .practice-library .view.hero-panel,
+.atlas-source-ui .practice-library .backup-list-card,
+.atlas-source-ui .practice-library .suite-mode-selector-content,
+.atlas-source-ui .practice-library .clock-overlay-inner,
+.atlas-source-ui .practice-library .pdf-viewer-dialog {
+  border: 1px solid var(--library-rim);
+  border-radius: var(--atlas-radius-lg);
+  background: var(--library-panel);
+  box-shadow: var(--library-shadow);
+  backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
+}
+
+.atlas-source-ui .practice-library .view.hero-panel {
+  padding: clamp(18px, 3vw, 28px);
+}
+
+.atlas-source-ui .practice-library :is(.category-card, .exam-item, .hero-card, .practice-trend-card__face, .history-item, .tool-card, .hero-settings-group > .hero-panel, .backup-entry, .custom-suite-selection-bar, .system-info-surface, .app-update-details-row) {
+  border: 1px solid var(--library-rim);
+  border-radius: var(--atlas-radius-md);
+  background: var(--library-panel-soft);
+  box-shadow: var(--lg-shadow-subtle);
+  backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+}
+
+.atlas-source-ui .practice-library :is(.category-card, .exam-item, .history-item, .tool-card, .backup-entry) {
+  transition:
+    transform var(--lg-duration-fast) var(--lg-easing-spring),
+    box-shadow var(--lg-duration-fast) var(--lg-easing-spring),
+    border-color var(--lg-duration-fast) var(--lg-easing-spring);
+}
+
+.atlas-source-ui .practice-library :is(.category-card, .exam-item, .history-item, .tool-card, .backup-entry):hover {
+  border-color: var(--atlas-accent-ring);
+  box-shadow: var(--library-shadow);
+  transform: translateY(-2px);
+}
+
+.atlas-source-ui .practice-library .category-card::before {
+  display: block;
+  width: 42px;
+  height: 3px;
+  margin-bottom: 18px;
+  border-radius: 999px;
+  background: var(--color-brand-gradient);
+  content: '';
+}
+
+.atlas-source-ui .practice-library :is(.category-meta, .exam-meta, .hero-panel__muted, .more-view-subtitle, .record-meta-line, .backup-entry-meta, .practice-trend-card__metric-label) {
+  color: var(--atlas-ink-soft);
+}
+
+.atlas-source-ui .practice-library .exam-meta {
+  border: 1px solid var(--library-line);
+  border-radius: 999px;
+  background: var(--library-muted);
+}
+
+.atlas-source-ui .practice-library :is(.btn, .exam-item-action-btn, .shui-glass-btn, .hero-btn, .browse-frequency-chip, .shui-segmented-btn, .practice-trend-option, .practice-custom-option, .suite-flow-option, .custom-suite-picked-chip, .practice-summary-toggle, .practice-custom-card__icon-btn) {
+  color: var(--atlas-ink);
+  border: 1px solid var(--library-rim);
+  border-radius: var(--atlas-radius-sm);
+  background: var(--lg-bg-interactive);
+  box-shadow: var(--lg-shadow-subtle);
+  font-weight: 700;
+  transition:
+    transform var(--lg-duration-fast) var(--lg-easing-spring),
+    background var(--lg-duration-fast) var(--lg-easing-spring),
+    box-shadow var(--lg-duration-fast) var(--lg-easing-spring);
+}
+
+.atlas-source-ui .practice-library :is(.btn, .exam-item-action-btn, .shui-glass-btn, .hero-btn, .browse-frequency-chip, .shui-segmented-btn, .practice-trend-option, .practice-custom-option, .suite-flow-option, .custom-suite-picked-chip, .practice-summary-toggle, .practice-custom-card__icon-btn):hover:not(:disabled) {
+  background: var(--lg-bg-elevated);
+  box-shadow: var(--library-shadow);
+  transform: translateY(-1px);
+}
+
+.atlas-source-ui .practice-library :is(.btn, .exam-item-action-btn, .shui-glass-btn, .hero-btn, .browse-frequency-chip, .shui-segmented-btn, .practice-trend-option, .practice-custom-option, .suite-flow-option, .custom-suite-picked-chip, .practice-summary-toggle, .practice-custom-card__icon-btn):active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.atlas-source-ui .practice-library :is(.btn-secondary, .btn-outline, .hero-btn--ghost) {
+  background: var(--lg-bg-primary);
+}
+
+.atlas-source-ui .practice-library :is(.btn-warning, .hero-btn--warn) {
+  color: var(--atlas-danger);
+  border-color: color-mix(in srgb, var(--atlas-danger) 28%, var(--library-rim));
+  background: var(--atlas-library-danger);
+}
+
+.atlas-source-ui .practice-library :is(.btn-success, .btn-info) {
+  color: var(--atlas-accent-strong);
+  border-color: color-mix(in srgb, var(--atlas-accent) 28%, var(--library-rim));
+  background: var(--atlas-library-success);
+}
+
+.atlas-source-ui .practice-library :is(.shui-segmented-btn.active, .browse-frequency-chip.active, .practice-trend-option.active, .practice-custom-option.active, .suite-flow-option.active, .custom-suite-picked-chip.filled) {
+  color: var(--atlas-accent-strong);
+  border-color: var(--atlas-accent-ring);
+  background: var(--library-selected);
+}
+
+.atlas-source-ui .practice-library .shui-segmented-indicator {
+  border-radius: var(--atlas-radius-sm);
+  background: var(--library-selected);
+  box-shadow: 0 0 0 1px var(--atlas-accent-soft);
+}
+
+.atlas-source-ui .practice-library :is(.search-input, .browse-sort-select, .suite-frequency-select) {
+  border: 1px solid var(--library-line);
+  border-radius: var(--atlas-radius-sm);
+  background: var(--lg-bg-elevated);
+  color: var(--atlas-ink);
+}
+
+.atlas-source-ui .practice-library .exam-list-empty,
+.atlas-source-ui .practice-library .history-empty-placeholder,
+.atlas-source-ui .practice-library .practice-trend-empty {
+  border: 1px dashed var(--library-line);
+  border-radius: var(--atlas-radius-md);
+  background: var(--library-muted);
+  color: var(--atlas-ink-soft);
+}
+
+.atlas-source-ui .practice-library .inline-message-error {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--atlas-danger) 32%, var(--library-rim));
+  border-radius: var(--atlas-radius-sm);
+  background: var(--atlas-library-danger);
+  color: var(--atlas-danger);
+}
+
+.atlas-source-ui .practice-library :is(.hero-card__value, .stat-number, .practice-trend-card__metric-value, .priority-accuracy__orb span) {
+  color: var(--atlas-accent-strong);
+}
+
+.atlas-source-ui .practice-library :is(.practice-trend-bars .practice-trend-bar, .practice-radar-bar__fill, .priority-progress__fill) {
+  border-radius: 999px;
+  background: var(--color-brand-gradient);
+}
+
+.atlas-source-ui .practice-library :is(.practice-radar-bar__track, .priority-progress__track) {
+  border-radius: 999px;
+  background: var(--library-muted);
+}
+
+.atlas-source-ui .practice-library .priority-accuracy__orb {
+  border: 1px solid var(--atlas-accent-ring);
+  border-radius: 50%;
+  background: var(--library-selected);
+}
+
+.atlas-source-ui .practice-library .practice-heatmap__cell,
+.atlas-source-ui .practice-library .practice-heatmap__legend-cell {
+  border-radius: 4px;
+  background: var(--library-muted);
+}
+
+.atlas-source-ui .practice-library :is(.practice-heatmap__cell--1, .practice-heatmap__legend-cell--1) {
+  background: color-mix(in srgb, var(--atlas-accent-alt) 26%, var(--library-muted));
+}
+
+.atlas-source-ui .practice-library :is(.practice-heatmap__cell--2, .practice-heatmap__legend-cell--2) {
+  background: color-mix(in srgb, var(--atlas-accent-alt) 46%, var(--library-muted));
+}
+
+.atlas-source-ui .practice-library :is(.practice-heatmap__cell--3, .practice-heatmap__legend-cell--3) {
+  background: color-mix(in srgb, var(--atlas-accent) 64%, var(--library-muted));
+}
+
+.atlas-source-ui .practice-library :is(.practice-heatmap__cell--4, .practice-heatmap__legend-cell--4) {
+  background: var(--atlas-accent-strong);
+}
+
+.atlas-source-ui .practice-library .history-item-selected {
+  border-color: var(--atlas-accent-ring);
+  background: var(--library-selected);
+}
+
+.atlas-source-ui .practice-library .suite-mode-selector-modal,
+.atlas-source-ui .practice-library .clock-overlay,
+.atlas-source-ui .practice-library .dialog-overlay {
+  background: var(--lg-bg-scrim);
+  backdrop-filter: blur(var(--lg-blur-xl));
+  -webkit-backdrop-filter: blur(var(--lg-blur-xl));
+}
+
+.atlas-source-ui .practice-library .suite-mode-selector-content,
+.atlas-source-ui .practice-library .clock-overlay-inner,
+.atlas-source-ui .practice-library .pdf-viewer-dialog {
+  background: var(--lg-bg-elevated);
+  box-shadow: var(--lg-shadow-high);
+}
+
+.atlas-source-ui .practice-library .practice-local-message {
+  border: 1px solid var(--library-rim);
+  border-radius: var(--atlas-radius-sm);
+  background: var(--lg-bg-elevated);
+  box-shadow: var(--lg-shadow-elevated);
+  color: var(--atlas-ink);
+  backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+}
+
+.atlas-source-ui .practice-library .pdf-viewer-frame {
+  border: 1px solid var(--library-line);
+  border-radius: var(--atlas-radius-sm);
+  background: var(--lg-bg-primary);
 }
 
 .atlas-source-ui .reading-suite-page.reading-suite-page {

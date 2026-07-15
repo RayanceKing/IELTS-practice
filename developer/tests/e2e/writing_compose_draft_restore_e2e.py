@@ -469,7 +469,7 @@ async def assert_writing_top_nav_stays_in_writing_module(page, entry_url: str) -
 
     await page.click(".brand-block")
     await page.wait_for_url("**#/", timeout=10000)
-    await page.wait_for_selector('[data-practice-reading-home] h1:has-text("IELTS Practice")', timeout=20000)
+    await page.wait_for_selector('[data-practice-reading-home][data-library-ready]', timeout=20000)
     await assert_writing_nav_target(page, "写作", "/writing", ".compose-page")
     await wait_for_compose(page)
 

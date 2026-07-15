@@ -8,12 +8,13 @@ use uuid::Uuid;
 use ielts_domain::domain::{AttemptMode, SuiteFlowMode, SuiteStatus};
 use ielts_domain::dto::AttemptRecord;
 
+use crate::history::prune_terminal_attempts_in_transaction;
 use crate::modes::timer::{TimerMode, TimerState};
 use crate::reading::assets::{
     list_assets, load_answer_key, load_practice_asset_payload, AssetIndexEntry,
 };
 use crate::reading::attempt::{
-    save_reading_draft_in_transaction, submit_reading_attempt_in_transaction, ReadingDraftCommand,
+    save_reading_draft_in_scope, submit_reading_attempt_in_scope, ReadingDraftCommand,
     ReadingQuestionProgress, ReadingSubmitCommand, ReadingSubmitResult,
 };
 use crate::sqlite::{DbError, DbResult};
@@ -574,6 +575,7 @@ mod pick_tests {
             content_ref: None,
             payload_ref: None,
             activity: "reading".into(),
+            pdf_only: false,
         }
     }
 
@@ -639,7 +641,7 @@ pub fn save_suite_passage_draft(
         ));
     }
     let attempt_id = format!("reading-{}-p{}", session.session_id, passage_index + 1);
-    let mut attempt = save_reading_draft_in_transaction(
+    let attempt = save_reading_draft_in_scope(
         &tx,
         &ReadingDraftCommand {
             attempt_id: attempt_id.clone(),
@@ -652,13 +654,9 @@ pub fn save_suite_passage_draft(
             title_snapshot: cmd.title_snapshot.clone(),
             idempotency_key: format!("suite-draft-{}", cmd.idempotency_key),
         },
+        AttemptMode::Suite,
+        Some(&session.session_id),
     )?;
-    tx.execute(
-        "UPDATE attempts SET mode = 'suite', suite_id = ?1 WHERE id = ?2",
-        params![session.session_id, attempt_id],
-    )?;
-    attempt.mode = AttemptMode::Suite;
-    attempt.suite_id = Some(session.session_id.clone());
     session.timer = session.timer.merge_snapshot(cmd.timer_snapshot.as_ref());
     {
         let passage = &mut session.sequence[passage_index];
@@ -733,7 +731,7 @@ fn submit_suite_passage_in_transaction(
     }
 
     let attempt_id = format!("reading-{}-p{}", session.session_id, passage_index + 1);
-    let mut submit = submit_reading_attempt_in_transaction(
+    let submit = submit_reading_attempt_in_scope(
         conn,
         &ReadingSubmitCommand {
             attempt_id: attempt_id.clone(),
@@ -747,15 +745,9 @@ fn submit_suite_passage_in_transaction(
             title_snapshot: cmd.title_snapshot.clone(),
             idempotency_key: format!("suite-pass-{}", cmd.idempotency_key),
         },
+        AttemptMode::Suite,
+        Some(&session.session_id),
     )?;
-
-    // Tag attempt as suite mode
-    conn.execute(
-        "UPDATE attempts SET mode = 'suite', suite_id = ?1 WHERE id = ?2",
-        params![session.session_id, attempt_id],
-    )?;
-    submit.attempt.mode = AttemptMode::Suite;
-    submit.attempt.suite_id = Some(session.session_id.clone());
 
     session.timer = session.timer.merge_snapshot(cmd.timer_snapshot.as_ref());
 
@@ -796,6 +788,10 @@ fn submit_suite_passage_in_transaction(
         submission: submit,
     };
     store_idempotent_submit(conn, &cmd.idempotency_key, &session.session_id, &result)?;
+    // Keep the terminal attempt, suite state and replay record atomic with
+    // retention. This runs after the suite pointer is durable, so pruning an
+    // older passage cannot be overwritten by a later session persist.
+    prune_terminal_attempts_in_transaction(conn)?;
     Ok(result)
 }
 

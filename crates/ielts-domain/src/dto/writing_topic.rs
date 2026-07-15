@@ -43,7 +43,12 @@ pub struct WritingTopicDto {
 pub struct UpsertWritingTopicCommand {
     /// Omit for a server-generated ID. A supplied ID is always treated as a
     /// string and is validated before any mutation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "source_id",
+        alias = "sourceId"
+    )]
     pub id: Option<String>,
     #[serde(alias = "type", alias = "task_type")]
     pub task_type: WritingTaskType,
@@ -55,7 +60,11 @@ pub struct UpsertWritingTopicCommand {
     pub image_path: Option<String>,
     /// Omitted edits preserve an existing topic's official flag. Imports may
     /// explicitly retain the flag from a legacy package.
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "is_official")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "is_official"
+    )]
     pub is_official: Option<bool>,
 }
 

@@ -24,6 +24,12 @@ function loadModule(relativePath, injected = {}) {
     .replace(/import\s+\{([^}]+)\}\s+from\s+'\.\/readingLibraryCore\.js'/g, 'const {$1} = __deps.readingLibraryCore')
     .replace(/import\s+\{([^}]+)\}\s+from\s+'\.\/readingAssetCore\.js'/g, 'const {$1} = __deps.readingAssetCore')
     .replace(/import\s+\{([^}]+)\}\s+from\s+'\.\/readingHistoryCore\.js'/g, 'const {$1} = __deps.readingHistoryCore')
+    .replace(/^interface\s+\w+\s*\{[^\r\n]*\}\s*$/gm, '')
+    .replace(/^interface\s+\w+\s*\{[\s\S]*?^\}\s*$/gm, '')
+    .replace(/\bref<[^>]+>\(/g, 'ref(')
+    .replace(/dependencies\s*:\s*(?:ReadingLibraryDependencies|ReadingHistoryDependencies|ReadingAssetDependencies)/g, 'dependencies')
+    .replace(/assetId\s*:\s*string/g, 'assetId')
+    .replace(/options\s*:\s*\{\s*afterLoad\?:\s*\(asset\s*:\s*ReadingAsset\)\s*=>\s*Promise<void>\s*\|\s*void\s*\}/g, 'options')
     .replace(/export function /g, 'function ')
     .concat('\nmodule.exports = { ')
   source += exportNames.join(', ') + ' }\n'
@@ -61,8 +67,8 @@ function testUseReadingLibraryLoadsAssets() {
     readingLibraryCore,
     api: {
       readingLibraryApi: {
-        listAssets: async (options) => {
-          calls.push(options)
+        listAssets: async () => {
+          calls.push('default')
           return expected
         },
         getAsset: async () => null
@@ -71,14 +77,14 @@ function testUseReadingLibraryLoadsAssets() {
   })
 
   return useReadingLibrary({ api: {
-    listAssets: async (options) => {
-      calls.push({ injected: options })
+    listAssets: async () => {
+      calls.push('injected')
       return expected
     },
     getAsset: async () => null
-  } }).loadReadingAssets({ refresh: true }).then((result) => {
+  } }).loadReadingAssets().then((result) => {
     assert.strictEqual(result, expected)
-    assert.deepStrictEqual(calls, [{ injected: { refresh: true } }])
+    assert.deepStrictEqual(calls, ['injected'])
   })
 }
 
@@ -150,15 +156,14 @@ async function testReadingPageLoadAssetSuccessAndFailure() {
   const successCalls = []
   const success = useReadingAsset({
     api: {
-      getAsset: async (assetId, options) => {
-        successCalls.push({ assetId, options })
+      getAsset: async (assetId) => {
+        successCalls.push({ assetId })
         return { id: assetId, payload: { questionOrder: [] } }
       },
       listAssets: async () => ({ data: [] })
     }
   })
   const loaded = await success.loadReadingAsset('  reading-01  ', {
-    refresh: true,
     afterLoad: async (asset) => successCalls.push({ afterLoad: asset.id })
   })
   assert.strictEqual(loaded.id, 'reading-01')
@@ -166,7 +171,7 @@ async function testReadingPageLoadAssetSuccessAndFailure() {
   assert.strictEqual(success.error.value, '')
   assert.strictEqual(success.loading.value, false)
   assert.deepStrictEqual(toPlain(successCalls), [
-    { assetId: 'reading-01', options: { refresh: true } },
+    { assetId: 'reading-01' },
     { afterLoad: 'reading-01' }
   ])
 
@@ -192,11 +197,49 @@ async function testReadingPageLoadAssetSuccessAndFailure() {
   assert.strictEqual(missing.error.value, '缺少阅读资源编号')
 }
 
+function testReadingLibraryUsesOnlyNativeArchiveAndIndexTruth() {
+  const read = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), 'utf8')
+  const page = read('apps/writing-vue/src/views/PracticeLibraryPage.vue')
+  const settings = read('apps/writing-vue/src/modules/practice-reading/components/ReadingSettingsPanel.vue')
+  const moreTools = read('apps/writing-vue/src/modules/practice-reading/components/ReadingMoreToolsPanel.vue')
+  const client = read('apps/writing-vue/src/api/practice-client.js')
+  const api = read('apps/writing-vue/src/modules/practice-reading/api.ts')
+
+  for (const required of [
+    'requireReadingArchiveExport',
+    'requireCommittedReadingArchiveImport',
+    "{ value: 'settings', label: '数据工具'",
+    "invokeCommand('reading_export_archive')",
+    "invokeCommand('reading_import_archive'",
+    'Rust/SQLite 本地索引'
+  ]) {
+    assert.ok([page, settings, client].some((source) => source.includes(required)), `native Reading boundary missing: ${required}`)
+  }
+  for (const retired of [
+    'READING_BACKUP_STORAGE_KEY',
+    'readReadingBackups',
+    'persistReadingBackups',
+    'createReadingBackup',
+    'forceRefreshReadingData',
+    'create-reading-backup',
+    'show-reading-backup-list',
+    'force-refresh-reading-data',
+    'SM-2',
+    'show-achievements-tool',
+    'open-vocab-tool',
+    'refresh: Boolean(options.refresh)'
+  ]) {
+    assert.ok(![page, settings, moreTools, api].some((source) => source.includes(retired)), `retired Reading UI truth remains: ${retired}`)
+  }
+  assert.ok(!page.includes("if (view === 'settings')"), 'Reading archive controls must remain reachable from Library data tools')
+}
+
 async function main() {
   await testUseReadingLibraryLoadsAssets()
   await testUseReadingHistoryLoadsHistoryAndComputesStats()
   testReadingBrowsePanelSearchAndFilter()
   await testReadingPageLoadAssetSuccessAndFailure()
+  testReadingLibraryUsesOnlyNativeArchiveAndIndexTruth()
   console.log('practiceReadingCore10.test.js passed')
 }
 

@@ -140,6 +140,8 @@ pub fn measure_history_list_ms(conn: &Connection) -> DbResult<u128> {
             end_date: None,
             min_score: None,
             max_score: None,
+            score_scale: None,
+            task_type: None,
         },
     )?;
     let _ = page.items.len();

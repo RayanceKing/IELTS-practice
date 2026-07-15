@@ -17,15 +17,7 @@
         <div class="tool-card-icon" v-html="icons.clockLarge"></div>
         <div class="tool-card-content">
           <h3>全屏时钟</h3>
-          <p>沉浸式模拟指针时钟，实时同步系统时间，陪伴你的专注时刻。</p>
-        </div>
-        <div class="tool-card-arrow">进入</div>
-      </button>
-      <button class="tool-card" type="button" data-action="open-vocab" @click="$emit('open-vocab-tool', $event)">
-        <div class="tool-card-icon" v-html="icons.vocabLarge"></div>
-        <div class="tool-card-content">
-          <h3>单词背诵</h3>
-          <p>SM-2记忆算法，随时继续你的词汇任务。</p>
+          <p>全屏数字时钟，实时显示系统时间，适合专注练习时计时。</p>
         </div>
         <div class="tool-card-arrow">进入</div>
       </button>
@@ -36,20 +28,6 @@
           <p>复用统一阅读页，查看答案、解析与定位高亮，并可切换测试。</p>
         </div>
         <div class="tool-card-arrow">进入</div>
-      </button>
-      <button
-        class="tool-card"
-        type="button"
-        data-index-action="show-achievements"
-        data-action="show-achievements"
-        @click="$emit('show-achievements-tool', $event)"
-      >
-        <div class="tool-card-icon" v-html="icons.achievementLarge"></div>
-        <div class="tool-card-content">
-          <h3>成就</h3>
-          <p>查看你解锁的徽章和荣誉。</p>
-        </div>
-        <div class="tool-card-arrow">查看</div>
       </button>
     </div>
   </div>
@@ -64,8 +42,6 @@ defineProps({
 defineEmits([
   'open-writing-entry',
   'open-clock-tool',
-  'open-vocab-tool',
-  'open-reading-memorize',
-  'show-achievements-tool'
+  'open-reading-memorize'
 ])
 </script>

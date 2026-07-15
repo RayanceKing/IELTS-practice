@@ -166,6 +166,7 @@
               {{ customSuiteDraft ? '选择此题' : '开始练习' }}
             </button>
             <button
+              v-if="asset.pdfOnly"
               class="btn btn-outline exam-item-action-btn"
               type="button"
               data-action="pdf"

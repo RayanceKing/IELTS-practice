@@ -260,6 +260,7 @@ fn import_history_row(conn: &Connection, row: &LegacyHistoryRow) -> DbResult<()>
         title_snapshot: Some(row.title.clone()),
         prompt_snapshot: None,
         content_text: None,
+        task_type: None,
         answers: vec![],
         annotations: vec![],
     };
@@ -267,7 +268,7 @@ fn import_history_row(conn: &Connection, row: &LegacyHistoryRow) -> DbResult<()>
 }
 
 fn import_essay_row(conn: &Connection, row: &LegacyEssayRow) -> DbResult<()> {
-    use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
+    use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale, WritingTaskType};
     use ielts_domain::dto::AttemptRecord;
 
     let attempt_id = format!("essay-{}", row.id);
@@ -309,6 +310,7 @@ fn import_essay_row(conn: &Connection, row: &LegacyEssayRow) -> DbResult<()> {
         title_snapshot: Some(title),
         prompt_snapshot: row.topic_text.clone(),
         content_text: Some(row.content.clone()),
+        task_type: WritingTaskType::parse_loose(&row.task_type),
         answers: vec![],
         annotations: vec![],
     };

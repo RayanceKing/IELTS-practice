@@ -31,6 +31,7 @@ import {
 import { writingTopicsRepository } from '@/api/topics-repository.js'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 import { adaptWritingHistoryDetail } from '@/utils/evaluation-result.js'
+import { requireWritingAttemptMode } from '@/api/writing-mode.js'
 
 const ERROR_MESSAGES = {
   invalid_api_key: 'API 密钥无效，请前往设置页面检查配置',
@@ -268,7 +269,7 @@ export const configs = {
 
   async getDefault() {
     const list = await this.list()
-    return list.find((item) => item.is_default) || list[0] || null
+    return list.find((item) => item.is_default) || null
   },
 
   async create(data) {
@@ -310,8 +311,12 @@ export const configs = {
     return this.update(id, { is_enabled: !prev.is_enabled })
   },
 
-  async test() {
-    return testAiProvider()
+  async test(id) {
+    const configId = String(id || '').trim()
+    if (!configId) {
+      throw new Error('请选择要测试的 API 配置')
+    }
+    return testAiProvider(configId)
   }
 }
 
@@ -486,6 +491,7 @@ export const evaluate = {
   async start(payload) {
     const attemptId = payload.sessionId || payload.attemptId || newId('attempt')
     const content = payload.content || payload.contentText || ''
+    const mode = requireWritingAttemptMode(payload.mode)
     const promptSnapshot =
       payload.topic_text || payload.topicText || payload.promptSnapshot || null
     const taskType = payload.task_type || payload.taskType || null
@@ -495,13 +501,14 @@ export const evaluate = {
 
     await saveDraft({
       attemptId,
-      mode: payload.mode || 'bank',
+      mode,
       assetId:
         payload.topic_id != null
           ? String(payload.topic_id)
           : payload.assetId || null,
       contentText: content,
       promptSnapshot,
+      taskType,
       idempotencyKey: newIdempotencyKey('draft')
     })
     await submitAttempt(attemptId, newIdempotencyKey('submit'))
@@ -526,18 +533,15 @@ export const evaluate = {
   },
 
   async cancel(sessionId) {
-    try {
-      const { evaluation } = await getEvaluationForAttempt(sessionId)
-      const evaluationId = evaluation?.id
-      if (evaluationId) {
-        const stop = activePolls.get(evaluationId)
-        if (stop) stop()
-        await cancelEvaluation(evaluationId)
-      }
-    } catch (_) {
-      // ignore
+    const { evaluation } = await getEvaluationForAttempt(sessionId)
+    const evaluationId = evaluation?.id
+    if (!evaluationId) {
+      return { cancelled: false, sessionId }
     }
-    return { cancelled: true, sessionId }
+    const stop = activePolls.get(evaluationId)
+    if (stop) stop()
+    const cancelled = await cancelEvaluation(evaluationId)
+    return { cancelled: Boolean(cancelled), sessionId, evaluationId }
   },
 
   async getSessionState(sessionId) {
@@ -576,12 +580,12 @@ export const topics = writingTopicsRepository
 function mapHistoryItemToEssay(item) {
   return {
     id: item.id,
-    task_type: item.task_type || item.taskType || 'task2',
-    topic_title: item.display_topic_title || item.topic_title || item.title || 'Untitled',
-    content: item.content_text || '',
-    total_score: item.total_score ?? item.score_value ?? 0,
-    submitted_at: item.submitted_at || item.submittedAt || '',
-    duration: item.duration ?? Math.round((item.duration_ms || 0) / 1000),
+    task_type: item.taskType ?? null,
+    topic_title: item.title || 'Untitled',
+    content: item.contentText || '',
+    total_score: item.scoreValue ?? 0,
+    submitted_at: item.submittedAt || '',
+    duration: item.duration ?? Math.round((item.durationMs || 0) / 1000),
     status: item.status,
     source: 'tauri'
   }
@@ -600,7 +604,8 @@ export const essays = {
       startDate: filters.startDate || filters.start_date || null,
       endDate: filters.endDate || filters.end_date || null,
       minScore: filters.minScore ?? filters.min_score ?? null,
-      maxScore: filters.maxScore ?? filters.max_score ?? null
+      maxScore: filters.maxScore ?? filters.max_score ?? null,
+      taskType: filters.taskType ?? filters.task_type ?? null
     })
     return {
       data: (result.items || []).map(mapHistoryItemToEssay),
@@ -652,7 +657,7 @@ export const essays = {
     const result = await listHistoryAll({ activity: 'writing' })
     const items = result.items || []
     const scores = items
-      .map((i) => Number(i.score_value ?? i.total_score ?? 0))
+      .map((i) => Number(i.scoreValue ?? 0))
       .filter((n) => n > 0)
     const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0
     return {

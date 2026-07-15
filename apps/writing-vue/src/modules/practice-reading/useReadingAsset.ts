@@ -9,8 +9,8 @@ interface ReadingAsset {
 }
 
 interface ReadingAssetApi {
-  getAsset: (assetId: string, options?: { refresh?: boolean }) => Promise<ReadingAsset>
-  listAssets: (options?: { refresh?: boolean }) => Promise<unknown>
+  getAsset: (assetId: string) => Promise<ReadingAsset>
+  listAssets: () => Promise<unknown>
 }
 
 interface ReadingAssetDependencies { api?: ReadingAssetApi }
@@ -23,7 +23,7 @@ export function useReadingAsset(dependencies: ReadingAssetDependencies = {}) {
   const error = ref(controller.state.error)
   const payload = computed(() => asset.value?.payload || null)
 
-  async function loadReadingAsset(assetId: string, options: { refresh?: boolean } = {}) {
+  async function loadReadingAsset(assetId: string, options: { afterLoad?: (asset: ReadingAsset) => Promise<void> | void } = {}) {
     loading.value = true
     try {
       const data = await controller.loadReadingAsset(assetId, options)
@@ -39,8 +39,8 @@ export function useReadingAsset(dependencies: ReadingAssetDependencies = {}) {
     }
   }
 
-  async function loadReadingAssetPool(options = {}) {
-    return controller.loadReadingAssetPool(options)
+  async function loadReadingAssetPool() {
+    return controller.loadReadingAssetPool()
   }
 
   function clearReadingAssetError() {

@@ -1,7 +1,7 @@
 /**
  * Pointer/keyboard-neutral selection state for legacy reading drag/drop.
  * DOM adapters decide what is an option or target; this controller owns the
- * single selected option and guarantees review mode stays read-only.
+ * single selected option and guarantees every read-only mode stays inert.
  */
 export function createDragSelectionController(options = {}) {
   let selected = null
@@ -12,7 +12,9 @@ export function createDragSelectionController(options = {}) {
   const changed = () => {
     if (typeof options.onChange === 'function') options.onChange(selected)
   }
-  const isReview = () => Boolean(options.isReview?.())
+  const isReadOnly = () => Boolean(options.isReadOnly?.() || options.isReview?.())
+  const readOnlyMessage = () => options.readOnlyMessage
+    || (options.isReview ? '回顾模式为只读，不能修改答案。' : '当前模式为只读，不能修改答案。')
 
   function getSelected() {
     return selected ? { ...selected } : null
@@ -25,8 +27,8 @@ export function createDragSelectionController(options = {}) {
   }
 
   function select(payload) {
-    if (isReview()) {
-      status('回顾模式为只读，不能修改答案。')
+    if (isReadOnly()) {
+      status(readOnlyMessage())
       return false
     }
     const value = String(payload?.value || '').trim()
@@ -46,8 +48,8 @@ export function createDragSelectionController(options = {}) {
   }
 
   function place(questionId, assign) {
-    if (isReview()) {
-      status('回顾模式为只读，不能修改答案。')
+    if (isReadOnly()) {
+      status(readOnlyMessage())
       return false
     }
     if (!selected) {
@@ -62,6 +64,7 @@ export function createDragSelectionController(options = {}) {
   }
 
   function activateKey(key, activate) {
+    if (isReadOnly()) return false
     if (key === 'Escape') {
       clear('已取消选择。')
       return true

@@ -108,11 +108,11 @@ img {
 }
 
 .btn-brand {
-  background: rgba(255, 255, 255, 0.42);
+  background: var(--atlas-button-brand-overlay);
   background-image: var(--color-brand-gradient);
   color: var(--shui-text-strong);
   padding: 12px 24px;
-  border: 1px solid rgba(255, 255, 255, 0.62);
+  border: 1px solid var(--atlas-button-brand-border);
   border-radius: var(--shui-radius-sm);
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-medium);

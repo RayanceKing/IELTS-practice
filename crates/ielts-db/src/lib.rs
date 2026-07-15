@@ -29,8 +29,8 @@ pub use dictionary::*;
 pub use history::*;
 pub use import::{
     find_legacy_db_candidates, import_browser_export_file, import_browser_export_value,
-    import_reading_archive_file, import_reading_archive_value, list_history_view_models,
-    migrate_legacy_sqlite_to_v2, scan_legacy_sqlite, LegacyDbScan, LegacyMigrationReport,
+    import_reading_archive_file, list_history_view_models, migrate_legacy_sqlite_to_v2,
+    scan_legacy_sqlite, LegacyDbScan, LegacyMigrationReport,
 };
 pub use migrate::*;
 pub use modes::*;

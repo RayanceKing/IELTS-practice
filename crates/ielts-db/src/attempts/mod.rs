@@ -2,30 +2,28 @@
 //!
 //! Lives outside `import/` — product writes must not go through "legacy import".
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
-use ielts_domain::domain::{Activity, AttemptMode, ScoreScale};
+use ielts_domain::domain::{Activity, AttemptMode, ScoreScale, WritingTaskType};
 use ielts_domain::dto::AttemptRecord;
 
-use crate::sqlite::DbResult;
+use crate::sqlite::{DbError, DbResult};
 
 pub fn upsert_attempt(conn: &Connection, attempt: &AttemptRecord) -> DbResult<()> {
+    ensure_attempt_identity(conn, attempt)?;
+    ensure_task_type_scope(attempt)?;
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "INSERT INTO attempts (
             id, activity, asset_id, mode, suite_id, status, started_at, submitted_at, completed_at,
             duration_ms, score_value, score_scale, correct_count, question_count, title_snapshot,
-            prompt_snapshot, content_text, schema_version, created_at, updated_at
+            prompt_snapshot, content_text, task_type, schema_version, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
             ?10, ?11, ?12, ?13, ?14, ?15,
-            ?16, ?17, ?18, ?19, ?20
+            ?16, ?17, ?18, ?19, ?20, ?21
         )
         ON CONFLICT(id) DO UPDATE SET
-            activity=excluded.activity,
-            asset_id=excluded.asset_id,
-            mode=excluded.mode,
-            suite_id=excluded.suite_id,
             status=excluded.status,
             submitted_at=excluded.submitted_at,
             completed_at=excluded.completed_at,
@@ -37,6 +35,10 @@ pub fn upsert_attempt(conn: &Connection, attempt: &AttemptRecord) -> DbResult<()
             title_snapshot=excluded.title_snapshot,
             prompt_snapshot=excluded.prompt_snapshot,
             content_text=excluded.content_text,
+            -- A compatibility import may not know the task type.  It must
+            -- never erase a classification already established by a modern
+            -- writing write; explicit Task 1/2 updates still replace it.
+            task_type=COALESCE(excluded.task_type, attempts.task_type),
             updated_at=excluded.updated_at
         ",
         params![
@@ -60,6 +62,7 @@ pub fn upsert_attempt(conn: &Connection, attempt: &AttemptRecord) -> DbResult<()
             attempt.title_snapshot,
             attempt.prompt_snapshot,
             attempt.content_text,
+            attempt.task_type.map(writing_task_type_str),
             attempt.schema_version as i64,
             now,
             now,
@@ -115,6 +118,39 @@ pub fn upsert_attempt(conn: &Connection, attempt: &AttemptRecord) -> DbResult<()
     Ok(())
 }
 
+fn ensure_task_type_scope(attempt: &AttemptRecord) -> DbResult<()> {
+    if attempt.activity == Activity::Reading && attempt.task_type.is_some() {
+        return Err(DbError::Validation(
+            "reading attempts cannot carry a writing task_type".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_attempt_identity(conn: &Connection, attempt: &AttemptRecord) -> DbResult<()> {
+    let existing: Option<(String, Option<String>, String, Option<String>)> = conn
+        .query_row(
+            "SELECT activity, asset_id, mode, suite_id FROM attempts WHERE id = ?1",
+            params![attempt.id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    let Some((activity, asset_id, mode, suite_id)) = existing else {
+        return Ok(());
+    };
+    if activity == activity_str(attempt.activity)
+        && asset_id == attempt.asset_id
+        && mode == mode_str(attempt.mode)
+        && suite_id == attempt.suite_id
+    {
+        return Ok(());
+    }
+    Err(DbError::Validation(format!(
+        "attempt identity is immutable: {}",
+        attempt.id
+    )))
+}
+
 pub fn ensure_asset_stub(
     conn: &Connection,
     asset_id: &str,
@@ -165,4 +201,15 @@ fn mode_str(mode: AttemptMode) -> &'static str {
         AttemptMode::Freeform => "freeform",
         AttemptMode::Bank => "bank",
     }
+}
+
+pub(crate) fn writing_task_type_str(task_type: WritingTaskType) -> &'static str {
+    match task_type {
+        WritingTaskType::Task1 => "task1",
+        WritingTaskType::Task2 => "task2",
+    }
+}
+
+pub(crate) fn parse_writing_task_type(raw: Option<String>) -> Option<WritingTaskType> {
+    raw.as_deref().and_then(WritingTaskType::parse_loose)
 }

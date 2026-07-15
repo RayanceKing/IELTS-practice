@@ -97,9 +97,28 @@ export function buildEndlessNextRoute(nextAssetId, endlessSessionId) {
   }
 }
 
+/**
+ * One availability predicate for the durable draft action. Modes which own
+ * their own lifecycle (endless) and read-only views never pretend a draft was
+ * persisted.
+ */
+export function canSnapshotReadingAnswers(options = {}) {
+  return Boolean(
+    options.isTauriRuntime
+    && options.hasAsset
+    && options.hasPayload
+    && !options.loading
+    && !options.submitting
+    && !options.leaving
+    && !options.readOnly
+    && !options.isEndlessMode
+  )
+}
+
 export default {
   mapTauriSubmissionToUi,
   findNextActiveSuitePassage,
   buildSuiteReviewNavigationTarget,
-  buildEndlessNextRoute
+  buildEndlessNextRoute,
+  canSnapshotReadingAnswers
 }

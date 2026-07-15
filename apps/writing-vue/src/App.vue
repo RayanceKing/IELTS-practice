@@ -6,10 +6,7 @@
     <NavBar v-if="showShellNav" />
     <main
       id="app-main-content"
-      :class="['app-main', {
-        'app-main--frameless': !showShellNav,
-        'app-main--library-shell': isLibraryRoute
-      }]"
+      :class="['app-main', { 'app-main--frameless': !showShellNav }]"
       tabindex="-1"
     >
       <router-view v-slot="{ Component }">
@@ -34,8 +31,7 @@ const framelessRouteNames = new Set([
   'PracticeReadingSuite',
   'PracticeReadingReview'
 ])
-const isLibraryRoute = computed(() => route.name === 'PracticeLibrary')
-const showShellNav = computed(() => !framelessRouteNames.has(route.name) && !isLibraryRoute.value)
+const showShellNav = computed(() => !framelessRouteNames.has(route.name))
 const prefersReducedMotion = computed(() => {
   if (typeof window === 'undefined' || !window.matchMedia) return false
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -65,11 +61,6 @@ const routeViewKey = computed(() => route.path || String(route.name || route.ful
 }
 
 .app-main--frameless {
-  width: 100%;
-  padding: 0;
-}
-
-.app-main--library-shell {
   width: 100%;
   padding: 0;
 }

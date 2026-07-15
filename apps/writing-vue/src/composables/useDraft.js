@@ -1,5 +1,6 @@
 import { onBeforeUnmount } from 'vue'
 import { getDraft, newIdempotencyKey, saveDraft as persistDraft } from '@/api/writing-repository.js'
+import { writingTopicModeToAttemptMode } from '@/api/writing-mode.js'
 
 const VALID_TASK_TYPES = new Set(['task1', 'task2'])
 const VALID_TOPIC_MODES = new Set(['free', 'bank'])
@@ -63,10 +64,11 @@ export function useDraft(draftId, getSnapshot = null, options = {}) {
         }
         const { draft } = await persistDraft({
             attemptId,
-            mode: payload.topic_mode === 'bank' ? 'bank' : 'freeform',
+            mode: writingTopicModeToAttemptMode(payload.topic_mode),
             assetId: payload.topic_id === null ? null : String(payload.topic_id),
             contentText: payload.content,
             promptSnapshot: JSON.stringify(metadata),
+            taskType: payload.task_type,
             idempotencyKey: newIdempotencyKey('compose-draft')
         })
         lastSnapshot = { ...payload, last_saved: draft?.updatedAt || draft?.updated_at || null }

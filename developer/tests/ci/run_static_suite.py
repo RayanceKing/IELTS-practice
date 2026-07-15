@@ -76,6 +76,13 @@ def check_tauri_contract() -> dict[str, Any]:
         failures.append("base config must disable updater artifacts; release overlay enables them")
     if ((bundle.get("windows") or {}).get("allowDowngrades")) is not False:
         failures.append("Windows installers must reject version downgrades")
+    resources = bundle.get("resources") or {}
+    writing_catalog_source = "../assets/generated/writing-topics"
+    if resources.get(writing_catalog_source) != "writing-topics":
+        failures.append("bundled writing catalog must be mapped to the writing-topics resource directory")
+    writing_catalog = ROOT / "assets/generated/writing-topics/bc-task2-2024-12_2025-01.catalog.json"
+    if not writing_catalog.is_file():
+        failures.append("bundled writing catalog source file is missing")
     for icon in bundle.get("icon") or []:
         if not (ROOT / "src-tauri" / icon).is_file():
             failures.append(f"bundle icon does not exist: {icon}")
@@ -88,6 +95,9 @@ def check_tauri_contract() -> dict[str, Any]:
 
     cargo_toml = (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8")
     rust_shell = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+    for needle in ("seed_builtin_writing_catalog", "bc-task2-2024-12_2025-01.catalog.json"):
+        if needle not in rust_shell:
+            failures.append(f"native startup does not seed the bundled writing catalog ({needle})")
     for plugin in ("tauri-plugin-fs", "tauri-plugin-shell", "tauri-plugin-process"):
         if plugin in cargo_toml:
             failures.append(f"unused privileged plugin dependency remains: {plugin}")
@@ -152,11 +162,48 @@ def main() -> int:
             ["node", "developer/tests/js/readingModeFlowCore.test.mjs"],
         ),
         run_command(
+            "Reading mode idempotency",
+            ["node", "developer/tests/js/modeIdempotency.test.mjs"],
+        ),
+        run_command(
+            "Reading Library truth contract",
+            ["node", "developer/tests/js/practiceReadingCore10.test.js"],
+        ),
+        run_command(
+            "History view-model contract",
+            ["node", "developer/tests/js/historyViewModel.test.mjs"],
+        ),
+        run_command(
+            "Writing source-mode contract",
+            ["node", "developer/tests/js/writingMode.test.mjs"],
+        ),
+        run_command(
+            "Tauri Vue shell contract",
+            ["node", "developer/tests/js/practiceVueShell.test.js"],
+        ),
+        run_command(
             "Phase 10 release contract",
             [sys.executable, "developer/tests/ci/release_contract_test.py"],
         ),
         run_command("Vue production build", ["npm.cmd", "--prefix", "apps/writing-vue", "run", "build"]),
         run_command("Rust workspace check", ["cargo", "check", "--workspace", "--locked"]),
+        run_command(
+            "Rust data-truth regressions",
+            [
+                "cargo",
+                "test",
+                "-p",
+                "ielts-db",
+                "--test",
+                "phase4_history_settings",
+                "--test",
+                "phase5_writing_eval",
+                "--test",
+                "history_retention",
+                "--test",
+                "reading_archive_transaction",
+            ],
+        ),
         run_command(
             "AI configuration security",
             [sys.executable, "developer/tests/ci/check_ai_config_security.py"],

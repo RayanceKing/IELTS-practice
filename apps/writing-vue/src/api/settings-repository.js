@@ -16,6 +16,19 @@ export async function upsertSetting(namespace, key, value) {
   return { source: 'tauri', entry: unwrapCommandResponse(response, 'upsert_setting') }
 }
 
+/** SQLite-owned policy; intentionally separate from generic settings KV. */
+export async function getHistoryRetentionPolicy() {
+  const response = await invokeCommand('history_get_retention_policy')
+  return unwrapCommandResponse(response, 'history_get_retention_policy')
+}
+
+export async function setHistoryRetentionPolicy(maxTerminalAttempts) {
+  const response = await invokeCommand('history_set_retention_policy', {
+    cmd: { maxTerminalAttempts }
+  })
+  return unwrapCommandResponse(response, 'history_set_retention_policy')
+}
+
 export async function migrateLocalPreferences(prefs) {
   const response = await invokeCommand('migrate_local_preferences', { prefs })
   return {
@@ -54,8 +67,8 @@ export async function setDefaultAiConfig(id) {
   return unwrapCommandResponse(response, 'ai_set_default_config')
 }
 
-export async function testAiProvider() {
-  const response = await invokeCommand('ai_test_provider')
+export async function testAiProvider(configId) {
+  const response = await invokeCommand('ai_test_provider', { configId })
   return unwrapCommandResponse(response, 'ai_test_provider')
 }
 
@@ -87,6 +100,8 @@ export async function importBackupPath(grantId, dryRun = true) {
 export const settingsRepository = {
   listSettings,
   upsertSetting,
+  getHistoryRetentionPolicy,
+  setHistoryRetentionPolicy,
   migrateLocalPreferences,
   setSecret,
   listSecretRefs,

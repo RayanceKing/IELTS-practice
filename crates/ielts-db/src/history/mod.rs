@@ -1,15 +1,24 @@
 //! Unified history query, export, and detail loading (Phase 4).
 
-use rusqlite::{params, params_from_iter, Connection, ToSql};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, ToSql};
 
-use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
+use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale, WritingTaskType};
 use ielts_domain::dto::{
-    ExportHistoryResult, HistoryDetailResponse, HistoryExportFormat, ListHistoryPage,
-    ListHistoryQuery, WritingEvaluationV4,
+    ExportHistoryResult, HistoryDetailResponse, HistoryExportFormat, HistoryRetentionPolicyDto,
+    ListHistoryPage, ListHistoryQuery, SetHistoryRetentionPolicyResult, WritingEvaluationV4,
 };
 use ielts_domain::{history_item_from_attempt, AttemptRecord, HistoryListItemVm};
 
+use crate::attempts::{parse_writing_task_type, writing_task_type_str};
 use crate::sqlite::{DbError, DbResult};
+
+pub const HISTORY_RETENTION_MIN: u32 = 50;
+pub const HISTORY_RETENTION_MAX: u32 = 500;
+pub const HISTORY_RETENTION_STEP: u32 = 50;
+pub const HISTORY_RETENTION_DEFAULT: u32 = 100;
+
+const RETAINABLE_TERMINAL_STATUS_SQL: &str =
+    "lower(status) IN ('completed', 'cancelled', 'failed', 'interrupted')";
 
 #[derive(Debug, Clone, Default)]
 struct HistoryFilter {
@@ -19,6 +28,8 @@ struct HistoryFilter {
     end_date: Option<String>,
     min_score: Option<f64>,
     max_score: Option<f64>,
+    score_scale: Option<ScoreScale>,
+    task_type: Option<WritingTaskType>,
 }
 
 impl From<&ListHistoryQuery> for HistoryFilter {
@@ -34,11 +45,13 @@ impl From<&ListHistoryQuery> for HistoryFilter {
             end_date: q.end_date.clone().filter(|s| !s.is_empty()),
             min_score: q.min_score,
             max_score: q.max_score,
+            score_scale: q.score_scale,
+            task_type: q.task_type,
         }
     }
 }
 
-fn build_where(filter: &HistoryFilter) -> (String, Vec<Box<dyn ToSql>>) {
+fn build_where(filter: &HistoryFilter) -> DbResult<(String, Vec<Box<dyn ToSql>>)> {
     let mut clauses: Vec<String> = Vec::new();
     let mut binds: Vec<Box<dyn ToSql>> = Vec::new();
 
@@ -60,6 +73,10 @@ fn build_where(filter: &HistoryFilter) -> (String, Vec<Box<dyn ToSql>>) {
         clauses.push("date(COALESCE(submitted_at, started_at)) <= date(?)".into());
         binds.push(Box::new(end.clone()));
     }
+    if let Some(scale) = resolve_score_filter_scale(filter)? {
+        clauses.push("score_scale = ?".into());
+        binds.push(Box::new(score_scale_str(scale).to_string()));
+    }
     if let Some(min) = filter.min_score {
         clauses.push("score_value IS NOT NULL AND score_value >= ?".into());
         binds.push(Box::new(min));
@@ -67,6 +84,11 @@ fn build_where(filter: &HistoryFilter) -> (String, Vec<Box<dyn ToSql>>) {
     if let Some(max) = filter.max_score {
         clauses.push("score_value IS NOT NULL AND score_value <= ?".into());
         binds.push(Box::new(max));
+    }
+    if let Some(task_type) = filter.task_type {
+        clauses.push("activity = 'writing'".into());
+        clauses.push("task_type = ?".into());
+        binds.push(Box::new(writing_task_type_str(task_type).to_string()));
     }
     if let Some(search) = &filter.search {
         clauses.push(
@@ -85,7 +107,72 @@ fn build_where(filter: &HistoryFilter) -> (String, Vec<Box<dyn ToSql>>) {
     } else {
         format!("WHERE {}", clauses.join(" AND "))
     };
-    (sql, binds)
+    Ok((sql, binds))
+}
+
+/// Score values are only meaningful alongside their unit. Keep compatible
+/// single-activity callers working by deriving the only valid scale there, but
+/// never guess when Reading and Writing are mixed.
+fn resolve_score_filter_scale(filter: &HistoryFilter) -> DbResult<Option<ScoreScale>> {
+    if filter.min_score.is_none() && filter.max_score.is_none() {
+        return Ok(None);
+    }
+
+    let activity_scale = filter.activity.map(score_scale_for_activity);
+    let scale = match (filter.score_scale, activity_scale) {
+        (Some(requested), Some(activity)) if requested != activity => {
+            return Err(DbError::Message(
+                "history score scale does not match the requested activity".into(),
+            ));
+        }
+        (Some(requested), _) => requested,
+        (None, Some(activity)) => activity,
+        (None, None) => {
+            return Err(DbError::Message(
+                "history score range requires scoreScale for mixed activities".into(),
+            ));
+        }
+    };
+
+    validate_score_range(filter.min_score, filter.max_score, scale)?;
+    Ok(Some(scale))
+}
+
+fn score_scale_for_activity(activity: Activity) -> ScoreScale {
+    match activity {
+        Activity::Reading => ScoreScale::Ratio,
+        Activity::Writing => ScoreScale::Band9,
+    }
+}
+
+fn score_scale_str(scale: ScoreScale) -> &'static str {
+    match scale {
+        ScoreScale::Ratio => "ratio",
+        ScoreScale::Band9 => "band9",
+    }
+}
+
+fn validate_score_range(min: Option<f64>, max: Option<f64>, scale: ScoreScale) -> DbResult<()> {
+    if let (Some(min), Some(max)) = (min, max) {
+        if min > max {
+            return Err(DbError::Message(
+                "history minimum score cannot exceed maximum score".into(),
+            ));
+        }
+    }
+
+    let (lower, upper, label) = match scale {
+        ScoreScale::Ratio => (0.0, 1.0, "ratio"),
+        ScoreScale::Band9 => (0.0, 9.0, "band9"),
+    };
+    for value in [min, max].into_iter().flatten() {
+        if !value.is_finite() || value < lower || value > upper {
+            return Err(DbError::Message(format!(
+                "history {label} score must be between {lower} and {upper}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Hard cap for normal UI/list pages. Export/bulk use a higher internal max.
@@ -105,7 +192,7 @@ fn list_history_capped(
     max_limit: u32,
 ) -> DbResult<ListHistoryPage> {
     let filter = HistoryFilter::from(query);
-    let (where_sql, binds) = build_where(&filter);
+    let (where_sql, binds) = build_where(&filter)?;
     let limit = query.limit.max(1).min(max_limit.max(1));
     let offset = query.offset;
 
@@ -119,7 +206,7 @@ fn list_history_capped(
     let list_sql = format!(
         "SELECT id, activity, asset_id, mode, suite_id, status, started_at, submitted_at, completed_at,
                 duration_ms, score_value, score_scale, correct_count, question_count, title_snapshot,
-                prompt_snapshot, content_text, schema_version
+                prompt_snapshot, content_text, schema_version, task_type
          FROM attempts
          {where_sql}
          ORDER BY COALESCE(submitted_at, started_at) DESC, id DESC
@@ -222,6 +309,8 @@ pub fn export_history(
         end_date: None,
         min_score: None,
         max_score: None,
+        score_scale: None,
+        task_type: None,
     });
     // Export must not inherit the UI list hard-cap of 200.
     let requested = q.limit.max(1).min(LIST_HISTORY_EXPORT_MAX);
@@ -230,8 +319,9 @@ pub fn export_history(
     let body = match format {
         HistoryExportFormat::Csv => render_csv(&items),
         HistoryExportFormat::Markdown => render_markdown(&items),
-        HistoryExportFormat::Json => serde_json::to_string_pretty(&items)
-            .map_err(|e| DbError::Message(e.to_string()))?,
+        HistoryExportFormat::Json => {
+            serde_json::to_string_pretty(&items).map_err(|e| DbError::Message(e.to_string()))?
+        }
     };
     Ok(ExportHistoryResult {
         format,
@@ -241,17 +331,290 @@ pub fn export_history(
 }
 
 pub fn delete_attempt(conn: &Connection, attempt_id: &str) -> DbResult<bool> {
-    let n = conn.execute("DELETE FROM attempts WHERE id = ?1", params![attempt_id])?;
-    Ok(n > 0)
+    let tx = conn.unchecked_transaction()?;
+    let deleted = delete_attempt_graph_in_transaction(&tx, attempt_id)?;
+    tx.commit()?;
+    Ok(deleted)
+}
+
+/// Return the only persisted retention policy. A missing row is database
+/// corruption after migration, not a UI-default opportunity: callers must see
+/// the failure instead of believing a value that SQLite does not own.
+pub fn get_history_retention_policy(conn: &Connection) -> DbResult<HistoryRetentionPolicyDto> {
+    Ok(HistoryRetentionPolicyDto {
+        max_terminal_attempts: load_history_retention_limit(conn)?,
+    })
+}
+
+/// Persist a policy and immediately apply it to existing terminal history in
+/// one transaction. `None` is an explicit unlimited/disabled policy.
+pub fn set_history_retention_policy(
+    conn: &Connection,
+    max_terminal_attempts: Option<u32>,
+) -> DbResult<SetHistoryRetentionPolicyResult> {
+    validate_history_retention_limit(max_terminal_attempts)?;
+    let tx = conn.unchecked_transaction()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    tx.execute(
+        "INSERT INTO history_retention_policy (singleton, max_terminal_attempts, updated_at)
+         VALUES (1, ?1, ?2)
+         ON CONFLICT(singleton) DO UPDATE SET
+           max_terminal_attempts = excluded.max_terminal_attempts,
+           updated_at = excluded.updated_at",
+        params![max_terminal_attempts.map(i64::from), now],
+    )?;
+    let pruned_attempt_count = prune_terminal_attempts_in_transaction(&tx)?;
+    tx.commit()?;
+    Ok(SetHistoryRetentionPolicyResult {
+        policy: HistoryRetentionPolicyDto {
+            max_terminal_attempts,
+        },
+        pruned_attempt_count,
+    })
+}
+
+/// A v3 backup predates the policy table but can contain the old app KV. When
+/// restoring it, migrate that value once and erase the mirror again. If there
+/// is no old value, preserve the target's existing policy (normally the v8
+/// migration default) rather than silently inventing an unlimited policy.
+pub fn restore_legacy_history_retention_policy(conn: &Connection) -> DbResult<()> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT value_json FROM settings WHERE namespace = 'app' AND key = 'history_limit'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let parsed = raw
+        .as_deref()
+        .and_then(parse_legacy_history_retention_limit)
+        .filter(|limit| validate_history_retention_limit(Some(*limit)).is_ok());
+    let now = chrono::Utc::now().to_rfc3339();
+    if let Some(limit) = parsed {
+        conn.execute(
+            "INSERT INTO history_retention_policy (singleton, max_terminal_attempts, updated_at)
+             VALUES (1, ?1, ?2)
+             ON CONFLICT(singleton) DO UPDATE SET
+               max_terminal_attempts = excluded.max_terminal_attempts,
+               updated_at = excluded.updated_at",
+            params![i64::from(limit), now],
+        )?;
+    } else {
+        conn.execute(
+            "INSERT OR IGNORE INTO history_retention_policy (singleton, max_terminal_attempts, updated_at)
+             VALUES (1, ?1, ?2)",
+            params![i64::from(HISTORY_RETENTION_DEFAULT), now],
+        )?;
+    }
+    conn.execute(
+        "DELETE FROM settings WHERE namespace = 'app' AND key = 'history_limit'",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Apply the canonical policy after a product path has made an attempt
+/// terminal, but before that path commits its own transaction. Cold import and
+/// backup restore intentionally never call this function: they replay durable
+/// facts rather than creating a new learner completion.
+pub fn prune_terminal_attempts_in_transaction(conn: &Connection) -> DbResult<u32> {
+    let Some(limit) = load_history_retention_limit(conn)? else {
+        return Ok(0);
+    };
+    let select_sql = format!(
+        "SELECT id
+         FROM attempts
+         WHERE mode != 'memorize' AND {RETAINABLE_TERMINAL_STATUS_SQL}
+         ORDER BY COALESCE(completed_at, submitted_at, started_at, created_at) DESC, id DESC
+         LIMIT -1 OFFSET ?1"
+    );
+    let ids = {
+        let mut statement = conn.prepare(&select_sql)?;
+        let rows = statement.query_map(params![i64::from(limit)], |row| row.get::<_, String>(0))?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row?);
+        }
+        ids
+    };
+    for attempt_id in &ids {
+        delete_attempt_graph_in_transaction(conn, attempt_id)?;
+    }
+    Ok(ids.len() as u32)
+}
+
+/// Delete an attempt together with every non-FK logical edge that would
+/// otherwise make a backup or idempotent replay lie about an erased record.
+/// The caller owns the transaction.
+fn delete_attempt_graph_in_transaction(conn: &Connection, attempt_id: &str) -> DbResult<bool> {
+    let evaluation_ids = {
+        let mut statement =
+            conn.prepare("SELECT id FROM writing_evaluations WHERE attempt_id = ?1 ORDER BY id")?;
+        let rows = statement.query_map(params![attempt_id], |row| row.get::<_, String>(0))?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row?);
+        }
+        ids
+    };
+    for evaluation_id in evaluation_ids {
+        conn.execute(
+            "DELETE FROM evaluation_checkpoints WHERE evaluation_id = ?1",
+            params![evaluation_id],
+        )?;
+        conn.execute(
+            "DELETE FROM evaluation_events WHERE evaluation_id = ?1",
+            params![evaluation_id],
+        )?;
+        conn.execute(
+            "DELETE FROM evaluation_lineage
+             WHERE evaluation_id = ?1 OR retry_of = ?1 OR root_evaluation_id = ?1",
+            params![evaluation_id],
+        )?;
+    }
+    conn.execute(
+        "DELETE FROM evaluation_lineage WHERE attempt_id = ?1",
+        params![attempt_id],
+    )?;
+    conn.execute(
+        "UPDATE reading_suite_items SET attempt_id = NULL WHERE attempt_id = ?1",
+        params![attempt_id],
+    )?;
+    conn.execute(
+        "UPDATE endless_sessions SET current_attempt_id = NULL WHERE current_attempt_id = ?1",
+        params![attempt_id],
+    )?;
+    conn.execute(
+        "UPDATE coach_threads SET attempt_id = NULL WHERE attempt_id = ?1",
+        params![attempt_id],
+    )?;
+    conn.execute(
+        "UPDATE vocabulary_items SET source_attempt_id = NULL WHERE source_attempt_id = ?1",
+        params![attempt_id],
+    )?;
+    conn.execute(
+        "DELETE FROM settings WHERE namespace = 'reading_draft' AND key = ?1",
+        params![attempt_id],
+    )?;
+    delete_mode_idempotency_replays_for_attempt(conn, attempt_id)?;
+    let deleted = conn.execute("DELETE FROM attempts WHERE id = ?1", params![attempt_id])?;
+    Ok(deleted > 0)
+}
+
+/// Mode idempotency predates a direct attempt foreign key. Its response is
+/// JSON, so substring matching is wrong: a short attempt ID such as `a1`
+/// matches an unrelated `a100` replay. Only delete exact values at fields
+/// whose schema denotes an attempt. The JSON guard also leaves corrupt legacy
+/// rows alone instead of turning a history deletion into a database error.
+fn delete_mode_idempotency_replays_for_attempt(
+    conn: &Connection,
+    attempt_id: &str,
+) -> DbResult<()> {
+    conn.execute(
+        "DELETE FROM mode_idempotency
+         WHERE (scope = 'memorize.create' AND entity_id = ?1)
+            OR CASE
+                 WHEN json_valid(response_json) THEN
+                   json_extract(response_json, '$.attempt.id') = ?1
+                   OR json_extract(response_json, '$.submission.attempt.id') = ?1
+                   OR json_extract(response_json, '$.currentAttemptId') = ?1
+                   OR json_extract(response_json, '$.current_attempt_id') = ?1
+                   OR json_extract(response_json, '$.session.currentAttemptId') = ?1
+                   OR json_extract(response_json, '$.session.current_attempt_id') = ?1
+                   OR (
+                     scope IN ('suite.create', 'suite.submit')
+                     AND (
+                       EXISTS (
+                         SELECT 1
+                         FROM json_each(response_json, '$.sequence') AS sequence_item
+                         WHERE json_extract(sequence_item.value, '$.attemptId') = ?1
+                            OR json_extract(sequence_item.value, '$.attempt_id') = ?1
+                            OR json_extract(sequence_item.value, '$.sessionId') = ?1
+                            OR json_extract(sequence_item.value, '$.session_id') = ?1
+                       )
+                       OR EXISTS (
+                         SELECT 1
+                         FROM json_each(response_json, '$.suiteSession.sequence') AS sequence_item
+                         WHERE json_extract(sequence_item.value, '$.attemptId') = ?1
+                            OR json_extract(sequence_item.value, '$.attempt_id') = ?1
+                            OR json_extract(sequence_item.value, '$.sessionId') = ?1
+                            OR json_extract(sequence_item.value, '$.session_id') = ?1
+                       )
+                       OR EXISTS (
+                         SELECT 1
+                         FROM json_each(response_json, '$.suite_session.sequence') AS sequence_item
+                         WHERE json_extract(sequence_item.value, '$.attemptId') = ?1
+                            OR json_extract(sequence_item.value, '$.attempt_id') = ?1
+                            OR json_extract(sequence_item.value, '$.sessionId') = ?1
+                            OR json_extract(sequence_item.value, '$.session_id') = ?1
+                       )
+                     )
+                   )
+                 ELSE 0
+               END",
+        params![attempt_id],
+    )?;
+    Ok(())
+}
+
+fn load_history_retention_limit(conn: &Connection) -> DbResult<Option<u32>> {
+    let stored: Option<Option<i64>> = conn
+        .query_row(
+            "SELECT max_terminal_attempts FROM history_retention_policy WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(stored) = stored else {
+        return Err(DbError::Validation(
+            "history retention policy missing after migration".into(),
+        ));
+    };
+    let limit = stored
+        .map(|value| {
+            u32::try_from(value).map_err(|_| {
+                DbError::Validation("history retention policy contains a negative limit".into())
+            })
+        })
+        .transpose()?;
+    validate_history_retention_limit(limit)?;
+    Ok(limit)
+}
+
+fn validate_history_retention_limit(limit: Option<u32>) -> DbResult<()> {
+    let Some(limit) = limit else {
+        return Ok(());
+    };
+    if (HISTORY_RETENTION_MIN..=HISTORY_RETENTION_MAX).contains(&limit)
+        && limit % HISTORY_RETENTION_STEP == 0
+    {
+        return Ok(());
+    }
+    Err(DbError::Validation(format!(
+        "history retention limit must be unlimited or {HISTORY_RETENTION_MIN}-{HISTORY_RETENTION_MAX} in increments of {HISTORY_RETENTION_STEP}"
+    )))
+}
+
+fn parse_legacy_history_retention_limit(raw: &str) -> Option<u32> {
+    let value = serde_json::from_str::<serde_json::Value>(raw).ok()?;
+    if let Some(value) = value.as_u64() {
+        return u32::try_from(value).ok();
+    }
+    let text = value.as_str()?;
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse::<u32>().ok()
 }
 
 fn render_csv(items: &[HistoryListItemVm]) -> String {
-    let mut out = String::from("id,activity,title,status,mode,submitted_at,duration_ms,score_value,score_scale,score_display\n");
+    let mut out = String::from("id,activity,task_type,title,status,mode,submitted_at,duration_ms,score_value,score_scale,score_display\n");
     for item in items {
         out.push_str(&format!(
-            "{},{},{},{},{},{},{},{},{},{}\n",
+            "{},{},{},{},{},{},{},{},{},{},{}\n",
             csv_escape(&item.id),
             activity_str(item.activity),
+            item.task_type.map(writing_task_type_str).unwrap_or(""),
             csv_escape(&item.title),
             format!("{:?}", item.status).to_ascii_lowercase(),
             mode_str(item.mode),
@@ -272,12 +635,15 @@ fn render_csv(items: &[HistoryListItemVm]) -> String {
 
 fn render_markdown(items: &[HistoryListItemVm]) -> String {
     let mut out = String::from("# IELTS Practice History\n\n");
-    out.push_str("| Activity | Title | Score | Submitted | Duration |\n");
-    out.push_str("|---|---|---|---|---|\n");
+    out.push_str("| Activity | Task | Title | Score | Submitted | Duration |\n");
+    out.push_str("|---|---|---|---|---|---|\n");
     for item in items {
         out.push_str(&format!(
-            "| {} | {} | {} | {} | {} ms |\n",
+            "| {} | {} | {} | {} | {} | {} ms |\n",
             activity_str(item.activity),
+            item.task_type
+                .map(writing_task_type_str)
+                .unwrap_or("未标注"),
             md_escape(&item.title),
             item.score_display,
             item.submitted_at.as_deref().unwrap_or("—"),
@@ -325,16 +691,17 @@ fn map_attempt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttemptRecord> {
         title_snapshot: row.get(14)?,
         prompt_snapshot: row.get(15)?,
         content_text: row.get(16)?,
+        task_type: parse_writing_task_type(row.get(18)?),
         answers: vec![],
         annotations: vec![],
     })
 }
 
-fn load_attempt(conn: &Connection, id: &str) -> DbResult<AttemptRecord> {
+pub(crate) fn load_attempt(conn: &Connection, id: &str) -> DbResult<AttemptRecord> {
     let mut attempt = conn.query_row(
         "SELECT id, activity, asset_id, mode, suite_id, status, started_at, submitted_at, completed_at,
                 duration_ms, score_value, score_scale, correct_count, question_count, title_snapshot,
-                prompt_snapshot, content_text, schema_version
+                prompt_snapshot, content_text, schema_version, task_type
          FROM attempts WHERE id = ?1",
         params![id],
         map_attempt_row,

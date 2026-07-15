@@ -39,7 +39,7 @@
           class="mark-question-button"
           :class="{ active: isMarkedQuestion(questionId) }"
           :disabled="readOnlyMode"
-          :aria-label="`${isMarkedQuestion(questionId) ? '取消标记' : '标记'} Question ${getDisplayLabel(questionId)}`"
+          :aria-label="`第 ${getDisplayLabel(questionId)} 题${isMarkedQuestion(questionId) ? '取消标记' : '标记'}`"
           @click.stop="$emit('toggle-marked-question', questionId)"
         >
           !
@@ -55,22 +55,30 @@
         </div>
       </div>
       <span class="reading-stat reading-progress" data-reading-answer-progress>
-        {{ answeredCount }}/{{ payload.questionCount }}
+        已作答 {{ answeredCount }}/{{ payload.questionCount }}
       </span>
-      <router-link id="exit-btn" class="header-btn" :to="returnRoute">{{ returnLabel }}</router-link>
+      <router-link v-slot="{ href }" :to="returnRoute" custom>
+        <a
+          id="exit-btn"
+          class="header-btn"
+          :href="href"
+          :aria-disabled="leaving ? 'true' : undefined"
+          :tabindex="leaving ? -1 : undefined"
+          @click="handleLeave"
+        >{{ leaving ? '退出中…' : returnLabel }}</a>
+      </router-link>
       <button id="reset-btn" class="header-btn" type="button" :disabled="resetButtonDisabled" @click="$emit('reset')">{{ resetButtonLabel }}</button>
-      <button class="header-btn" type="button" :disabled="!asset || loading || submitting" @click="$emit('snapshot')">保存作答快照</button>
+      <button class="header-btn" type="button" :disabled="!canSnapshot" @click="$emit('snapshot')">保存作答快照</button>
       <button id="submit-btn" class="submit-btn primary" type="button" :disabled="primaryButtonDisabled" @click="$emit('primary')">
         {{ primaryButtonLabel }}
       </button>
     </div>
 
-    <p v-if="snapshotMessage" class="snapshot-message">{{ snapshotMessage }}</p>
   </nav>
 </template>
 
 <script setup>
-defineProps({
+const props = defineProps({
   asset: { type: Object, default: null },
   payload: { type: Object, default: null },
   suiteSession: { type: Object, default: null },
@@ -83,8 +91,9 @@ defineProps({
   primaryButtonLabel: { type: String, required: true },
   loading: { type: Boolean, default: false },
   submitting: { type: Boolean, default: false },
+  leaving: { type: Boolean, default: false },
   readOnlyMode: { type: Boolean, default: false },
-  snapshotMessage: { type: String, default: '' },
+  canSnapshot: { type: Boolean, default: false },
   hasAnswer: { type: Function, required: true },
   isMarkedQuestion: { type: Function, required: true },
   getReviewClass: { type: Function, required: true },
@@ -93,11 +102,18 @@ defineProps({
   getDisplayLabel: { type: Function, required: true }
 })
 
-defineEmits([
+const emit = defineEmits([
   'scroll-to-question',
   'toggle-marked-question',
+  'leave',
   'reset',
   'snapshot',
   'primary'
 ])
+
+function handleLeave(event) {
+  event.preventDefault()
+  if (props.leaving) return
+  emit('leave')
+}
 </script>

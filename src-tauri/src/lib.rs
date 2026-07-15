@@ -68,6 +68,8 @@ pub fn run() {
             commands::history::export_history,
             commands::history::delete_history_attempt,
             commands::history::import_reading_archive_value,
+            commands::history::history_get_retention_policy,
+            commands::history::history_set_retention_policy,
             commands::settings::list_settings,
             commands::settings::upsert_setting,
             commands::settings::migrate_local_preferences,
@@ -86,12 +88,16 @@ pub fn run() {
             commands::writing::writing_cancel_evaluation,
             commands::writing::writing_get_evaluation,
             commands::writing::writing_topic_list,
+            commands::writing::writing_topic_get,
             commands::writing::writing_topic_upsert,
             commands::writing::writing_topic_delete,
             commands::writing::writing_topic_import,
             commands::writing::writing_topic_statistics,
             commands::reading::reading_list_assets,
             commands::reading::reading_get_asset_payload,
+            commands::reading::reading_get_pdf_data_url,
+            commands::reading::reading_export_archive,
+            commands::reading::reading_import_archive,
             commands::reading::reading_save_draft,
             commands::reading::reading_get_open_draft,
             commands::reading::reading_patch_answer,
@@ -129,6 +135,21 @@ pub fn run() {
         .setup(|app| {
             let paths = app.state::<app::state::AppPaths>();
             let db = app.state::<app::state::AppDb>();
+            let writing_catalog = app
+                .path()
+                .resource_dir()?
+                .join("writing-topics")
+                .join("bc-task2-2024-12_2025-01.catalog.json");
+            let writing_seed = db
+                .with_conn(|conn| ielts_db::seed_builtin_writing_catalog(conn, &writing_catalog))?;
+            tracing::info!(
+                declared = writing_seed.declared,
+                created = writing_seed.created,
+                updated = writing_seed.updated,
+                unchanged = writing_seed.unchanged,
+                preserved = writing_seed.preserved,
+                "validated and indexed bundled writing catalog"
+            );
             let reading_pack = app.path().resource_dir()?.join("reading");
             let seed_report =
                 db.with_conn(|conn| ielts_db::seed_builtin_reading_pack(conn, &reading_pack))?;

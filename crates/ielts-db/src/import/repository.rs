@@ -7,7 +7,9 @@ use serde_json::Value;
 use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
 use ielts_domain::dto::{AttemptRecord, WritingEvaluationV4};
 
-use crate::attempts::{ensure_asset_stub, upsert_attempt};
+use crate::attempts::{
+    ensure_asset_stub, parse_writing_task_type, upsert_attempt, writing_task_type_str,
+};
 use crate::import::convert::{evaluation_v3_to_v4, reading_submission_to_attempt};
 use crate::sqlite::{DbError, DbResult};
 
@@ -58,6 +60,28 @@ pub fn upsert_writing_evaluation(
             now,
         ],
     )?;
+    if let Some(task_type) = evaluation.task_type {
+        // Import data may predate the attempt-level column.  An explicit V4
+        // evaluation is a trustworthy source, but it must never overwrite an
+        // already persisted conflicting classification.
+        let updated = conn.execute(
+            "UPDATE attempts
+             SET task_type = ?1, updated_at = ?2
+             WHERE id = ?3
+               AND activity = 'writing'
+               AND (task_type IS NULL OR task_type = ?1)",
+            params![
+                writing_task_type_str(task_type),
+                chrono::Utc::now().to_rfc3339(),
+                attempt_id
+            ],
+        )?;
+        if updated == 0 {
+            return Err(DbError::Import(format!(
+                "evaluation task_type conflicts with writing attempt {attempt_id}"
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -67,7 +91,7 @@ pub fn list_history_view_models(
     let mut stmt = conn.prepare(
         "SELECT id, activity, asset_id, mode, suite_id, status, started_at, submitted_at, completed_at,
                 duration_ms, score_value, score_scale, correct_count, question_count, title_snapshot,
-                prompt_snapshot, content_text, schema_version
+                prompt_snapshot, content_text, schema_version, task_type
          FROM attempts
          ORDER BY COALESCE(submitted_at, started_at) DESC",
     )?;
@@ -97,6 +121,7 @@ pub fn list_history_view_models(
             title_snapshot: row.get(14)?,
             prompt_snapshot: row.get(15)?,
             content_text: row.get(16)?,
+            task_type: parse_writing_task_type(row.get(18)?),
             answers: vec![],
             annotations: vec![],
         })

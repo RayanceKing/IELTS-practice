@@ -123,8 +123,8 @@ function isNavActive(item) {
 .nav-item:hover,
 .nav-item.is-active {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.58);
-  box-shadow: 0 1px 4px rgba(37, 35, 44, 0.08);
+  background: var(--atlas-nav-active-bg);
+  box-shadow: var(--atlas-nav-active-shadow);
 }
 
 @media (max-width: 900px) {

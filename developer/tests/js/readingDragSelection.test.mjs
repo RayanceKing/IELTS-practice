@@ -40,7 +40,17 @@ assert.equal(activated, 2)
 review = true
 assert.equal(controller.select({ value: 'C', label: 'Heading C' }), false)
 assert.equal(controller.place('q3', () => assert.fail('review mode must not assign')), false)
+assert.equal(controller.activateKey('Enter', () => assert.fail('read-only keyboard must not assign')), false)
 assert.equal(controller.getSelected(), null)
+
+let memorizeReadOnly = false
+const memorizeController = createDragSelectionController({
+  isReadOnly: () => memorizeReadOnly
+})
+assert.equal(memorizeController.select({ value: 'M', label: 'Memorize option' }), true)
+memorizeReadOnly = true
+assert.equal(memorizeController.place('q4', () => assert.fail('memorize mode must not assign')), false)
+assert.equal(memorizeController.activateKey(' ', () => assert.fail('memorize keyboard must not assign')), false)
 
 review = false
 controller.select({ value: 'D', label: 'Heading D', sourceQuestionId: 'q4' })

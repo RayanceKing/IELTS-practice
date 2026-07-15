@@ -2,7 +2,8 @@
 
 use ielts_domain::dto::{
     CommandResponse, ExportHistoryCommand, ExportHistoryResult, HistoryDetailResponse,
-    ListHistoryPage, ListHistoryQuery,
+    HistoryRetentionPolicyDto, ListHistoryPage, ListHistoryQuery, SetHistoryRetentionPolicyCommand,
+    SetHistoryRetentionPolicyResult,
 };
 use ielts_domain::ErrorEnvelope;
 use tauri::State;
@@ -78,30 +79,42 @@ pub fn delete_history_attempt(db: State<'_, AppDb>, attempt_id: String) -> Comma
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReadingArchiveImportResult {
-    pub imported_count: usize,
-    pub skipped_count: usize,
-    pub failed_count: usize,
-    pub attempt_ids: Vec<String>,
-    pub errors: Vec<String>,
+/// Read the SQLite-owned history retention policy. The UI must consume this
+/// value directly instead of presenting an unrelated settings KV as a switch.
+#[tauri::command]
+pub fn history_get_retention_policy(
+    db: State<'_, AppDb>,
+) -> CommandResponse<HistoryRetentionPolicyDto> {
+    match db.with_conn(ielts_db::get_history_retention_policy) {
+        Ok(policy) => CommandResponse::success(policy),
+        Err(error) => CommandResponse::failure(map_db_err(error)),
+    }
 }
 
-/// Product reading archive import (`submissions[]` or cold `records[]`).
+/// Set a bounded policy (50–500 in steps of 50) or `null` for unlimited
+/// retention. The repository validates and applies immediate pruning atomically.
+#[tauri::command]
+pub fn history_set_retention_policy(
+    db: State<'_, AppDb>,
+    cmd: SetHistoryRetentionPolicyCommand,
+) -> CommandResponse<SetHistoryRetentionPolicyResult> {
+    match db
+        .with_conn(|conn| ielts_db::set_history_retention_policy(conn, cmd.max_terminal_attempts))
+    {
+        Ok(result) => CommandResponse::success(result),
+        Err(error) => CommandResponse::failure(map_db_err(error)),
+    }
+}
+
+/// Compatibility command name for callers not yet on `reading_import_archive`.
+/// It returns the same canonical all-or-nothing report as the Reading command.
 #[tauri::command]
 pub fn import_reading_archive_value(
     db: State<'_, AppDb>,
     value: serde_json::Value,
-) -> CommandResponse<ReadingArchiveImportResult> {
+) -> CommandResponse<ielts_db::ReadingArchiveImportResult> {
     match db.with_conn(|conn| ielts_db::import_reading_archive_value(conn, &value)) {
-        Ok(report) => CommandResponse::success(ReadingArchiveImportResult {
-            imported_count: report.imported,
-            skipped_count: 0,
-            failed_count: report.failed,
-            attempt_ids: report.attempt_ids,
-            errors: report.errors,
-        }),
+        Ok(report) => CommandResponse::success(report),
         Err(e) => CommandResponse::failure(map_db_err(e)),
     }
 }

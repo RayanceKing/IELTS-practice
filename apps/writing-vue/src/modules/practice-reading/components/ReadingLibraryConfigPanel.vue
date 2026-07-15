@@ -4,20 +4,17 @@
       <div class="backup-list-header">
         <h3 class="backup-list-title">
           <span class="backup-list-title-icon" aria-hidden="true">🗂️</span>
-          <span class="backup-list-title-text">题库配置</span>
+          <span class="backup-list-title-text">本地题库信息</span>
         </h3>
         <button class="btn btn-secondary backup-list-dismiss" type="button" @click="$emit('close')">收起</button>
       </div>
       <div class="backup-list-scroll reading-library-config-scroll">
         <div class="backup-entry reading-library-config-entry" data-library-config-key="practice-reading-api">
           <div class="backup-entry-info">
-            <strong class="backup-entry-id">默认阅读题库</strong>
-            <div class="backup-entry-meta">来源: Practice API / reading assets</div>
+            <strong class="backup-entry-id">桌面内置阅读题库</strong>
+            <div class="backup-entry-meta">来源: Rust/SQLite 本地索引</div>
             <div class="backup-entry-meta">题目: {{ readingAssetCount }} 条 | HTML: {{ htmlAssetCount }} | PDF: {{ pdfAssetCount }}</div>
-            <div class="backup-entry-meta">最后更新: {{ latestAssetSyncLabel }}</div>
-          </div>
-          <div class="backup-entry-actions">
-            <button class="btn btn-secondary" type="button" :disabled="loading" @click="$emit('load-reading-data')">刷新</button>
+            <div class="backup-entry-meta">最近读取: {{ latestAssetReadLabel }}</div>
           </div>
         </div>
       </div>
@@ -31,9 +28,8 @@ defineProps({
   readingAssetCount: { type: Number, default: 0 },
   htmlAssetCount: { type: Number, default: 0 },
   pdfAssetCount: { type: Number, default: 0 },
-  latestAssetSyncLabel: { type: String, default: '未同步' },
-  loading: { type: Boolean, default: false }
+  latestAssetReadLabel: { type: String, default: '尚未读取' }
 })
 
-defineEmits(['close', 'load-reading-data'])
+defineEmits(['close'])
 </script>

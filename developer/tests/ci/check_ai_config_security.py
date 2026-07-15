@@ -12,6 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 VUE_ROOT = ROOT / "apps/writing-vue/src"
 AI_RUST = ROOT / "src-tauri/src/commands/ai.rs"
+AI_SETTINGS_RUST = ROOT / "crates/ielts-db/src/settings/mod.rs"
+WRITING_RUST = ROOT / "src-tauri/src/commands/writing.rs"
 TAURI_LIB = ROOT / "src-tauri/src/lib.rs"
 CLIENT = ROOT / "apps/writing-vue/src/api/client.js"
 SETTINGS_REPOSITORY = ROOT / "apps/writing-vue/src/api/settings-repository.js"
@@ -64,11 +66,38 @@ def check_rust_owned_crud(failures: list[str]) -> None:
 
 
 def check_runtime_contract(failures: list[str]) -> None:
-    rust = AI_RUST.read_text(encoding="utf-8", errors="replace")
+    commands = AI_RUST.read_text(encoding="utf-8", errors="replace")
+    settings = AI_SETTINGS_RUST.read_text(encoding="utf-8", errors="replace")
+    client = CLIENT.read_text(encoding="utf-8", errors="replace")
+    repository = SETTINGS_REPOSITORY.read_text(encoding="utf-8", errors="replace")
     registered = TAURI_LIB.read_text(encoding="utf-8", errors="replace")
     for key in RUNTIME_KEYS:
-        if f'"{key}"' not in rust:
-            fail(f"Rust active AI config is missing runtime key {key}", failures)
+        if f'"{key}"' not in settings:
+            fail(f"Rust AI runtime mirror owner is missing key {key}", failures)
+    if "fn write_ai_runtime_value" not in settings:
+        fail("Rust AI runtime mirror has no dedicated settings writer", failures)
+    if "pub fn reconcile_default_ai_config" not in settings:
+        fail("Rust AI settings owner does not reconcile the persisted default", failures)
+    if "reconcile_default_ai_config_with_secret_availability" not in settings:
+        fail("Rust AI settings owner does not distinguish a local vault key from a secret reference", failures)
+    if "pub fn reconcile_default_ai_config_with_vault" not in commands:
+        fail("Rust AI command layer does not reconcile the active configuration against the local vault", failures)
+    if "list_ai_configs_with_secret_availability" not in commands:
+        fail("Rust AI command layer exposes backup-restored secret references as usable configs", failures)
+    if "config_id: String" not in commands or "load_runtime_for_config(&db, &vault, &config_id)" not in commands:
+        fail("AI provider test does not target the user-selected configuration", failures)
+    if "testAiProvider(configId)" not in repository or "async test(id)" not in client:
+        fail("frontend provider test does not forward its selected configuration id", failures)
+    writing = WRITING_RUST.read_text(encoding="utf-8", errors="replace")
+    if "load_provider_config(&db, &vault)" not in writing:
+        fail("writing evaluation does not preflight the local vault before submission", failures)
+    submit_command = re.search(
+        r"pub fn writing_submit_attempt\b.*?\n}\n",
+        writing,
+        re.DOTALL,
+    )
+    if not submit_command or "load_provider_config(&db, &vault)" not in submit_command.group(0):
+        fail("writing submit can persist an attempt without a local-vault preflight", failures)
     for command in AI_COMMANDS:
         if f"commands::ai::{command}" not in registered:
             fail(f"Tauri invoke handler does not register {command}", failures)

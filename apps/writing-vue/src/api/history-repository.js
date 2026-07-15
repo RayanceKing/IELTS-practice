@@ -3,6 +3,7 @@
  */
 
 import { invokeCommand, isTauriRuntime, unwrapCommandResponse } from '@/api/tauri-bridge.js'
+import { normalizeHistoryViewModel } from '@/api/history-view-model.js'
 
 /** Matches backend UI hard-cap on list_history. */
 const LIST_HISTORY_UI_MAX = 200
@@ -20,13 +21,15 @@ export async function listHistory(query = {}) {
       startDate: query.startDate || null,
       endDate: query.endDate || null,
       minScore: query.minScore ?? null,
-      maxScore: query.maxScore ?? null
+      maxScore: query.maxScore ?? null,
+      scoreScale: query.scoreScale ?? query.score_scale ?? null,
+      taskType: query.taskType ?? query.task_type ?? null
     }
   })
   const page = unwrapCommandResponse(response, 'list_history')
   return {
     source: 'tauri',
-    items: (page?.items || []).map(normalizeUnifiedItem),
+    items: (page?.items || []).map(normalizeHistoryViewModel),
     total: Number(page?.total || 0),
     limit: Number(page?.limit || query.limit || 20),
     offset: Number(page?.offset || query.offset || 0),
@@ -95,7 +98,9 @@ export async function exportHistory(format = 'csv', query = {}) {
         startDate: query.startDate || null,
         endDate: query.endDate || null,
         minScore: query.minScore ?? null,
-        maxScore: query.maxScore ?? null
+        maxScore: query.maxScore ?? null,
+        scoreScale: query.scoreScale ?? query.score_scale ?? null,
+        taskType: query.taskType ?? query.task_type ?? null
       }
     }
   })
@@ -108,47 +113,6 @@ export async function exportHistory(format = 'csv', query = {}) {
 export async function deleteHistoryAttempt(attemptId) {
   const response = await invokeCommand('delete_history_attempt', { attemptId })
   return unwrapCommandResponse(response, 'delete_history_attempt')
-}
-
-function normalizeUnifiedItem(item) {
-  const activity = item.activity || 'writing'
-  const scoreValue = item.scoreValue ?? item.score_value ?? null
-  const scoreDisplay = item.scoreDisplay || item.score_display || '—'
-  const assetId = item.assetId || item.asset_id || null
-  const sessionId = item.sessionId || item.session_id || item.id || null
-  const suiteId = item.suiteId || item.suite_id || null
-  return {
-    id: item.id,
-    activity,
-    title: item.title || 'Untitled',
-    status: item.status,
-    mode: item.mode,
-    submitted_at: item.submittedAt || item.submitted_at || '',
-    duration_ms: item.durationMs ?? item.duration_ms ?? 0,
-    score_value: scoreValue,
-    score_scale: item.scoreScale || item.score_scale || null,
-    score_label: item.scoreLabel || item.score_label || (activity === 'reading' ? 'Accuracy' : 'Overall Band'),
-    score_display: scoreDisplay,
-    assetId,
-    asset_id: assetId,
-    examId: assetId,
-    sessionId,
-    session_id: sessionId,
-    suiteId,
-    suite_id: suiteId,
-    metadata: suiteId ? { suiteSessionId: suiteId, suite_session_id: suiteId } : (item.metadata || {}),
-    task_type: activity === 'reading' ? 'reading' : item.taskType || 'task2',
-    display_topic_title: item.title || 'Untitled',
-    topic_title: item.title || 'Untitled',
-    total_score: activity === 'writing'
-      ? Number(scoreValue ?? 0)
-      : Number(scoreValue ?? 0) * 10,
-    reading_accuracy: activity === 'reading' && scoreValue != null
-      ? Math.round(Number(scoreValue) * 100)
-      : undefined,
-    duration: Math.round((item.durationMs ?? item.duration_ms ?? 0) / 1000),
-    source: 'unified'
-  }
 }
 
 /**

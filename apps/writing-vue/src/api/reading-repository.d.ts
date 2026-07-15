@@ -12,6 +12,7 @@ export interface ReadingDraftInput {
 export function newKey(prefix?: string): string
 export function listReadingAssets(): Promise<ReadingListResult>
 export function getReadingAssetPayload(assetId: string): Promise<ReadingAssetEnvelope>
+export function getReadingPdfDataUrl(assetId: string): Promise<string>
 export function normalizeReadingAssetEnvelope(value: unknown): ReadingAssetEnvelope
 export function saveReadingDraft(payload: ReadingDraftInput): Promise<{ source: 'tauri'; attempt: AttemptRecord }>
 export function getOpenReadingDraft(assetId: string): Promise<{ source: 'tauri'; attempt: AttemptRecord | null }>
@@ -20,6 +21,7 @@ export function submitReadingAttempt(payload: ReadingDraftInput & { durationMs?:
 export const readingRepository: {
   listReadingAssets: typeof listReadingAssets
   getReadingAssetPayload: typeof getReadingAssetPayload
+  getReadingPdfDataUrl: typeof getReadingPdfDataUrl
   normalizeReadingAssetEnvelope: typeof normalizeReadingAssetEnvelope
   saveReadingDraft: typeof saveReadingDraft
   getOpenReadingDraft: typeof getOpenReadingDraft

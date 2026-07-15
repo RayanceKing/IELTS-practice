@@ -12,12 +12,12 @@ use tauri::{AppHandle, Manager, State};
 use crate::app::state::{AppDb, AppVault};
 use crate::commands::ai::{load_provider_config, load_runtime};
 use ielts_db::{
-    delete_writing_topic, finish_evaluation, get_writing_draft, import_writing_topics,
-    list_events, list_writing_topics, load_evaluation_for_attempt, prepare_evaluation,
-    request_cancel, save_writing_draft, submit_writing_attempt, upsert_writing_topic,
-    writing_topic_statistics as load_writing_topic_statistics, DeterministicProvider,
-    EvaluationEvent, EvaluationHandle,
-    EvaluationRunResult, StartEvaluationCommand, WritingDraft, WritingProvider,
+    delete_writing_topic, finish_evaluation, get_writing_draft, get_writing_topic,
+    import_writing_topics, list_events, list_writing_topics, load_evaluation_for_attempt,
+    prepare_evaluation, request_cancel, save_writing_draft, submit_writing_attempt,
+    upsert_writing_topic, writing_topic_statistics as load_writing_topic_statistics,
+    DeterministicProvider, EvaluationEvent, EvaluationHandle, EvaluationRunResult,
+    StartEvaluationCommand, WritingDraft, WritingProvider,
 };
 
 mod openai_provider;
@@ -26,6 +26,16 @@ fn map_err(err: ielts_db::DbError) -> ErrorEnvelope {
     ErrorEnvelope {
         code: "writing.error".into(),
         message: err.to_string(),
+        retryable: false,
+        context: None,
+        cause_id: None,
+    }
+}
+
+fn map_ai_not_configured(_: ielts_db::DbError) -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "ai.not_configured".into(),
+        message: "未配置可用 AI：请在设置中添加并启用默认模型，并在此设备填写 API Key。".into(),
         retryable: false,
         context: None,
         cause_id: None,
@@ -57,8 +67,14 @@ pub fn writing_get_draft(
 #[tauri::command]
 pub fn writing_submit_attempt(
     db: State<'_, AppDb>,
+    vault: State<'_, AppVault>,
     cmd: SubmitAttemptCommand,
 ) -> CommandResponse<ielts_domain::dto::AttemptRecord> {
+    // A restored secret reference is not enough. Refuse the durable submit
+    // before it can create an evaluation orphan on a different device.
+    if let Err(error) = load_provider_config(&db, &vault) {
+        return CommandResponse::failure(map_ai_not_configured(error));
+    }
     match db.with_conn(|conn| submit_writing_attempt(conn, &cmd)) {
         Ok(a) => CommandResponse::success(a),
         Err(e) => CommandResponse::failure(map_err(e)),
@@ -72,9 +88,10 @@ pub async fn writing_start_evaluation(
     cmd: StartEvaluationCommand,
     on_event: Channel<EvaluationEvent>,
 ) -> Result<CommandResponse<EvaluationHandle>, ErrorEnvelope> {
-    let config = match db.with_conn(load_provider_config) {
+    let vault = app.state::<AppVault>();
+    let config = match load_provider_config(&db, &vault) {
         Ok(config) => config,
-        Err(error) => return Ok(CommandResponse::failure(map_err(error))),
+        Err(error) => return Ok(CommandResponse::failure(map_ai_not_configured(error))),
     };
 
     // Fail closed when no AI is configured. Deterministic is only for explicit offline mode.
@@ -257,6 +274,17 @@ pub fn writing_topic_list(
 }
 
 #[tauri::command]
+pub fn writing_topic_get(
+    db: State<'_, AppDb>,
+    id: String,
+) -> CommandResponse<Option<WritingTopicDto>> {
+    match db.with_conn(|conn| get_writing_topic(conn, &id)) {
+        Ok(topic) => CommandResponse::success(topic),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+#[tauri::command]
 pub fn writing_topic_upsert(
     db: State<'_, AppDb>,
     cmd: UpsertWritingTopicCommand,
@@ -287,9 +315,7 @@ pub fn writing_topic_import(
 }
 
 #[tauri::command]
-pub fn writing_topic_statistics(
-    db: State<'_, AppDb>,
-) -> CommandResponse<WritingTopicStatistics> {
+pub fn writing_topic_statistics(db: State<'_, AppDb>) -> CommandResponse<WritingTopicStatistics> {
     match db.with_conn(load_writing_topic_statistics) {
         Ok(statistics) => CommandResponse::success(statistics),
         Err(error) => CommandResponse::failure(map_err(error)),

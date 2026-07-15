@@ -39,7 +39,9 @@ function normalizeTopic(raw) {
     difficulty: numberOr(raw?.difficulty),
     title_json: String(raw?.titleJson ?? raw?.title_json ?? ''),
     image_path: raw?.imagePath ?? raw?.image_path ?? null,
-    image_url: null,
+    // Rust owns the persisted value. The UI may only render a safe data URL;
+    // it never resolves an arbitrary local filesystem path.
+    image_url: raw?.imageUrl ?? raw?.image_url ?? raw?.imagePath ?? raw?.image_path ?? null,
     is_official: Boolean(raw?.isOfficial ?? raw?.is_official),
     usage_count: numberOr(raw?.usageCount ?? raw?.usage_count),
     created_at: raw?.createdAt ?? raw?.created_at ?? '',
@@ -53,9 +55,11 @@ function topicCommand(data = {}, explicitId = undefined) {
     category: String(data.category ?? ''),
     difficulty: numberOr(data.difficulty),
     titleJson: String(data.titleJson ?? data.title_json ?? data.title ?? data.prompt ?? ''),
-    imagePath: data.imagePath ?? data.image_path ?? null
+    imagePath: data.imagePath ?? data.image_path ?? data.imageUrl ?? data.image_url ?? null
   }
-  const suppliedId = explicitId === undefined ? data.id : explicitId
+  const suppliedId = explicitId === undefined
+    ? (data.id ?? data.sourceId ?? data.source_id)
+    : explicitId
   if (suppliedId !== undefined && suppliedId !== null) {
     command.id = asTopicId(suppliedId)
   }
@@ -97,6 +101,12 @@ export async function listWritingTopics(filters = {}, pagination = {}) {
     page,
     limit: numberOr(result.limit, limit)
   }
+}
+
+export async function getWritingTopic(id) {
+  const response = await invokeCommand('writing_topic_get', { id: asTopicId(id) })
+  const result = unwrapCommandResponse(response, 'writing_topic_get')
+  return result ? normalizeTopic(result) : null
 }
 
 export async function upsertWritingTopic(data, id = undefined) {
@@ -146,6 +156,7 @@ export async function getWritingTopicStatistics() {
 
 export const writingTopicsRepository = {
   list: listWritingTopics,
+  get: getWritingTopic,
   create: (data) => upsertWritingTopic(data),
   update: (id, data) => upsertWritingTopic(data, id),
   delete: deleteWritingTopic,

@@ -9,6 +9,7 @@ use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
 use ielts_domain::dto::{AttemptAnswer, AttemptRecord};
 
 use crate::attempts::upsert_attempt;
+use crate::history::prune_terminal_attempts_in_transaction;
 use crate::reading::assets::{
     load_answer_key, load_controls, load_kinds, load_practice_asset_payload,
 };
@@ -96,9 +97,21 @@ pub(crate) fn save_reading_draft_in_transaction(
     conn: &Connection,
     cmd: &ReadingDraftCommand,
 ) -> DbResult<AttemptRecord> {
+    save_reading_draft_in_scope(conn, cmd, AttemptMode::Single, None)
+}
+
+/// Internal mode adapters must name their ownership up front. They may never
+/// create a generic attempt and mutate it into a suite/endless attempt later.
+pub(crate) fn save_reading_draft_in_scope(
+    conn: &Connection,
+    cmd: &ReadingDraftCommand,
+    mode: AttemptMode,
+    suite_id: Option<&str>,
+) -> DbResult<AttemptRecord> {
     if cmd.idempotency_key.trim().is_empty() {
         return Err(DbError::Validation("idempotency_key required".into()));
     }
+    ensure_open_reading_attempt_scope(conn, &cmd.attempt_id, &cmd.asset_id, mode, suite_id)?;
     let loaded = load_answerable_asset(
         conn,
         &cmd.asset_id,
@@ -112,8 +125,8 @@ pub(crate) fn save_reading_draft_in_transaction(
         id: cmd.attempt_id.clone(),
         activity: Activity::Reading,
         asset_id: Some(cmd.asset_id.clone()),
-        mode: AttemptMode::Single,
-        suite_id: None,
+        mode,
+        suite_id: suite_id.map(str::to_string),
         status: AttemptStatus::Draft,
         started_at: now.clone(),
         submitted_at: None,
@@ -130,6 +143,7 @@ pub(crate) fn save_reading_draft_in_transaction(
         ),
         prompt_snapshot: None,
         content_text: None,
+        task_type: None,
         answers,
         annotations: vec![],
     };
@@ -155,6 +169,11 @@ pub fn submit_reading_attempt(
 ) -> DbResult<ReadingSubmitResult> {
     let tx = conn.unchecked_transaction()?;
     let result = submit_reading_attempt_in_transaction(&tx, cmd)?;
+    if !result.idempotent_replay {
+        // The terminal attempt, idempotency response and retention cleanup are
+        // one fact. A failed prune rolls the submission back with it.
+        prune_terminal_attempts_in_transaction(&tx)?;
+    }
     tx.commit()?;
     Ok(result)
 }
@@ -166,6 +185,15 @@ pub(crate) fn submit_reading_attempt_in_transaction(
     conn: &Connection,
     cmd: &ReadingSubmitCommand,
 ) -> DbResult<ReadingSubmitResult> {
+    submit_reading_attempt_in_scope(conn, cmd, AttemptMode::Single, None)
+}
+
+pub(crate) fn submit_reading_attempt_in_scope(
+    conn: &Connection,
+    cmd: &ReadingSubmitCommand,
+    mode: AttemptMode,
+    suite_id: Option<&str>,
+) -> DbResult<ReadingSubmitResult> {
     if cmd.idempotency_key.trim().is_empty() {
         return Err(DbError::Validation("idempotency_key required".into()));
     }
@@ -176,6 +204,8 @@ pub(crate) fn submit_reading_attempt_in_transaction(
     {
         return Ok(prev);
     }
+
+    ensure_open_reading_attempt_scope(conn, &cmd.attempt_id, &cmd.asset_id, mode, suite_id)?;
 
     let loaded = load_answerable_asset(
         conn,
@@ -226,8 +256,8 @@ pub(crate) fn submit_reading_attempt_in_transaction(
         id: cmd.attempt_id.clone(),
         activity: Activity::Reading,
         asset_id: Some(cmd.asset_id.clone()),
-        mode: AttemptMode::Single,
-        suite_id: None,
+        mode,
+        suite_id: suite_id.map(str::to_string),
         status: AttemptStatus::Completed,
         started_at: now.clone(),
         submitted_at: Some(now.clone()),
@@ -240,6 +270,7 @@ pub(crate) fn submit_reading_attempt_in_transaction(
         title_snapshot: Some(loaded.asset.title),
         prompt_snapshot: None,
         content_text: None,
+        task_type: None,
         answers,
         annotations: vec![],
     };
@@ -263,6 +294,95 @@ pub(crate) fn submit_reading_attempt_in_transaction(
         params![cmd.attempt_id],
     )?;
     Ok(result)
+}
+
+#[derive(Debug)]
+struct ExistingReadingAttempt {
+    activity: String,
+    asset_id: Option<String>,
+    mode: String,
+    suite_id: Option<String>,
+    status: String,
+}
+
+fn ensure_open_reading_attempt_scope(
+    conn: &Connection,
+    attempt_id: &str,
+    asset_id: &str,
+    mode: AttemptMode,
+    suite_id: Option<&str>,
+) -> DbResult<()> {
+    let Some(existing) = load_existing_reading_attempt(conn, attempt_id)? else {
+        return Ok(());
+    };
+    validate_open_reading_attempt_scope(&existing, asset_id, mode, suite_id)
+}
+
+fn require_open_standalone_reading_attempt(conn: &Connection, attempt_id: &str) -> DbResult<()> {
+    let existing = load_existing_reading_attempt(conn, attempt_id)?.ok_or_else(|| {
+        DbError::Validation(format!("reading attempt does not exist: {attempt_id}"))
+    })?;
+    let asset_id = existing.asset_id.clone().ok_or_else(|| {
+        DbError::Validation(format!("reading attempt has no asset: {attempt_id}"))
+    })?;
+    validate_open_reading_attempt_scope(&existing, &asset_id, AttemptMode::Single, None)
+}
+
+fn load_existing_reading_attempt(
+    conn: &Connection,
+    attempt_id: &str,
+) -> DbResult<Option<ExistingReadingAttempt>> {
+    conn.query_row(
+        "SELECT activity, asset_id, mode, suite_id, status FROM attempts WHERE id = ?1",
+        params![attempt_id],
+        |row| {
+            Ok(ExistingReadingAttempt {
+                activity: row.get(0)?,
+                asset_id: row.get(1)?,
+                mode: row.get(2)?,
+                suite_id: row.get(3)?,
+                status: row.get(4)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+fn validate_open_reading_attempt_scope(
+    existing: &ExistingReadingAttempt,
+    asset_id: &str,
+    mode: AttemptMode,
+    suite_id: Option<&str>,
+) -> DbResult<()> {
+    let expected_mode = attempt_mode_name(mode);
+    let expected_suite_id = suite_id.map(str::trim).filter(|id| !id.is_empty());
+    if existing.activity != "reading"
+        || existing.asset_id.as_deref() != Some(asset_id)
+        || existing.mode != expected_mode
+        || existing.suite_id.as_deref() != expected_suite_id
+    {
+        return Err(DbError::Validation(
+            "reading attempt belongs to another mode, session, or asset".into(),
+        ));
+    }
+    if !matches!(existing.status.as_str(), "draft" | "active") {
+        return Err(DbError::Validation(
+            "only an open reading attempt may be changed".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn attempt_mode_name(mode: AttemptMode) -> &'static str {
+    match mode {
+        AttemptMode::Single => "single",
+        AttemptMode::Suite => "suite",
+        AttemptMode::Endless => "endless",
+        AttemptMode::Memorize => "memorize",
+        AttemptMode::Freeform => "freeform",
+        AttemptMode::Bank => "bank",
+    }
 }
 
 /// Latest draft attempt for an asset, with answers hydrated.
@@ -358,6 +478,7 @@ pub fn get_open_reading_draft_for_scope(
                 title_snapshot: row.get(14)?,
                 prompt_snapshot: row.get(15)?,
                 content_text: row.get(16)?,
+                task_type: None,
                 answers: vec![],
                 annotations: vec![],
             })
@@ -522,6 +643,7 @@ pub fn patch_reading_answer(
     answer: &Value,
     marked: bool,
 ) -> DbResult<()> {
+    require_open_standalone_reading_attempt(conn, attempt_id)?;
     let qid = crate::reading::scoring::normalize_question_id(question_id);
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(

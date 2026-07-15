@@ -15,6 +15,8 @@ use ielts_domain::dto::{
 };
 use ielts_domain::ErrorEnvelope;
 
+use crate::attempts::writing_task_type_str;
+use crate::history::prune_terminal_attempts_in_transaction;
 use crate::sqlite::{DbError, DbResult};
 use crate::writing::draft::get_writing_draft;
 use crate::writing::eval_resolve::{
@@ -307,7 +309,8 @@ pub fn prepare_evaluation(
         return Err(DbError::Validation("empty essay".into()));
     }
 
-    let task_type = parse_task(cmd.task_type.as_deref());
+    let requested_task_type = parse_task(cmd.task_type.as_deref())?;
+    let task_type = reconcile_attempt_task_type(draft.task_type, requested_task_type)?;
     let policy: ResolvedWritingEvalPolicy = resolve_writing_eval_policy(conn, task_type)?;
     let now = chrono::Utc::now().to_rfc3339();
     let evaluation_id = Uuid::new_v4().to_string();
@@ -324,6 +327,8 @@ pub fn prepare_evaluation(
 
     // Create evaluation row first, then session — transactionally related.
     let tx = conn.unchecked_transaction()?;
+
+    persist_attempt_task_type(&tx, &cmd.attempt_id, task_type)?;
 
     tx.execute(
         "INSERT INTO writing_evaluations (
@@ -716,6 +721,27 @@ fn finalize_completed(
     conn: &Connection,
     evaluation_id: &str,
     session_id: &str,
+    evaluation: WritingEvaluationV4,
+    events: Vec<EvaluationEvent>,
+    degraded: bool,
+) -> DbResult<EvaluationRunResult> {
+    let tx = conn.unchecked_transaction()?;
+    let result = finalize_completed_in_transaction(
+        &tx,
+        evaluation_id,
+        session_id,
+        evaluation,
+        events,
+        degraded,
+    )?;
+    tx.commit()?;
+    Ok(result)
+}
+
+fn finalize_completed_in_transaction(
+    conn: &Connection,
+    evaluation_id: &str,
+    session_id: &str,
     mut evaluation: WritingEvaluationV4,
     mut events: Vec<EvaluationEvent>,
     degraded: bool,
@@ -770,6 +796,7 @@ fn finalize_completed(
         Some(EvaluationStage::Finalizing),
         json!({ "status": status_str(evaluation.status), "evaluation": &evaluation }),
     )?);
+    prune_terminal_attempts_in_transaction(conn)?;
 
     Ok(EvaluationRunResult {
         session,
@@ -779,6 +806,21 @@ fn finalize_completed(
 }
 
 fn finalize_failed(
+    conn: &Connection,
+    evaluation_id: &str,
+    session_id: &str,
+    evaluation: WritingEvaluationV4,
+    events: Vec<EvaluationEvent>,
+    err: ProviderError,
+) -> DbResult<EvaluationRunResult> {
+    let tx = conn.unchecked_transaction()?;
+    let result =
+        finalize_failed_in_transaction(&tx, evaluation_id, session_id, evaluation, events, err)?;
+    tx.commit()?;
+    Ok(result)
+}
+
+fn finalize_failed_in_transaction(
     conn: &Connection,
     evaluation_id: &str,
     session_id: &str,
@@ -827,6 +869,7 @@ fn finalize_failed(
             "retryable": err.retryable,
         }),
     )?);
+    prune_terminal_attempts_in_transaction(conn)?;
     Ok(EvaluationRunResult {
         session,
         evaluation,
@@ -849,6 +892,25 @@ fn finalize_cancelled(
 }
 
 fn finalize_cancelled_with_partial(
+    conn: &Connection,
+    evaluation_id: &str,
+    session_id: &str,
+    evaluation: WritingEvaluationV4,
+    events: Vec<EvaluationEvent>,
+) -> DbResult<EvaluationRunResult> {
+    let tx = conn.unchecked_transaction()?;
+    let result = finalize_cancelled_with_partial_in_transaction(
+        &tx,
+        evaluation_id,
+        session_id,
+        evaluation,
+        events,
+    )?;
+    tx.commit()?;
+    Ok(result)
+}
+
+fn finalize_cancelled_with_partial_in_transaction(
     conn: &Connection,
     evaluation_id: &str,
     session_id: &str,
@@ -892,6 +954,7 @@ fn finalize_cancelled_with_partial(
         Some(evaluation.stage),
         json!({ "keptInputs": true }),
     )?);
+    prune_terminal_attempts_in_transaction(conn)?;
     Ok(EvaluationRunResult {
         session,
         evaluation,
@@ -947,6 +1010,7 @@ pub fn request_cancel(conn: &Connection, evaluation_id: &str) -> DbResult<bool> 
         Some(session.stage),
         json!({ "evaluationId": evaluation_id, "keptInputs": true }),
     )?;
+    prune_terminal_attempts_in_transaction(&tx)?;
     tx.commit()?;
     Ok(true)
 }
@@ -1066,6 +1130,9 @@ pub fn recover_interrupted_sessions(conn: &Connection) -> DbResult<u32> {
 
     for attempt_id in recovered_attempts {
         sync_attempt_from_latest_evaluation(&tx, &attempt_id, &now)?;
+    }
+    if !sessions.is_empty() {
+        prune_terminal_attempts_in_transaction(&tx)?;
     }
 
     tx.commit()?;
@@ -1466,6 +1533,49 @@ fn parse_stage(raw: &str) -> Option<EvaluationStage> {
     })
 }
 
-fn parse_task(raw: Option<&str>) -> Option<WritingTaskType> {
-    raw.and_then(WritingTaskType::parse_loose)
+fn parse_task(raw: Option<&str>) -> DbResult<Option<WritingTaskType>> {
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    WritingTaskType::parse_loose(raw)
+        .map(Some)
+        .ok_or_else(|| DbError::Validation("task_type must be task1 or task2".into()))
+}
+
+fn reconcile_attempt_task_type(
+    persisted: Option<WritingTaskType>,
+    requested: Option<WritingTaskType>,
+) -> DbResult<Option<WritingTaskType>> {
+    match (persisted, requested) {
+        (Some(persisted), Some(requested)) if persisted != requested => Err(DbError::Validation(
+            "evaluation task_type conflicts with the persisted writing attempt".into(),
+        )),
+        (Some(persisted), _) => Ok(Some(persisted)),
+        (None, requested) => Ok(requested),
+    }
+}
+
+fn persist_attempt_task_type(
+    conn: &Connection,
+    attempt_id: &str,
+    task_type: Option<WritingTaskType>,
+) -> DbResult<()> {
+    let Some(task_type) = task_type else {
+        return Ok(());
+    };
+    let task_type = writing_task_type_str(task_type);
+    let updated = conn.execute(
+        "UPDATE attempts
+         SET task_type = ?1, updated_at = ?2
+         WHERE id = ?3
+           AND activity = 'writing'
+           AND (task_type IS NULL OR task_type = ?1)",
+        params![task_type, chrono::Utc::now().to_rfc3339(), attempt_id],
+    )?;
+    if updated == 1 {
+        return Ok(());
+    }
+    Err(DbError::Validation(
+        "writing attempt is missing or its persisted task_type conflicts with evaluation".into(),
+    ))
 }

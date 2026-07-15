@@ -4,12 +4,19 @@ export function safeDateMs(value) {
 }
 
 export function historyPercentage(record) {
-  return Math.round(Number(record?.accuracy || 0) * 100)
+  const accuracy = Number(record?.accuracy)
+  if (!Number.isFinite(accuracy)) return 0
+  return Math.round(Math.min(1, Math.max(0, accuracy)) * 100)
+}
+
+function historyDurationSeconds(record) {
+  const duration = Number(record?.duration)
+  return Number.isFinite(duration) ? Math.max(0, duration) : 0
 }
 
 export function calculateStreakDays(records, now = new Date()) {
   const days = new Set((Array.isArray(records) ? records : []).map((record) => {
-    const value = String(record?.submittedAt || record?.endTime || '').trim()
+    const value = String(record?.submittedAt || '').trim()
     if (!value) return ''
     return value.slice(0, 10)
   }).filter(Boolean))
@@ -28,15 +35,15 @@ export function calculateStreakDays(records, now = new Date()) {
 
 export function sortReadingHistory(records) {
   return (Array.isArray(records) ? records : []).slice().sort((left, right) => (
-    safeDateMs(right?.submittedAt || right?.endTime || right?.startTime)
-    - safeDateMs(left?.submittedAt || left?.endTime || left?.startTime)
+    safeDateMs(right?.submittedAt)
+    - safeDateMs(left?.submittedAt)
   ))
 }
 
 export function historyRecordMatchesType(record, type) {
   if (type !== 'reading') return true
-  const activity = String(record?.activity || record?.metadata?.activity || '').trim().toLowerCase()
-  const recordType = String(record?.type || record?.metadata?.type || '').trim().toLowerCase()
+  const activity = String(record?.activity || '').trim().toLowerCase()
+  const recordType = String(record?.taskType || '').trim().toLowerCase()
   return activity === 'reading' || recordType === 'reading' || Boolean(record?.assetId || record?.examId)
 }
 
@@ -52,12 +59,9 @@ export function filterReadingHistory(records, options = {}) {
       record?.assetId,
       record?.examId,
       record?.activity,
-      record?.type,
+      record?.taskType,
       record?.metadata?.activity,
-      record?.metadata?.type,
-      record?.metadata?.category,
-      record?.submittedAt,
-      record?.endTime
+      record?.submittedAt
     ].filter(Boolean).join(' ').toLowerCase().includes(query)
   })
 }
@@ -65,8 +69,8 @@ export function filterReadingHistory(records, options = {}) {
 export function buildHistoryStats(records, options = {}) {
   const list = Array.isArray(records) ? records : []
   const totalPracticed = list.length
-  const totalAccuracy = list.reduce((sum, record) => sum + Number(record?.accuracy || 0), 0)
-  const totalDuration = list.reduce((sum, record) => sum + Number(record?.duration || 0), 0)
+  const totalAccuracy = list.reduce((sum, record) => sum + historyPercentage(record) / 100, 0)
+  const totalDuration = list.reduce((sum, record) => sum + historyDurationSeconds(record), 0)
   return {
     totalPracticed,
     averageAccuracy: totalPracticed ? Math.round((totalAccuracy / totalPracticed) * 100) : 0,
@@ -80,7 +84,7 @@ export function getPracticeTrendRecords(records, range, ranges, now = Date.now()
   const config = (Array.isArray(ranges) ? ranges : []).find((item) => item.value === range) || ranges?.[0] || { limit: 10 }
   if (config.days) {
     const cutoff = now - config.days * 24 * 60 * 60 * 1000
-    return list.filter((record) => safeDateMs(record?.submittedAt || record?.endTime || record?.startTime) >= cutoff)
+    return list.filter((record) => safeDateMs(record?.submittedAt) >= cutoff)
   }
   return list.slice(0, config.limit || 10)
 }

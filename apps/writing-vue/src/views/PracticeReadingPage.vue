@@ -48,7 +48,8 @@
           v-if="payload"
           class="header-btn"
           id="settings-btn"
-          title="Settings"
+          title="阅读设置"
+          aria-label="阅读设置"
           type="button"
           @click="toggleSettingsPanel"
         >
@@ -61,7 +62,7 @@
           type="button"
           @click="toggleNotesPanel"
         >
-          Note
+          笔记
         </button>
       </div>
     </header>
@@ -71,7 +72,7 @@
       <button class="btn-text" type="button" @click="loadAsset">重试</button>
     </div>
 
-    <div v-if="loading" class="surface loading">正在加载阅读题目...</div>
+    <div v-if="loading" class="surface loading">正在加载阅读内容…</div>
 
     <div v-if="submitError" class="inline-message inline-message-error">
       <span>{{ submitError }}</span>
@@ -167,8 +168,8 @@
       @keydown="handleNotesDialogKeydown"
     >
       <header>
-        <h3 id="notes-panel-title">Notes</h3>
-        <button id="close-note" type="button" @click="closeFloatingPanels">Close</button>
+        <h3 id="notes-panel-title">阅读笔记</h3>
+        <button id="close-note" type="button" @click="closeFloatingPanels">关闭</button>
       </header>
       <textarea ref="notesTextarea" v-model="notesText" aria-label="阅读笔记"></textarea>
       <p v-if="notesError" class="settings-help settings-help-error" role="alert">{{ notesError }}</p>
@@ -183,9 +184,9 @@
       @mousedown.prevent="keepSelectionToolbar = true"
       @mouseup="keepSelectionToolbar = false"
     >
-      <button type="button" id="btnHL" data-role="highlight" @click="applySelectionHighlight('highlight')">Highlight</button>
-      <button type="button" id="btnUH" data-role="remove-highlight" @click="removeSelectionHighlight">Remove</button>
-      <button type="button" id="btnNote" data-role="note" @click="applySelectionNote">Note</button>
+      <button type="button" id="btnHL" data-role="highlight" @click="applySelectionHighlight('highlight')">高亮标记</button>
+      <button type="button" id="btnUH" data-role="remove-highlight" @click="removeSelectionHighlight">取消高亮</button>
+      <button type="button" id="btnNote" data-role="note" @click="applySelectionNote">添加笔记</button>
     </div>
 
     <div
@@ -252,13 +253,17 @@
     <div v-if="isEndlessMode" class="inline-message endless-message" data-reading-endless-mode>
       <span>{{ endlessStatusText }}</span>
       <div class="endless-actions">
-        <button v-if="endlessNextAssetId" class="btn-text" type="button" @click="goToNextEndlessAsset">下一篇</button>
-        <button class="btn-text" type="button" @click="stopEndlessMode">退出无尽模式</button>
+        <button v-if="endlessNextAssetId" class="btn-text" type="button" :disabled="leaving" @click="goToNextEndlessAsset">下一篇</button>
+        <button class="btn-text" type="button" :disabled="leaving" @click="stopEndlessMode">退出无尽模式</button>
       </div>
     </div>
 
     <p v-if="highlightRestoreWarning" class="settings-help settings-help-error" role="status">
       {{ highlightRestoreWarning }}
+    </p>
+
+    <p v-if="snapshotMessage" class="reading-action-status snapshot-message" role="status" aria-live="polite">
+      {{ snapshotMessage }}
     </p>
 
     <p class="sr-only" aria-live="polite">{{ dragInteractionStatus }}</p>
@@ -373,8 +378,9 @@
       :primary-button-label="primaryButtonLabel"
       :loading="loading"
       :submitting="submitting"
+      :leaving="leaving"
       :read-only-mode="readOnlyMode"
-      :snapshot-message="snapshotMessage"
+      :can-snapshot="canSnapshot"
       :has-answer="hasAnswer"
       :is-marked-question="isMarkedQuestion"
       :get-review-class="getReviewClass"
@@ -383,6 +389,7 @@
       :get-display-label="getDisplayLabel"
       @scroll-to-question="scrollToQuestion"
       @toggle-marked-question="toggleMarkedQuestion"
+      @leave="handleLeave"
       @reset="handleResetButton"
       @snapshot="snapshotAnswers"
       @primary="handlePrimaryButton"
@@ -411,6 +418,7 @@ import { useReadingCoach } from '@/modules/practice-reading/useReadingCoach'
 import { useReadingHighlights } from '@/modules/practice-reading/useReadingHighlights'
 import { normalizeComparableText } from '@/modules/practice-reading/readingHighlightCore.js'
 import { useReadingModeFlow } from '@/modules/practice-reading/useReadingModeFlow'
+import { canSnapshotReadingAnswers } from '@/modules/practice-reading/readingModeFlowCore.js'
 import { useReadingTimer } from '@/modules/practice-reading/useReadingTimer'
 import { useReadingAttempt } from '@/modules/practice-reading/useReadingAttempt'
 import {
@@ -474,6 +482,7 @@ const {
   clearReadingAssetError
 } = useReadingAsset()
 const submitting = ref(false)
+const leaving = ref(false)
 const submitError = ref('')
 const snapshotMessage = ref('')
 const submission = ref(null)
@@ -498,6 +507,7 @@ const readingPassagePane = ref(null)
 const readingAttempt = useReadingAttempt()
 let tauriAttemptId = ''
 let draftAutosaveTimer = null
+let snapshotMessageTimer = null
 
 const {
   settingsPanelOpen,
@@ -575,12 +585,12 @@ const isMemorizeMode = computed(() => {
 })
 const activeMemorizeAttemptId = ref(String(readRouteQueryValue('memorizeAttemptId') || '').trim())
 const headerSummary = computed(() => {
-  if (!payload.value) return '从统一 Practice API 加载阅读题目。'
-  const category = payload.value.meta?.category || asset.value?.category || 'Reading'
+  if (!payload.value) return '正在准备阅读练习…'
+  const category = payload.value.meta?.category || asset.value?.category || '阅读'
   const questionCount = Number(payload.value.questionCount ?? payload.value.questionOrder?.length) || 0
   const mode = activeSuiteSessionId.value
-    ? 'Vue 套题阅读链路'
-    : (isEndlessMode.value ? '无尽模式' : (isMemorizeMode.value ? '背题模式' : 'Vue 原生阅读链路'))
+    ? '套题练习'
+    : (isEndlessMode.value ? '无尽练习' : (isMemorizeMode.value ? '背题模式' : '单篇练习'))
   return `${category} · ${questionCount} 题 · ${mode}`
 })
 const returnRoute = computed(() => (
@@ -606,11 +616,11 @@ const {
   getAnswerFingerprint
 } = useReadingAnswers({
   payloadSource: () => payload.value,
-  readOnlySource: reviewMode,
+  readOnlySource: readOnlyMode,
   onTrack: recordAnswerTimeline,
   onSyncNative: syncNativeControl,
   onMutate: () => {
-    snapshotMessage.value = ''
+    clearSnapshotMessage()
     submitError.value = ''
   }
 })
@@ -650,7 +660,7 @@ const {
   resolveDropzoneQuestionId
 } = useReadingInteractions({
   payloadSource: () => payload.value,
-  reviewModeSource: reviewMode,
+  readOnlyModeSource: readOnlyMode,
   getAnswerValue,
   getRawAnswer,
   assignAnswer,
@@ -764,7 +774,24 @@ const {
   notesText,
   toggleNotesPanel
 })
-const canSubmit = computed(() => Boolean(asset.value && payload.value && !loading.value && !submitting.value && !readOnlyMode.value))
+const canSubmit = computed(() => Boolean(
+  asset.value
+  && payload.value
+  && !loading.value
+  && !submitting.value
+  && !leaving.value
+  && !readOnlyMode.value
+))
+const canSnapshot = computed(() => canSnapshotReadingAnswers({
+  isTauriRuntime: isTauriRuntime(),
+  hasAsset: Boolean(asset.value?.id),
+  hasPayload: Boolean(payload.value),
+  loading: loading.value,
+  submitting: submitting.value,
+  leaving: leaving.value,
+  readOnly: readOnlyMode.value,
+  isEndlessMode: isEndlessMode.value
+}))
 const canRecycleSubmittedAttempt = computed(() => Boolean(
   reviewMode.value
   && !activeSuiteSessionId.value
@@ -781,23 +808,24 @@ const readingWorkspaceStyle = computed(() => ({
   '--reading-left-pane-width': `${leftPanePercent.value}%`
 }))
 const primaryButtonLabel = computed(() => {
-  if (submitting.value) return '提交中...'
-  if (isMemorizeMode.value) return 'Exit'
+  if (submitting.value) return '提交中…'
+  if (isMemorizeMode.value) return '退出背题'
   if (reviewMode.value) return '已提交'
-  return 'Submit'
+  return '提交作答'
 })
 const primaryButtonDisabled = computed(() => {
-  if (isMemorizeMode.value) return false
+  if (isMemorizeMode.value) return leaving.value
   return !canSubmit.value
 })
 const resetButtonLabel = computed(() => {
-  if (isMemorizeMode.value) return '重置测试'
-  return 'Reset'
+  if (isMemorizeMode.value) return '转为练习'
+  if (reviewMode.value) return '重新作答'
+  return '清空作答'
 })
 const resetButtonDisabled = computed(() => {
-  if (isMemorizeMode.value) return false
-  if (reviewMode.value) return !canRecycleSubmittedAttempt.value
-  return submitting.value
+  if (isMemorizeMode.value) return leaving.value
+  if (reviewMode.value) return !canRecycleSubmittedAttempt.value || leaving.value
+  return submitting.value || leaving.value
 })
 const endlessStatusText = computed(() => {
   if (endlessCountdown.value > 0 && endlessNextAssetId.value) {
@@ -815,7 +843,7 @@ const officialPassageNotes = computed(() => {
   return Array.isArray(notes)
     ? notes
         .map((note, index) => ({
-          label: String(note?.label || `Paragraph ${index + 1}`).trim(),
+          label: String(note?.label || `第 ${index + 1} 段`).trim(),
           text: String(note?.text || '').trim()
         }))
         .filter((note) => note.text)
@@ -883,7 +911,7 @@ const singleAttemptLlmQuestionAnalyses = computed(() => (
     ? singleAttemptAnalysisLlm.value.reviewQuestionAnalyses
         .map((entry, index) => {
           const rawQuestionNumber = String(entry?.questionNumber || entry?.questionId || '').replace(/^q/i, '').trim()
-          const questionLabel = rawQuestionNumber ? `Q${rawQuestionNumber}` : `Q${index + 1}`
+          const questionLabel = `第 ${rawQuestionNumber || index + 1} 题`
           return {
             questionLabel,
             likelyMistake: String(entry?.likelyMistake || '').trim(),
@@ -911,6 +939,23 @@ const analysisKindRows = computed(() => {
   return Object.values(fallback)
 })
 
+function clearSnapshotMessage() {
+  snapshotMessage.value = ''
+  if (snapshotMessageTimer) {
+    clearTimeout(snapshotMessageTimer)
+    snapshotMessageTimer = null
+  }
+}
+
+function showSnapshotMessage(message, durationMs = 4200) {
+  clearSnapshotMessage()
+  snapshotMessage.value = message
+  snapshotMessageTimer = setTimeout(() => {
+    snapshotMessage.value = ''
+    snapshotMessageTimer = null
+  }, durationMs)
+}
+
 onMounted(async () => {
   await initializeReadingPreferences()
   attachHighlightDocumentListeners()
@@ -921,8 +966,10 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   flushActiveQuestionVisit()
   stopPracticeTimer()
-  if (!reviewMode.value && !isMemorizeMode.value) {
-    void persistTauriDraft()
+  if (!reviewMode.value && !isMemorizeMode.value && !isEndlessMode.value) {
+    void persistTauriDraft().catch((error) => {
+      console.warn('阅读页面卸载时保存草稿失败', error)
+    })
   }
   clearEndlessTimer()
   if (isMemorizeMode.value) void finishActiveMemorizeSession()
@@ -930,6 +977,7 @@ onBeforeUnmount(() => {
     clearTimeout(draftAutosaveTimer)
     draftAutosaveTimer = null
   }
+  clearSnapshotMessage()
   detachHighlightDocumentListeners()
   removeDividerDragListeners()
 })
@@ -939,7 +987,7 @@ onUpdated(() => {
     return
   }
   syncDomAnswers()
-  if (reviewMode.value) {
+  if (readOnlyMode.value) {
     setReadOnlyDomControls(true)
   }
 })
@@ -965,7 +1013,7 @@ watch(
     assetId: asset.value?.id || '',
     questionCount: Array.isArray(payload.value?.questionOrder) ? payload.value.questionOrder.length : 0,
     answers: JSON.stringify(snapshotAnswerMap()),
-    review: reviewMode.value
+    readOnly: readOnlyMode.value
   }),
   async ({ assetId, questionCount }) => {
     if (!assetId || !questionCount) {
@@ -973,7 +1021,7 @@ watch(
     }
     await nextTick()
     syncDomAnswers()
-    if (reviewMode.value) {
+    if (readOnlyMode.value) {
       setReadOnlyDomControls(true)
     }
   },
@@ -993,7 +1041,7 @@ async function loadAsset() {
 
   clearReadingAssetError()
   submitError.value = ''
-  snapshotMessage.value = ''
+  clearSnapshotMessage()
   submission.value = null
   suiteSession.value = null
   resetAttemptMetadata()
@@ -1006,6 +1054,9 @@ async function loadAsset() {
   endlessNextAssetId.value = ''
   try {
     const data = await loadReadingAsset(normalizedAssetId)
+    if (isEndlessMode.value && !(await reconcileEndlessRoute())) {
+      return
+    }
     initializeReadingAnswers(data?.payload, { prefillAnswerKey: isMemorizeMode.value })
     loadReadingNotes()
     if (activeSuiteSessionId.value) {
@@ -1022,7 +1073,7 @@ async function loadAsset() {
     }
     if (replaySessionId) {
       await loadSubmittedSession(replaySessionId)
-    } else if (isTauriRuntime() && !isMemorizeMode.value) {
+    } else if (isTauriRuntime() && !isMemorizeMode.value && !isEndlessMode.value) {
       await hydrateOpenDraft(normalizedAssetId, activeSuiteSessionId.value || null)
     }
   } catch (loadError) {
@@ -1136,7 +1187,7 @@ async function hydrateOpenDraft(assetId, suiteId = null) {
     if (marked.length) {
       markedQuestions.value = marked
     }
-    snapshotMessage.value = '已恢复未提交草稿。'
+    showSnapshotMessage('已恢复未提交草稿。')
   } catch (draftError) {
     console.warn('加载阅读草稿失败:', draftError)
   }
@@ -1258,7 +1309,7 @@ function restoreSubmittedMetadata(loadedSubmission) {
 }
 
 function resetAnswers() {
-  if (reviewMode.value) {
+  if (readOnlyMode.value) {
     return
   }
   initializeReadingAnswers(payload.value, { prefillAnswerKey: isMemorizeMode.value })
@@ -1270,7 +1321,7 @@ function resetAnswers() {
   }
   startPracticeTimer()
   syncDomAnswers()
-  snapshotMessage.value = '已清空本页作答。'
+  showSnapshotMessage('已清空本页作答。')
 }
 
 function isMarkedQuestion(questionId) {
@@ -1297,7 +1348,7 @@ async function recycleSubmittedAttempt() {
   clearSubmissionSnapshot()
   resetReadingCoachState()
   submitError.value = ''
-  snapshotMessage.value = ''
+  clearSnapshotMessage()
   resetAttemptMetadata()
   initializeReadingAnswers(payload.value, { prefillAnswerKey: isMemorizeMode.value })
   resetHighlightUiStateFromComposable()
@@ -1307,21 +1358,24 @@ async function recycleSubmittedAttempt() {
   setReadOnlyDomControls(false)
   resetPracticeTimerClock()
   startPracticeTimer()
-  snapshotMessage.value = '已重置本篇练习，可重新作答。'
+  showSnapshotMessage('已重置本篇练习，可重新作答。')
 }
 
-function snapshotAnswers() {
-  if (!asset.value?.id) return
+async function snapshotAnswers() {
+  if (!canSnapshot.value) return false
   // Durable truth is Tauri SQLite draft; no Web Storage dual-write.
-  void persistTauriDraft().then(() => {
-    snapshotMessage.value = '作答快照已保存。'
-  }).catch(() => {
-    snapshotMessage.value = '当前环境无法写入草稿。'
-  })
+  try {
+    await persistTauriDraft()
+    showSnapshotMessage('作答快照已保存。')
+    return true
+  } catch (_) {
+    showSnapshotMessage('作答快照保存失败，请重试。')
+    return false
+  }
 }
 
 function handleQuestionInput(event) {
-  if (reviewMode.value) {
+  if (readOnlyMode.value) {
     return
   }
   const target = event.target
@@ -1409,7 +1463,7 @@ function syncNativeControl(questionId, explicitValue = getRawAnswer(questionId))
     })
     document.querySelectorAll(`input[type="checkbox"][name="${escapeCss(interaction.name)}"]`).forEach((input) => {
       input.checked = selectedValues.has(String(input.value || '').trim())
-      input.disabled = reviewMode.value
+      syncNativeReadOnly(input)
     })
     return
   }
@@ -1418,65 +1472,72 @@ function syncNativeControl(questionId, explicitValue = getRawAnswer(questionId))
     const escaped = escapeCss(name)
     document.querySelectorAll(`input[type="radio"][name="${escaped}"]`).forEach((input) => {
       input.checked = String(input.value || '').trim() === String(explicitValue || '').trim()
-      input.disabled = reviewMode.value
+      syncNativeReadOnly(input)
     })
     document.querySelectorAll(`input[type="text"][name="${escaped}"], textarea[name="${escaped}"]`).forEach((input) => {
       input.value = String(explicitValue || '')
-      input.disabled = reviewMode.value
+      syncNativeReadOnly(input)
     })
   })
 }
 
+function syncNativeReadOnly(control) {
+  const readOnly = readOnlyMode.value
+  control.disabled = readOnly
+  control.tabIndex = readOnly ? -1 : 0
+  control.setAttribute('aria-disabled', readOnly ? 'true' : 'false')
+}
+
 function scheduleDraftAutosave() {
-  if (!isTauriRuntime() || reviewMode.value || isMemorizeMode.value) {
+  if (!isTauriRuntime() || readOnlyMode.value || isEndlessMode.value) {
     return
   }
   if (draftAutosaveTimer) clearTimeout(draftAutosaveTimer)
   draftAutosaveTimer = setTimeout(() => {
     draftAutosaveTimer = null
-    void persistTauriDraft()
+    void persistTauriDraft().catch((error) => {
+      console.warn('阅读草稿自动保存失败', error)
+    })
   }, 800)
 }
 
 async function persistTauriDraft() {
-  if (!isTauriRuntime() || !asset.value?.id || reviewMode.value || isMemorizeMode.value) return
-  try {
-    if (activeSuiteSessionId.value) {
-      const { result } = await saveSuitePassageDraft({
-        suiteId: activeSuiteSessionId.value,
-        assetId: asset.value.id,
-        assetRevision: asset.value.schemaVersion ?? null,
-        assetFingerprint: asset.value.fingerprint || null,
-        answers: snapshotAnswerMap(),
-        markedQuestions: markedQuestions.value.slice(),
-        questionTimeline: buildPersistedQuestionTimeline(),
-        titleSnapshot: asset.value.title || asset.value.name || null,
-        timerSnapshot: getPracticeTimerSnapshot()
-      })
-      suiteSession.value = result?.suiteSession || suiteSession.value
-      tauriAttemptId = String(result?.attempt?.id || tauriAttemptId || '')
-      return
-    }
-    if (!tauriAttemptId) tauriAttemptId = readingAttempt.newAttemptId()
-    await readingAttempt.persistDraft({
-      attemptId: tauriAttemptId,
+  if (!isTauriRuntime() || !asset.value?.id || readOnlyMode.value || isEndlessMode.value) return
+  if (activeSuiteSessionId.value) {
+    const { result } = await saveSuitePassageDraft({
+      suiteId: activeSuiteSessionId.value,
       assetId: asset.value.id,
       assetRevision: asset.value.schemaVersion ?? null,
       assetFingerprint: asset.value.fingerprint || null,
       answers: snapshotAnswerMap(),
       markedQuestions: markedQuestions.value.slice(),
       questionTimeline: buildPersistedQuestionTimeline(),
-      titleSnapshot: asset.value.title || asset.value.name || null
+      titleSnapshot: asset.value.title || asset.value.name || null,
+      timerSnapshot: getPracticeTimerSnapshot()
     })
-  } catch (err) {
-    console.warn('Tauri reading draft persist failed', err)
+    suiteSession.value = result?.suiteSession || suiteSession.value
+    tauriAttemptId = String(result?.attempt?.id || tauriAttemptId || '')
+    return
   }
+  if (!tauriAttemptId) tauriAttemptId = readingAttempt.newAttemptId()
+  await readingAttempt.persistDraft({
+    attemptId: tauriAttemptId,
+    assetId: asset.value.id,
+    assetRevision: asset.value.schemaVersion ?? null,
+    assetFingerprint: asset.value.fingerprint || null,
+    answers: snapshotAnswerMap(),
+    markedQuestions: markedQuestions.value.slice(),
+    questionTimeline: buildPersistedQuestionTimeline(),
+    titleSnapshot: asset.value.title || asset.value.name || null
+  })
 }
 
 function toggleTimer() {
   togglePracticeTimer()
-  if (isTauriRuntime() && !isMemorizeMode.value) {
-    void persistTauriDraft()
+  if (isTauriRuntime() && !readOnlyMode.value && !isEndlessMode.value) {
+    void persistTauriDraft().catch((error) => {
+      console.warn('切换阅读计时时保存草稿失败', error)
+    })
   }
 }
 
@@ -1487,6 +1548,7 @@ const modeFlow = useReadingModeFlow({
   submission,
   suiteSession,
   submitting,
+  leaving,
   submitError,
   snapshotMessage,
   endlessCountdown,
@@ -1540,6 +1602,8 @@ function findSuiteReviewNavigationTarget(direction) { return modeFlow.findSuiteR
 function navigateSuiteReview(direction) { return modeFlow.navigateSuiteReview(direction) }
 function goToNextEndlessAsset() { return modeFlow.goToNextEndlessAsset() }
 function stopEndlessMode() { return modeFlow.stopEndlessMode() }
+function handleLeave() { return modeFlow.handleLeave() }
+function reconcileEndlessRoute() { return modeFlow.reconcileEndlessRoute() }
 function handleResetButton() { return modeFlow.handleResetButton() }
 function handlePrimaryButton() { return modeFlow.handlePrimaryButton() }
 function ensureMemorizeSession() { return modeFlow.ensureMemorizeSession() }
@@ -1923,7 +1987,7 @@ function flushActiveQuestionVisit(nowMs = Date.now()) {
 }
 
 function recordQuestionVisit(questionId) {
-  if (reviewMode.value) {
+  if (readOnlyMode.value) {
     return
   }
   const normalized = normalizeQuestionId(questionId)
@@ -1943,7 +2007,7 @@ function recordQuestionVisit(questionId) {
 }
 
 function recordInteraction() {
-  if (!reviewMode.value) {
+  if (!readOnlyMode.value) {
     interactionCount.value += 1
   }
 }
@@ -2080,10 +2144,10 @@ function resolveAnswerAliases(questionId) {
 
 function getGroupRange(group) {
   const ids = Array.isArray(group.questionIds) ? group.questionIds : []
-  if (!ids.length) return 'Questions'
+  if (!ids.length) return '题目'
   const labels = ids.map((questionId) => getDisplayLabel(questionId)).filter(Boolean)
-  if (labels.length <= 1) return `Question ${labels[0] || ''}`
-  return `Questions ${labels[0]}-${labels[labels.length - 1]}`
+  if (labels.length <= 1) return `第 ${labels[0] || ''} 题`
+  return `第 ${labels[0]}-${labels[labels.length - 1]} 题`
 }
 
 function getQuestionKindLabel(kind) {
@@ -3135,14 +3199,20 @@ function getQuestionKindLabel(kind) {
     minmax(280px, var(--reading-left-pane-width))
     var(--reading-divider-width)
     minmax(320px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
   width: 100%;
   min-height: 0;
+  max-height: 100%;
   height: auto;
   overflow: hidden;
 }
 
 .pane {
+  min-height: 0;
+  height: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
   background: var(--reading-panel);
   padding: 22px;
   min-width: 0;
@@ -3153,6 +3223,9 @@ function getQuestionKindLabel(kind) {
 }
 
 #reading-divider {
+  align-self: stretch;
+  height: 100%;
+  min-height: 100%;
   border-right: 1px solid var(--reading-line);
   border-left: 1px solid var(--reading-line);
   background: linear-gradient(180deg, #e2e8f0 0%, #cbd5e1 100%);
@@ -3756,11 +3829,12 @@ function getQuestionKindLabel(kind) {
   font-size: 0.86rem;
 }
 
+.reading-action-status,
 .snapshot-message {
-  position: absolute;
-  right: 18px;
-  bottom: calc(100% + 8px);
-  margin: 0;
+  position: static;
+  flex: 0 0 auto;
+  align-self: stretch;
+  margin: 0 18px;
   padding: 8px 10px;
   border: 1px solid var(--atlas-accent-ring);
   border-radius: 8px;
@@ -4179,8 +4253,15 @@ function getQuestionKindLabel(kind) {
   .reading-workspace.shell {
     display: block;
     height: auto;
+    max-height: none;
     overflow: visible;
     min-height: 0;
+  }
+
+  .reading-workspace.shell .pane {
+    min-height: auto;
+    height: auto;
+    overflow: visible;
   }
 
   #left,

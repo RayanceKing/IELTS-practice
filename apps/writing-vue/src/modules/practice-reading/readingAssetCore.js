@@ -13,11 +13,11 @@ export function createReadingAssetController(api, normalizeReadingRecordId) {
       return null
     }
 
-    const { afterLoad, ...requestOptions } = options || {}
+    const { afterLoad } = options || {}
     state.loading = true
     state.error = ''
     try {
-      const data = normalizeReadingAssetViewModel(await api.getAsset(normalizedAssetId, requestOptions))
+      const data = normalizeReadingAssetViewModel(await api.getAsset(normalizedAssetId))
       state.asset = data
       if (typeof afterLoad === 'function') {
         await afterLoad(data)
@@ -34,8 +34,8 @@ export function createReadingAssetController(api, normalizeReadingRecordId) {
     }
   }
 
-  async function loadReadingAssetPool(options = {}) {
-    return api.listAssets(options)
+  async function loadReadingAssetPool() {
+    return api.listAssets()
   }
 
   function clearReadingAssetError() {

@@ -1,6 +1,6 @@
 export function createReadingLibraryClient(api) {
   return {
-    loadReadingAssets: (options = {}) => api.listAssets(options),
-    getReadingAsset: (assetId, options = {}) => api.getAsset(assetId, options)
+    loadReadingAssets: () => api.listAssets(),
+    getReadingAsset: (assetId) => api.getAsset(assetId)
   }
 }

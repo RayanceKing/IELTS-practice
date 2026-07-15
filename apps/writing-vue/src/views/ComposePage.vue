@@ -130,6 +130,9 @@
                 <div v-else-if="topicError" class="topic-status topic-status--error">{{ topicError }}</div>
                 <div v-else-if="selectedTopicText">
                   <p class="prompt-text">{{ selectedTopicText }}</p>
+                  <figure v-if="selectedTopicImage" class="prompt-image">
+                    <img :src="selectedTopicImage" :alt="`${currentTopicLabel} Task 1 图表`" />
+                  </figure>
                 </div>
                 <div v-else class="topic-status topic-status-plain">
                   <span v-if="topicsList.length === 0" style="opacity: 0.5;">当前分类下无记录</span>
@@ -224,6 +227,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { evaluate, resolveApiErrorMessage, topics as topicsApi } from '@/api/client.js'
 import { useDraft } from '@/composables/useDraft.js'
+import { writingTopicModeToAttemptMode } from '@/api/writing-mode.js'
 import { createRequestGate } from '@/utils/request-gate.js'
 import { extractTextFromTiptap, getTopicTitlePreview } from '@/utils/tiptap-text.js'
 import {
@@ -294,6 +298,11 @@ const selectedTopic = computed(() => (
 const selectedTopicText = computed(() => (
   selectedTopic.value ? extractTextFromTiptap(selectedTopic.value.title_json) : ''
 ))
+
+const selectedTopicImage = computed(() => {
+  const image = String(selectedTopic.value?.image_path || selectedTopic.value?.image_url || '').trim()
+  return /^data:image\/(?:png|jpeg|jpg|webp);base64,/i.test(image) ? image : null
+})
 
 const currentTopicLabel = computed(() => {
   if (!selectedTopic.value) return ''
@@ -510,7 +519,19 @@ async function loadTopics(type = taskType.value) {
       return
     }
 
-    topicsList.value = Array.isArray(result.data) ? result.data : []
+    const pageItems = Array.isArray(result.data) ? result.data : []
+    const requestedTopicId = selectedTopicId.value
+    let resolvedItems = pageItems
+    if (requestedTopicId && !pageItems.some((topic) => topic.id === requestedTopicId)) {
+      const topic = await topicsApi.get(requestedTopicId)
+      if (!topicsRequestGate.isCurrent(requestId)) {
+        return
+      }
+      if (topic && topic.type === type) {
+        resolvedItems = [topic, ...pageItems]
+      }
+    }
+    topicsList.value = resolvedItems
 
     const selectedStillExists = topicsList.value.some((topic) => topic.id === selectedTopicId.value)
     if (!selectedStillExists) {
@@ -646,6 +667,7 @@ async function submitEssay() {
   restoreNotice.value = ''
 
   try {
+    const attemptMode = writingTopicModeToAttemptMode(topicMode.value)
     const payload = {
       task_type: taskType.value,
       topic_id: bankTopicId,
@@ -656,6 +678,7 @@ async function submitEssay() {
     const result = await evaluate.start({
       sessionId: resumeAttemptId || undefined,
       task_type: payload.task_type,
+      mode: attemptMode,
       topic_id: payload.topic_id,
       // Bank and free both need the prompt text for AI + history/result topic display.
       topic_text: payload.topic_text,
@@ -684,22 +707,13 @@ async function submitEssay() {
 
 <style scoped>
 .compose-page {
-  --compose-accent: var(--atlas-accent);
-  --compose-accent-alt: var(--atlas-accent-alt);
-  --compose-ink: var(--atlas-ink);
-  --compose-muted: var(--atlas-ink-soft);
-  --compose-glass: var(--atlas-glass);
-  --compose-glass-strong: var(--atlas-glass-elevated);
-  --compose-rim: var(--atlas-rim);
-  --compose-line: var(--atlas-line);
   position: relative;
-  isolation: isolate;
   display: grid;
   gap: 18px;
   max-width: 1400px;
   margin: 0 auto;
   padding: 2px;
-  color: var(--compose-ink);
+  color: var(--atlas-ink);
   background: transparent;
   border-radius: 32px;
   animation: compose-enter 360ms var(--lg-easing-spring, cubic-bezier(0.22, 1, 0.36, 1)) both;
@@ -718,16 +732,12 @@ async function submitEssay() {
   justify-content: space-between;
   gap: 18px;
   padding: 17px 20px;
-  border: 1px solid var(--compose-rim);
+  border: 1px solid var(--lg-border-color);
   border-radius: 20px;
-  background:
-    linear-gradient(115deg, rgba(255, 255, 255, 0.82), rgba(244, 245, 255, 0.54)),
-    linear-gradient(135deg, rgba(102, 126, 234, 0.12), rgba(118, 75, 162, 0.08));
-  box-shadow:
-    0 16px 30px rgba(73, 79, 139, 0.1),
-    inset 0 1px 1px rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  background: var(--atlas-sheen), var(--lg-bg-primary);
+  box-shadow: var(--lg-shadow-elevated);
+  backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
 }
 
 .draft-banner__copy {
@@ -742,7 +752,7 @@ async function submitEssay() {
 }
 
 .draft-banner__copy p {
-  color: var(--compose-muted);
+  color: var(--atlas-ink-soft);
   font-size: 14px;
 }
 
@@ -760,17 +770,12 @@ async function submitEssay() {
   padding: 24px;
   overflow: auto;
   overscroll-behavior: contain;
-  border: 1px solid var(--compose-rim);
+  border: 1px solid var(--lg-border-color);
   border-radius: 26px;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.74), rgba(246, 247, 255, 0.42)),
-    var(--compose-glass);
-  box-shadow:
-    0 20px 42px rgba(54, 63, 117, 0.1),
-    inset 0 1px 1px rgba(255, 255, 255, 0.9),
-    inset 0 -1px 1px rgba(255, 255, 255, 0.25);
-  backdrop-filter: blur(28px) saturate(155%);
-  -webkit-backdrop-filter: blur(28px) saturate(155%);
+  background: var(--lg-bg-primary);
+  box-shadow: var(--lg-shadow-elevated);
+  backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
 }
 
 .compose-hero {
@@ -787,7 +792,7 @@ async function submitEssay() {
   font-size: clamp(1.85rem, 2.8vw, 2.55rem);
   line-height: 1.08;
   letter-spacing: -0.035em;
-  color: var(--compose-ink);
+  color: var(--atlas-ink);
 }
 
 .hero-chip {
@@ -797,9 +802,9 @@ async function submitEssay() {
   min-height: 28px;
   padding: 5px 11px;
   border-radius: 999px;
-  border: 1px solid rgba(102, 126, 234, 0.22);
-  background: rgba(102, 126, 234, 0.12);
-  color: var(--compose-accent);
+  border: 1px solid color-mix(in srgb, var(--atlas-accent) 24%, var(--atlas-rim));
+  background: var(--atlas-accent-soft);
+  color: var(--atlas-accent);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -817,17 +822,17 @@ async function submitEssay() {
   gap: 5px;
   min-width: 0;
   padding: 11px 12px;
-  border: 1px solid var(--compose-line);
+  border: 1px solid var(--lg-border-subtle);
   border-radius: 15px;
-  background: rgba(255, 255, 255, 0.46);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  background: var(--lg-bg-interactive);
+  box-shadow: var(--lg-shadow-subtle);
 }
 
 .hero-metric__label {
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--compose-muted);
+  color: var(--atlas-ink-soft);
 }
 
 .hero-metric strong {
@@ -835,7 +840,7 @@ async function submitEssay() {
   font-size: 18px;
   font-weight: 700;
   line-height: 1.1;
-  color: var(--compose-ink);
+  color: var(--atlas-ink);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -851,10 +856,10 @@ async function submitEssay() {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   padding: 9px;
-  border: 1px solid var(--compose-line);
+  border: 1px solid var(--lg-border-subtle);
   border-radius: 19px;
-  background: rgba(248, 249, 255, 0.58);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  background: var(--lg-bg-toolbar);
+  box-shadow: var(--lg-shadow-subtle);
 }
 
 .config-section {
@@ -869,7 +874,7 @@ async function submitEssay() {
   padding-left: 7px;
   font-size: 10px;
   font-weight: 700;
-  color: var(--compose-muted);
+  color: var(--atlas-ink-soft);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -903,11 +908,11 @@ async function submitEssay() {
 
 .topic-status {
   padding: 15px;
-  color: var(--compose-muted);
+  color: var(--atlas-ink-soft);
   font-size: 14px;
   text-align: center;
-  background: rgba(255, 255, 255, 0.36);
-  border: 1px dashed var(--compose-line);
+  background: var(--lg-bg-interactive);
+  border: 1px dashed var(--lg-border-subtle);
   border-radius: 16px;
 }
 
@@ -923,11 +928,26 @@ async function submitEssay() {
 }
 
 .prompt-content {
-  background: rgba(255, 255, 255, 0.48);
+  background: var(--lg-bg-interactive);
   padding: 18px;
-  border: 1px solid var(--compose-line);
+  border: 1px solid var(--lg-border-subtle);
   border-radius: 18px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  box-shadow: var(--lg-shadow-subtle);
+}
+
+.prompt-image {
+  margin: 14px 0 0;
+  overflow: hidden;
+  border: 1px solid var(--lg-border-subtle);
+  border-radius: 16px;
+  background: var(--lg-bg-primary);
+}
+
+.prompt-image img {
+  display: block;
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
 }
 
 .prompt-meta {
@@ -957,7 +977,7 @@ async function submitEssay() {
   font-size: 16px;
   font-weight: 500;
   line-height: 1.75;
-  color: var(--compose-ink);
+  color: var(--atlas-ink);
   white-space: pre-wrap;
 }
 
@@ -967,7 +987,6 @@ async function submitEssay() {
 
 .compose-editor {
   position: relative;
-  isolation: isolate;
   display: flex;
   flex-direction: column;
   gap: 15px;
@@ -975,47 +994,12 @@ async function submitEssay() {
   min-height: calc(100vh - 168px);
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--compose-rim);
+  border: 1px solid var(--lg-border-color);
   border-radius: 26px;
-  background:
-    radial-gradient(circle at 95% 0%, rgba(102, 126, 234, 0.18), transparent 24rem),
-    radial-gradient(circle at 0% 100%, rgba(118, 75, 162, 0.12), transparent 26rem),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(247, 248, 255, 0.54));
-  box-shadow:
-    0 20px 42px rgba(54, 63, 117, 0.11),
-    inset 0 1px 1px rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(28px) saturate(160%);
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
-}
-
-.compose-editor::before,
-.compose-editor::after {
-  content: '';
-  position: absolute;
-  border-radius: 999px;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.compose-editor::before {
-  width: 320px;
-  height: 320px;
-  top: -120px;
-  right: -90px;
-  background: radial-gradient(circle, rgba(102, 126, 234, 0.2), transparent 70%);
-}
-
-.compose-editor::after {
-  width: 280px;
-  height: 260px;
-  left: -70px;
-  bottom: -110px;
-  background: radial-gradient(circle, rgba(118, 75, 162, 0.13), transparent 70%);
-}
-
-.compose-editor > * {
-  position: relative;
-  z-index: 1;
+  background: var(--atlas-sheen), var(--lg-bg-primary);
+  box-shadow: var(--lg-shadow-elevated);
+  backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
 }
 
 .editor-head {
@@ -1024,8 +1008,8 @@ async function submitEssay() {
   align-items: center;
   gap: 18px;
   padding: 21px 24px 16px;
-  border-bottom: 1px solid rgba(126, 135, 183, 0.16);
-  background: rgba(255, 255, 255, 0.22);
+  border-bottom: 1px solid var(--lg-border-subtle);
+  background: var(--lg-bg-toolbar);
 }
 
 .editor-head__copy {
@@ -1040,7 +1024,7 @@ async function submitEssay() {
   line-height: 1;
   letter-spacing: -0.035em;
   margin: 0;
-  color: var(--compose-ink);
+  color: var(--atlas-ink);
 }
 
 .editor-head__stats {
@@ -1057,11 +1041,9 @@ async function submitEssay() {
   min-height: 42px;
   padding: 7px 13px;
   border-radius: var(--radius-full);
-  background: rgba(255, 255, 255, 0.66);
-  border: 1px solid var(--compose-rim);
-  box-shadow:
-    0 6px 15px rgba(54, 63, 117, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  background: var(--lg-bg-elevated);
+  border: 1px solid var(--lg-border-color);
+  box-shadow: var(--lg-shadow-subtle);
 }
 
 .word-badge span,
@@ -1070,14 +1052,14 @@ async function submitEssay() {
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--compose-muted);
+  color: var(--atlas-ink-soft);
 }
 
 .word-badge strong {
   font-size: 22px;
   line-height: 1;
   letter-spacing: -0.02em;
-  color: var(--compose-accent);
+  color: var(--atlas-accent);
 }
 
 .word-badge.is-warning strong,
@@ -1100,15 +1082,13 @@ async function submitEssay() {
   box-sizing: border-box;
   margin: 0 20px;
   padding: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.84);
+  border: 1px solid var(--lg-border-color);
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.76);
+  background: var(--lg-bg-elevated);
   font-size: 18px;
   line-height: 1.8;
-  color: var(--compose-ink);
-  box-shadow:
-    0 10px 26px rgba(54, 63, 117, 0.06),
-    inset 0 1px 2px rgba(255, 255, 255, 0.88);
+  color: var(--atlas-ink);
+  box-shadow: var(--lg-shadow-subtle);
   resize: vertical;
 }
 
@@ -1122,10 +1102,10 @@ async function submitEssay() {
   box-sizing: border-box;
   margin: 0 20px 20px;
   padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.58);
+  border: 1px solid var(--lg-border-color);
   border-radius: 18px;
-  background: rgba(247, 248, 255, 0.48);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  background: var(--lg-bg-interactive);
+  box-shadow: var(--lg-shadow-subtle);
 }
 
 .word-status {
@@ -1136,7 +1116,7 @@ async function submitEssay() {
 
 .word-status strong {
   font-size: 16px;
-  color: var(--compose-ink);
+  color: var(--atlas-ink);
 }
 
 .editor-actions {
@@ -1154,10 +1134,10 @@ async function submitEssay() {
   gap: 4px;
   min-width: 0;
   padding: 4px;
-  border: 1px solid rgba(126, 135, 183, 0.14);
+  border: 1px solid var(--lg-border-subtle);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.5);
-  box-shadow: inset 0 1px 2px rgba(54, 63, 117, 0.08);
+  background: var(--lg-bg-interactive);
+  box-shadow: var(--lg-shadow-subtle);
 }
 
 .toggle-item {
@@ -1171,7 +1151,7 @@ async function submitEssay() {
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
-  color: var(--compose-muted);
+  color: var(--atlas-ink-soft);
   cursor: pointer;
   transition:
     color var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
@@ -1181,17 +1161,15 @@ async function submitEssay() {
 }
 
 .toggle-item:hover {
-  color: var(--compose-ink);
-  background: rgba(255, 255, 255, 0.54);
+  color: var(--atlas-ink);
+  background: var(--lg-bg-elevated);
 }
 
 .toggle-item.active {
-  background: var(--color-brand-gradient, linear-gradient(135deg, #667eea, #764ba2));
-  border-color: rgba(255, 255, 255, 0.42);
-  color: #fff;
-  box-shadow:
-    0 6px 16px rgba(102, 126, 234, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  background: var(--color-brand-gradient);
+  border-color: var(--atlas-button-brand-border);
+  color: var(--text-inverse);
+  box-shadow: var(--lg-shadow-subtle);
 }
 
 .toggle-item__label {
@@ -1205,14 +1183,14 @@ async function submitEssay() {
 .dialog-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.3);
+  background: var(--lg-bg-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   z-index: 30;
-  backdrop-filter: blur(12px) saturate(140%);
-  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
 }
 
 .dialog {
@@ -1220,10 +1198,10 @@ async function submitEssay() {
   width: 100%;
   overflow: visible;
   padding: 25px;
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--lg-border-color);
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.24);
+  background: var(--lg-bg-elevated);
+  box-shadow: var(--lg-shadow-high);
 }
 
 .dialog h3 {
@@ -1239,12 +1217,10 @@ async function submitEssay() {
 
 .compose-page :is(.textarea, .select) {
   width: 100%;
-  color: var(--compose-ink);
-  border: 1px solid rgba(126, 135, 183, 0.24);
-  background: rgba(255, 255, 255, 0.68);
-  box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.88),
-    0 4px 10px rgba(54, 63, 117, 0.035);
+  color: var(--atlas-ink);
+  border: 1px solid var(--lg-border-subtle);
+  background: var(--lg-bg-elevated);
+  box-shadow: var(--lg-shadow-subtle);
   transition:
     border-color var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
     box-shadow var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
@@ -1257,37 +1233,35 @@ async function submitEssay() {
 
 .compose-page :is(.textarea, .select):focus {
   outline: none;
-  border-color: rgba(102, 126, 234, 0.68);
-  background: rgba(255, 255, 255, 0.88);
+  border-color: var(--atlas-accent-ring);
+  background: var(--lg-bg-elevated);
   box-shadow:
-    0 0 0 4px rgba(102, 126, 234, 0.14),
-    inset 0 1px 1px rgba(255, 255, 255, 0.94);
+    0 0 0 4px var(--atlas-accent-soft),
+    var(--lg-shadow-subtle);
 }
 
 .compose-page .inline-message {
   padding: 11px 13px;
-  border: 1px solid rgba(102, 126, 234, 0.2);
+  border: 1px solid color-mix(in srgb, var(--atlas-accent) 24%, var(--atlas-rim));
   border-radius: 13px;
-  background: rgba(102, 126, 234, 0.09);
-  color: var(--compose-ink);
+  background: var(--atlas-accent-soft);
+  color: var(--atlas-ink);
   font-size: 14px;
 }
 
 .compose-page .inline-message-error {
-  border-color: rgba(239, 68, 68, 0.3);
-  background: rgba(254, 242, 242, 0.72);
-  color: #b91c1c;
+  border-color: color-mix(in srgb, var(--atlas-danger) 32%, var(--atlas-rim));
+  background: var(--atlas-library-danger);
+  color: var(--atlas-danger);
 }
 
 .compose-page .btn {
   min-height: 42px;
-  border: 1px solid rgba(255, 255, 255, 0.74);
+  border: 1px solid var(--lg-border-color);
   border-radius: 999px;
   font-weight: 700;
   letter-spacing: 0.01em;
-  box-shadow:
-    0 7px 16px rgba(54, 63, 117, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.84);
+  box-shadow: var(--lg-shadow-subtle);
   transition:
     transform var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
     box-shadow var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
@@ -1296,23 +1270,19 @@ async function submitEssay() {
 
 .compose-page .btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow:
-    0 12px 22px rgba(54, 63, 117, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+  box-shadow: var(--lg-shadow-elevated);
 }
 
 .compose-page :is(.btn-brand, .btn-primary) {
-  border-color: rgba(255, 255, 255, 0.38);
-  background: var(--color-brand-gradient, linear-gradient(135deg, #667eea, #764ba2));
-  color: #fff;
-  box-shadow:
-    0 10px 22px rgba(102, 126, 234, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.26);
+  border-color: var(--atlas-button-brand-border);
+  background: var(--color-brand-gradient);
+  color: var(--text-inverse);
+  box-shadow: var(--lg-shadow-subtle);
 }
 
 .compose-page :is(.btn-secondary, .btn-warm-sand) {
-  background: rgba(255, 255, 255, 0.6);
-  color: var(--compose-ink);
+  background: var(--lg-bg-primary);
+  color: var(--atlas-ink);
 }
 
 .compose-page .btn:active:not(:disabled),
@@ -1327,7 +1297,7 @@ async function submitEssay() {
 }
 
 .compose-page :is(.btn, .toggle-item, .textarea, .select):focus-visible {
-  outline: 3px solid rgba(102, 126, 234, 0.52);
+  outline: 3px solid var(--atlas-accent-ring);
   outline-offset: 3px;
 }
 
@@ -1423,25 +1393,13 @@ async function submitEssay() {
 
 @media (prefers-contrast: more) {
   .compose-page :is(.practice-left, .compose-editor, .draft-banner, .dialog) {
-    background: #fff;
-    border-color: #475569;
+    background: var(--atlas-canvas-solid);
+    border-color: var(--atlas-ink);
   }
 
   .compose-page :is(.textarea, .select, .toggle-group) {
-    background: #fff;
-    border-color: #475569;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .compose-page,
-  .compose-page *,
-  .compose-page *::before,
-  .compose-page *::after {
-    animation-duration: 1ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: 1ms !important;
+    background: var(--atlas-canvas-solid);
+    border-color: var(--atlas-ink);
   }
 }
 </style>

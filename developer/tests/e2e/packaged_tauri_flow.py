@@ -367,6 +367,38 @@ def main() -> int:
         assets = (result or {}).get("data") if isinstance(result, dict) else None
         if not assets: raise RuntimeError("Tauri IPC bridge unavailable or reading_list_assets returned empty")
         checks["readingIpc"] = "passed"
+        archive = driver.script(
+            "return window.__TAURI_INTERNALS__.invoke('reading_export_archive')"
+        )
+        archive_data = (archive or {}).get("data") if isinstance(archive, dict) else None
+        if not isinstance(archive, dict) or not archive.get("ok") or not isinstance(archive_data, dict):
+            raise RuntimeError(f"reading_export_archive failed: {archive}")
+        if archive_data.get("schemaVersion") != "practice-history-archive.v2":
+            raise RuntimeError(f"reading_export_archive returned a non-canonical schema: {archive_data}")
+        rejected_archive = driver.script("""
+            return window.__TAURI_INTERNALS__.invoke('reading_import_archive', {value: {
+              activity: 'reading', schemaVersion: 'practice-history-archive.v2',
+              exportedAt: '2026-01-01T00:00:00Z', count: 1, submissions: [{}]
+            }})
+        """)
+        rejected_data = (rejected_archive or {}).get("data") if isinstance(rejected_archive, dict) else None
+        if (not isinstance(rejected_archive, dict) or not rejected_archive.get("ok")
+                or not isinstance(rejected_data, dict) or rejected_data.get("committed")
+                or rejected_data.get("imported") != 0):
+            raise RuntimeError(f"reading_import_archive did not fail closed: {rejected_archive}")
+        checks["readingArchiveBoundary"] = "passed"
+        retention = driver.script(
+            "return window.__TAURI_INTERNALS__.invoke('history_get_retention_policy')"
+        )
+        retention_data = (retention or {}).get("data") if isinstance(retention, dict) else None
+        if not isinstance(retention, dict) or not retention.get("ok") or not isinstance(retention_data, dict):
+            raise RuntimeError(f"history_get_retention_policy failed: {retention}")
+        invalid_retention = driver.script(
+            "return window.__TAURI_INTERNALS__.invoke('history_set_retention_policy', {cmd: {maxTerminalAttempts: 51}})"
+        )
+        if not isinstance(invalid_retention, dict) or invalid_retention.get("ok"):
+            raise RuntimeError(f"invalid retention policy was accepted: {invalid_retention}")
+        checks["historyRetentionBoundary"] = "passed"
         asset_id = assets[0].get("id") or assets[0].get("assetId") or assets[0].get("asset_id")
         if not asset_id:
             raise RuntimeError(f"reading_list_assets returned an entry without an id: {assets[0]}")

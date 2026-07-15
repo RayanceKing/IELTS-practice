@@ -54,12 +54,12 @@ export const practiceAssets = {
     }
   },
 
-  async listAll(filters = {}, options = {}) {
+  async listAll(filters = {}) {
     const result = await this.list(filters, { page: 1, limit: 10000 })
     return result
   },
 
-  async get(activity, assetId, options = {}) {
+  async get(activity, assetId) {
     const normalizedAssetId = String(assetId || '').trim()
     const { items } = await listReadingAssets()
     const meta = (items || []).find((item) => String(item.id) === normalizedAssetId) || null
@@ -73,7 +73,6 @@ export const practiceAssets = {
       ...meta,
       ...(loaded.asset || {}),
       activity: activity || 'reading',
-      refresh: !!options.refresh,
       payload: loaded.payload
     }
   }
@@ -206,77 +205,46 @@ export const practiceHistory = {
   },
 
   async exportArchive(filters = { activity: 'reading' }) {
-    const listed = await listHistoryAll({
-      activity: filters.activity || 'reading',
-      search: filters.search || null
-    })
-    const submissions = []
-    for (const item of listed.items || []) {
-      try {
-        const { detail } = await getHistoryDetail(item.id)
-        const submission = mapHistoryDetailToSubmission(detail)
-        if (submission) {
-          submissions.push({
-            ...submission,
-            id: submission.sessionId || submission.attemptId || item.id,
-            title: submission.title || item.title || null
-          })
-        } else if (detail?.attempt) {
-          // Non-reading or partial: still include attempt snapshot for restore.
-          const attempt = detail.attempt
-          submissions.push({
-            id: attempt.id,
-            sessionId: attempt.id,
-            assetId: attempt.assetId || attempt.asset_id || item.assetId || null,
-            examId: attempt.assetId || attempt.asset_id || item.assetId || null,
-            activity: attempt.activity || 'reading',
-            status: attempt.status || 'completed',
-            answers: Object.fromEntries(
-              (attempt.answers || []).map((entry) => [
-                entry.questionId || entry.question_id,
-                entry.answer
-              ]).filter(([qid]) => qid)
-            ),
-            markedQuestions: (attempt.answers || [])
-              .filter((entry) => entry.marked)
-              .map((entry) => entry.questionId || entry.question_id)
-              .filter(Boolean),
-            score: attempt.scoreValue ?? attempt.score_value ?? null,
-            correctCount: attempt.correctCount ?? attempt.correct_count ?? 0,
-            questionCount: attempt.questionCount ?? attempt.question_count ?? 0,
-            durationMs: attempt.durationMs ?? attempt.duration_ms ?? 0,
-            submittedAt: attempt.submittedAt || attempt.submitted_at || null,
-            title: attempt.titleSnapshot || attempt.title_snapshot || item.title || null
-          })
-        }
-      } catch (err) {
-        console.warn('exportArchive skip item', item?.id, err)
-      }
+    const activity = String(filters.activity || 'reading').toLowerCase()
+    if (activity !== 'reading') {
+      const error = new Error('仅支持阅读练习归档导出')
+      error.code = 'reading.archive_unsupported'
+      throw error
     }
-    const exportedAt = new Date().toISOString()
-    return {
-      activity: filters.activity || 'reading',
-      schemaVersion: 'practice-history-archive.v1',
-      exportedAt,
-      count: submissions.length,
-      submissions
-    }
+    const response = await invokeCommand('reading_export_archive')
+    return unwrapCommandResponse(response, 'reading_export_archive')
   },
 
   async importArchive(activity, payload) {
-    const archive = payload?.archive && typeof payload.archive === 'object'
-      ? payload.archive
-      : payload
-    const response = await invokeCommand('import_reading_archive_value', {
-      value: archive
+    if (String(activity || 'reading').toLowerCase() !== 'reading') {
+      const error = new Error('仅支持阅读练习归档导入')
+      error.code = 'reading.archive_unsupported'
+      throw error
+    }
+    const response = await invokeCommand('reading_import_archive', {
+      value: payload
     })
-    const report = unwrapCommandResponse(response, 'import_reading_archive_value') || {}
+    const raw = unwrapCommandResponse(response, 'reading_import_archive') || {}
+    const result = {
+      imported: Number(raw.imported ?? raw.importedCount ?? 0),
+      failed: Number(raw.failed ?? raw.failedCount ?? 0),
+      report: Array.isArray(raw.report) ? raw.report : [],
+      attemptIds: raw.attemptIds || raw.attempt_ids || [],
+      committed: raw.committed === true
+    }
+    if (!result.committed || result.failed > 0) {
+      const message = result.report[0]?.message || '阅读记录导入未提交，原有数据未修改'
+      const error = new Error(message)
+      error.code = 'reading.archive_import_failed'
+      error.importResult = result
+      throw error
+    }
     return {
-      importedCount: Number(report.importedCount ?? report.imported ?? 0),
-      skippedCount: Number(report.skippedCount ?? 0),
-      failedCount: Number(report.failedCount ?? report.failed ?? 0),
-      attemptIds: report.attemptIds || report.attempt_ids || [],
-      errors: report.errors || []
+      ...result,
+      importedCount: result.imported,
+      failedCount: result.failed,
+      skippedCount: 0,
+      errors: []
     }
   }
 }

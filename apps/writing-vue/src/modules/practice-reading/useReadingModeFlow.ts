@@ -32,6 +32,7 @@ export interface ReadingModeFlowOptions {
   submission: Ref<any>
   suiteSession: Ref<any>
   submitting: Ref<boolean>
+  leaving: Ref<boolean>
   submitError: Ref<string>
   snapshotMessage: Ref<string>
   endlessCountdown: Ref<number>
@@ -123,24 +124,83 @@ export function useReadingModeFlow(options: ReadingModeFlowOptions) {
   }
 
   function goToNextEndlessAsset() {
+    if (options.leaving.value) return
     const route = buildEndlessNextRoute(options.endlessNextAssetId.value, activeEndlessSessionId())
     if (!route) return
     clearEndlessTimer()
     options.router.push(route)
   }
 
-  async function stopEndlessMode() {
-    clearEndlessTimer()
-    options.endlessNextAssetId.value = ''
-    const sessionId = activeEndlessSessionId()
-    if (sessionId && isTauriRuntime()) {
-      try {
-        await tauriCancelEndless(sessionId)
-      } catch (error) {
-        console.warn('cancel endless session failed', error)
+  async function handleLeave() {
+    if (options.leaving.value) return false
+    options.leaving.value = true
+    try {
+      if (isEndlessMode()) {
+        // Stop the local timer first: it must not route to the next asset while
+        // Rust is still deciding whether the authoritative session was cancelled.
+        clearEndlessTimer()
+        const sessionId = activeEndlessSessionId()
+        if (sessionId && isTauriRuntime()) {
+          try {
+            await tauriCancelEndless(sessionId)
+          } catch (error) {
+            console.warn('cancel endless session failed', error)
+            options.submitError.value = '无尽模式退出失败，当前练习仍保留；请重试。'
+            return false
+          }
+        }
+        options.endlessNextAssetId.value = ''
       }
+
+      if (isMemorizeMode()) {
+        const finished = await finishActiveMemorizeSession()
+        if (!finished) {
+          options.submitError.value = '背题模式退出失败，当前学习仍保留；请重试。'
+          return false
+        }
+      }
+
+      await options.router.push(resolveSource(options.returnRoute))
+      return true
+    } catch (error) {
+      console.error('leave reading mode failed', error)
+      options.submitError.value = '退出阅读失败，请重试。'
+      return false
+    } finally {
+      options.leaving.value = false
     }
-    options.router.push({ name: 'PracticeLibrary' })
+  }
+
+  async function stopEndlessMode() {
+    return handleLeave()
+  }
+
+  async function reconcileEndlessRoute() {
+    if (!isEndlessMode() || activeSuiteSessionId() || !isTauriRuntime()) {
+      return true
+    }
+    const sessionId = activeEndlessSessionId()
+    const currentAssetId = String(asset()?.id || '').trim()
+    if (!sessionId || !currentAssetId) {
+      options.submitError.value = '无尽模式会话或题目缺失，无法继续。'
+      return false
+    }
+    const { session } = await tauriGetEndless(sessionId)
+    const authoritativeAssetId = String(session?.currentAssetId || '').trim()
+    if (!authoritativeAssetId) {
+      await stopEndlessMode()
+      return false
+    }
+    if (authoritativeAssetId === currentAssetId) {
+      return true
+    }
+    const route = buildEndlessNextRoute(authoritativeAssetId, sessionId)
+    if (!route) {
+      options.submitError.value = '无尽模式下一题无效，无法继续。'
+      return false
+    }
+    await options.router.replace(route)
+    return false
   }
 
   async function scheduleEndlessNext(preferredNextId: string | null = null) {
@@ -158,8 +218,10 @@ export function useReadingModeFlow(options: ReadingModeFlowOptions) {
         }
       }
       if (!nextId) {
-        await stopEndlessMode()
-        options.submitError.value = '无尽模式：题库已刷完或为空，已退出。'
+        const stopped = await stopEndlessMode()
+        if (stopped) {
+          options.submitError.value = '无尽模式：题库已刷完或为空，已退出。'
+        }
         return
       }
       options.endlessNextAssetId.value = nextId
@@ -395,19 +457,26 @@ export function useReadingModeFlow(options: ReadingModeFlowOptions) {
 
   async function finishActiveMemorizeSession() {
     const attemptId = options.activeMemorizeAttemptId.value
-    if (!attemptId || memorizeFinishRequested || !isTauriRuntime()) return
+    if (!attemptId || !isTauriRuntime()) return true
+    if (memorizeFinishRequested) return false
     memorizeFinishRequested = true
     try {
       await tauriFinishMemorize(attemptId)
+      return true
     } catch (error) {
       memorizeFinishRequested = false
       console.warn('finish memorize session failed', error)
+      return false
     }
   }
 
   async function handleResetButton() {
     if (isMemorizeMode()) {
-      await finishActiveMemorizeSession()
+      const finished = await finishActiveMemorizeSession()
+      if (!finished) {
+        options.submitError.value = '背题模式退出失败，当前学习仍保留；请重试。'
+        return
+      }
       options.router.push({
         name: 'PracticeReading',
         params: { assetId: asset()?.id },
@@ -425,8 +494,7 @@ export function useReadingModeFlow(options: ReadingModeFlowOptions) {
 
   async function handlePrimaryButton() {
     if (isMemorizeMode()) {
-      await finishActiveMemorizeSession()
-      options.router.push(resolveSource(options.returnRoute))
+      await handleLeave()
       return
     }
     await submitAnswers()
@@ -441,6 +509,8 @@ export function useReadingModeFlow(options: ReadingModeFlowOptions) {
     maybeAdvanceSuitePassage,
     goToNextEndlessAsset,
     stopEndlessMode,
+    handleLeave,
+    reconcileEndlessRoute,
     snapshotSubmission,
     clearSubmissionSnapshot,
     submitAnswers,

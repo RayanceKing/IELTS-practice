@@ -17,8 +17,6 @@ use ielts_db::{
 use uuid::Uuid;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
-const DEFAULT_MODEL: &str = "gpt-4.1-mini";
-const DEFAULT_SECRET_NAME: &str = "openai_api_key";
 const DEFAULT_TIMEOUT_SECONDS: u64 = 45;
 const MAX_RETRIES: u32 = 2;
 
@@ -52,8 +50,11 @@ fn config_error(error: DbError) -> ErrorEnvelope {
 }
 
 #[tauri::command]
-pub fn ai_list_configs(db: State<'_, AppDb>) -> CommandResponse<Vec<AiConfigDto>> {
-    match db.with_conn(ielts_db::list_ai_configs) {
+pub fn ai_list_configs(
+    db: State<'_, AppDb>,
+    vault: State<'_, AppVault>,
+) -> CommandResponse<Vec<AiConfigDto>> {
+    match db.with_conn(|conn| list_ai_configs_with_vault(conn, vault.inner())) {
         Ok(v) => CommandResponse::success(v),
         Err(e) => CommandResponse::failure(config_error(e)),
     }
@@ -78,6 +79,7 @@ pub fn ai_upsert_config(
     let id = cmd.id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let (_, base_url) = normalize_provider(&cmd.provider, cmd.base_url.as_deref());
     let secret_name = ai_secret_name(&id);
+    let vault = vault.inner();
     if let Some(secret) = cmd.api_key.as_deref().filter(|v| !v.trim().is_empty()) {
         let ref_id = match vault.0.set_secret(&secret_name, secret) {
             Ok(v) => v,
@@ -89,7 +91,7 @@ pub fn ai_upsert_config(
             return CommandResponse::failure(config_error(e));
         }
     }
-    let mut config = AiConfigDto {
+    let config = AiConfigDto {
         id: id.clone(),
         config_name: cmd.config_name.trim().to_string(),
         provider: cmd.provider.trim().to_ascii_lowercase(),
@@ -101,32 +103,26 @@ pub fn ai_upsert_config(
     };
     let result = db.with_conn(|conn| {
         ielts_db::upsert_ai_config(conn, &config)?;
-        let all = ielts_db::list_ai_configs(conn)?;
-        let current_default = all.iter().find(|c| c.is_default).cloned();
-        config.has_secret = all
-            .iter()
-            .find(|c| c.id == config.id)
-            .map(|c| c.has_secret)
-            .unwrap_or(false);
-        if current_default.as_ref().is_some_and(|c| c.id == config.id) {
-            ielts_db::set_default_ai_config(conn, Some(&config))?;
-            config.is_default = true;
-        } else if current_default.is_none() && config.is_enabled && config.has_secret {
-            ielts_db::set_default_ai_config(conn, Some(&config))?;
-            config.is_default = true;
-        }
-        Ok(())
+        list_ai_configs_with_vault(conn, vault)?
+            .into_iter()
+            .find(|item| item.id == config.id)
+            .ok_or_else(|| DbError::Message("AI config disappeared after save".into()))
     });
     match result {
-        Ok(()) => CommandResponse::success(config),
+        Ok(config) => CommandResponse::success(config),
         Err(e) => CommandResponse::failure(config_error(e)),
     }
 }
 
 #[tauri::command]
-pub fn ai_set_default_config(db: State<'_, AppDb>, id: String) -> CommandResponse<AiConfigDto> {
+pub fn ai_set_default_config(
+    db: State<'_, AppDb>,
+    vault: State<'_, AppVault>,
+    id: String,
+) -> CommandResponse<AiConfigDto> {
+    let vault = vault.inner();
     let result = db.with_conn(|conn| {
-        let mut config = ielts_db::list_ai_configs(conn)?
+        let mut config = list_ai_configs_with_vault(conn, vault)?
             .into_iter()
             .find(|c| c.id == id)
             .ok_or_else(|| DbError::Validation("AI config not found".into()))?;
@@ -154,20 +150,18 @@ pub fn ai_delete_config(
 ) -> CommandResponse<bool> {
     let secret_name = ai_secret_name(&id);
     let legacy_secret_name = legacy_ai_secret_name(&id);
+    let vault = vault.inner();
     let result = db.with_conn(|conn| {
-        let configs = ielts_db::list_ai_configs(conn)?;
-        let was_default = configs.iter().any(|c| c.id == id && c.is_default);
         let deleted = ielts_db::delete_ai_config(conn, &id)?;
-        if was_default {
-            let next = configs.into_iter().find(|c| c.id != id && c.is_enabled);
-            ielts_db::set_default_ai_config(conn, next.as_ref())?;
-        }
+        ielts_db::delete_secret_ref(conn, &secret_name)?;
+        ielts_db::delete_secret_ref(conn, &legacy_secret_name)?;
+        list_ai_configs_with_vault(conn, vault)?;
         Ok(deleted)
     });
-    let _ = vault.0.delete_secret(&secret_name);
-    let _ = vault.0.delete_secret(&legacy_secret_name);
-    let _ = db.with_conn(|conn| ielts_db::delete_secret_ref(conn, &secret_name));
-    let _ = db.with_conn(|conn| ielts_db::delete_secret_ref(conn, &legacy_secret_name));
+    if result.is_ok() {
+        let _ = vault.0.delete_secret(&secret_name);
+        let _ = vault.0.delete_secret(&legacy_secret_name);
+    }
     match result {
         Ok(v) => CommandResponse::success(v),
         Err(e) => CommandResponse::failure(config_error(e)),
@@ -200,27 +194,109 @@ pub struct AiProviderTestResult {
     pub latency_ms: u64,
 }
 
-pub fn load_provider_config(conn: &rusqlite::Connection) -> DbResult<AiProviderConfig> {
-    fn string_setting(conn: &rusqlite::Connection, key: &str) -> DbResult<Option<String>> {
-        Ok(get_setting(conn, NS_AI, key)?
-            .and_then(|entry| entry.value.as_str().map(str::to_owned))
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty()))
-    }
+const API_KEY_REQUIRED_ON_THIS_DEVICE: &str =
+    "当前设备未找到可用 API Key；请在设置中重新填写该配置的 API Key 后再使用";
 
-    let provider = string_setting(conn, "provider")?.unwrap_or_else(|| "unconfigured".into());
+fn vault_has_secret(vault: &AppVault, reference: &ielts_domain::dto::SecretRef) -> bool {
+    match vault.0.get_secret_by_ref(&reference.ref_id) {
+        Ok(Some(secret)) => !secret.trim().is_empty(),
+        Ok(None) => false,
+        Err(error) => {
+            tracing::warn!(error = %error, "AI credential is unavailable in the local OS vault");
+            false
+        }
+    }
+}
+
+/// Reconcile the SQLite default with the credentials available on this host.
+/// A backup only restores opaque references; the vault check is what makes a
+/// same-device restore usable and a cross-device restore fail closed.
+pub fn reconcile_default_ai_config_with_vault(
+    conn: &rusqlite::Connection,
+    vault: &AppVault,
+) -> DbResult<Option<AiConfigDto>> {
+    ielts_db::reconcile_default_ai_config_with_secret_availability(conn, |reference| {
+        vault_has_secret(vault, reference)
+    })
+}
+
+pub fn list_ai_configs_with_vault(
+    conn: &rusqlite::Connection,
+    vault: &AppVault,
+) -> DbResult<Vec<AiConfigDto>> {
+    reconcile_default_ai_config_with_vault(conn, vault)?;
+    let mut configs = ielts_db::list_ai_configs_with_secret_availability(conn, |reference| {
+        vault_has_secret(vault, reference)
+    })?;
+    // The vault can change between reconciliation and presentation. Do not
+    // ever return a row that looks both default and unusable, even in that
+    // narrow race; the next successful save/list will select a replacement.
+    if configs
+        .iter()
+        .any(|config| config.is_default && (!config.is_enabled || !config.has_secret))
+    {
+        ielts_db::set_default_ai_config(conn, None)?;
+        for config in &mut configs {
+            config.is_default = false;
+        }
+    }
+    Ok(configs)
+}
+
+fn provider_config_for_config(
+    conn: &rusqlite::Connection,
+    config: &AiConfigDto,
+) -> DbResult<AiProviderConfig> {
+    if !config.has_secret {
+        return Err(DbError::Validation(API_KEY_REQUIRED_ON_THIS_DEVICE.into()));
+    }
+    let (provider, base_url) = normalize_provider(&config.provider, Some(&config.base_url));
+    let secret_name = ielts_db::ai_secret_ref_for_config(conn, &config.id)?
+        .map(|reference| reference.name)
+        .ok_or_else(|| DbError::Validation(API_KEY_REQUIRED_ON_THIS_DEVICE.into()))?;
     let timeout_seconds = get_setting(conn, NS_AI, "timeoutSeconds")?
         .and_then(|entry| entry.value.as_u64())
         .unwrap_or(DEFAULT_TIMEOUT_SECONDS)
         .clamp(5, 300);
     Ok(AiProviderConfig {
         provider,
-        base_url: string_setting(conn, "baseUrl")?.unwrap_or_else(|| DEFAULT_BASE_URL.into()),
-        model: string_setting(conn, "model")?.unwrap_or_else(|| DEFAULT_MODEL.into()),
-        secret_name: string_setting(conn, "secretName")?
-            .unwrap_or_else(|| DEFAULT_SECRET_NAME.into()),
+        base_url,
+        model: config.default_model.clone(),
+        secret_name,
         timeout: Duration::from_secs(timeout_seconds),
     })
+}
+
+/// Preflight the currently selected runtime configuration before any writing
+/// attempt is submitted. This deliberately verifies the local vault, not only
+/// a database secret reference restored from a backup.
+pub fn load_provider_config(db: &AppDb, vault: &AppVault) -> DbResult<AiProviderConfig> {
+    db.with_conn(|conn| {
+        let config = reconcile_default_ai_config_with_vault(conn, vault)?
+            .ok_or_else(|| DbError::Validation(API_KEY_REQUIRED_ON_THIS_DEVICE.into()))?;
+        provider_config_for_config(conn, &config)
+    })
+}
+
+fn load_provider_config_for_id(
+    db: &AppDb,
+    vault: &AppVault,
+    config_id: &str,
+) -> DbResult<AiProviderConfig> {
+    db.with_conn(|conn| {
+        let configs = ielts_db::list_ai_configs_with_secret_availability(conn, |reference| {
+            vault_has_secret(vault, reference)
+        })?;
+        let config = select_config_for_test(configs, config_id)?;
+        provider_config_for_config(conn, &config)
+    })
+}
+
+fn select_config_for_test(configs: Vec<AiConfigDto>, config_id: &str) -> DbResult<AiConfigDto> {
+    configs
+        .into_iter()
+        .find(|config| config.id == config_id)
+        .ok_or_else(|| DbError::Validation("AI config not found".into()))
 }
 
 pub fn resolve_api_key(
@@ -231,19 +307,29 @@ pub fn resolve_api_key(
     let secret_ref = list_secret_refs(conn)?
         .into_iter()
         .find(|secret_ref| secret_ref.name == name)
-        .ok_or_else(|| DbError::Validation(format!("missing AI secret reference: {name}")))?;
+        .ok_or_else(|| DbError::Validation(API_KEY_REQUIRED_ON_THIS_DEVICE.into()))?;
     vault
         .0
         .get_secret_by_ref(&secret_ref.ref_id)?
-        .ok_or_else(|| {
-            DbError::Validation(format!(
-                "AI secret not found in OS credential store: {name}"
-            ))
-        })
+        .filter(|secret| !secret.trim().is_empty())
+        .ok_or_else(|| DbError::Validation(API_KEY_REQUIRED_ON_THIS_DEVICE.into()))
 }
 
 pub fn load_runtime(db: &AppDb, vault: &AppVault) -> DbResult<AiRuntime> {
-    let config = db.with_conn(load_provider_config)?;
+    let config = load_provider_config(db, vault)?;
+    load_runtime_from_provider_config(db, vault, config)
+}
+
+fn load_runtime_for_config(db: &AppDb, vault: &AppVault, config_id: &str) -> DbResult<AiRuntime> {
+    let config = load_provider_config_for_id(db, vault, config_id)?;
+    load_runtime_from_provider_config(db, vault, config)
+}
+
+fn load_runtime_from_provider_config(
+    db: &AppDb,
+    vault: &AppVault,
+    config: AiProviderConfig,
+) -> DbResult<AiRuntime> {
     if config.provider != "openai-compatible" {
         return Err(DbError::Validation(format!(
             "provider does not support network AI requests: {}",
@@ -359,8 +445,9 @@ fn map_err(error: DbError) -> ErrorEnvelope {
 pub async fn ai_test_provider(
     db: State<'_, AppDb>,
     vault: State<'_, AppVault>,
+    config_id: String,
 ) -> Result<CommandResponse<AiProviderTestResult>, ErrorEnvelope> {
-    let runtime = match load_runtime(&db, &vault) {
+    let runtime = match load_runtime_for_config(&db, &vault, &config_id) {
         Ok(runtime) => runtime,
         Err(error) => return Ok(CommandResponse::failure(map_err(error))),
     };
@@ -424,5 +511,34 @@ mod tests {
             assert_eq!(runtime_provider, "openai-compatible");
             assert_eq!(base_url, expected);
         }
+    }
+
+    #[test]
+    fn provider_test_selects_the_requested_config_instead_of_the_default() {
+        let default = AiConfigDto {
+            id: "default".into(),
+            config_name: "Default".into(),
+            provider: "openai".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            default_model: "gpt-default".into(),
+            is_default: true,
+            is_enabled: true,
+            has_secret: true,
+        };
+        let selected = AiConfigDto {
+            id: "selected".into(),
+            config_name: "Selected".into(),
+            provider: "openrouter".into(),
+            base_url: "https://openrouter.ai/api/v1".into(),
+            default_model: "gpt-selected".into(),
+            is_default: false,
+            is_enabled: false,
+            has_secret: true,
+        };
+
+        let target = select_config_for_test(vec![default, selected.clone()], "selected").unwrap();
+        assert_eq!(target.id, "selected");
+        assert_eq!(target.default_model, "gpt-selected");
+        assert!(!target.is_default);
     }
 }

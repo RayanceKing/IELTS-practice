@@ -13,6 +13,7 @@ export interface WritingTopicViewModel {
 }
 
 export function listWritingTopics(filters?: Record<string, unknown>, pagination?: Record<string, unknown>): Promise<{ source: 'tauri'; data: WritingTopicViewModel[]; total: number; page: number; limit: number }>
+export function getWritingTopic(id: string): Promise<WritingTopicViewModel | null>
 export function upsertWritingTopic(data: Record<string, unknown>, id?: string): Promise<WritingTopicViewModel>
 export function deleteWritingTopic(id: string): Promise<boolean>
 export function importWritingTopics(topics: Record<string, unknown>[]): Promise<{ source: 'tauri'; created: number; updated: number; success: number; failed: number }>

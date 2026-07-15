@@ -7,11 +7,12 @@ use uuid::Uuid;
 
 use ielts_domain::domain::AttemptMode;
 
+use crate::history::prune_terminal_attempts_in_transaction;
 use crate::modes::suite::{
     frequency_matches, list_answerable_reading_assets, normalize_category, FrequencyScope,
 };
 use crate::reading::attempt::{
-    submit_reading_attempt_in_transaction, ReadingQuestionProgress, ReadingSubmitCommand,
+    submit_reading_attempt_in_scope, ReadingQuestionProgress, ReadingSubmitCommand,
     ReadingSubmitResult,
 };
 use crate::sqlite::{DbError, DbResult};
@@ -296,7 +297,7 @@ fn submit_endless_passage_in_transaction(
         session.id,
         stable_key_hash(&cmd.idempotency_key)
     );
-    let mut submission = submit_reading_attempt_in_transaction(
+    let submission = submit_reading_attempt_in_scope(
         conn,
         &ReadingSubmitCommand {
             attempt_id: attempt_id.clone(),
@@ -310,15 +311,11 @@ fn submit_endless_passage_in_transaction(
             title_snapshot: cmd.title_snapshot.clone(),
             idempotency_key: format!("endless-{}", cmd.idempotency_key),
         },
+        AttemptMode::Endless,
+        Some(&session.id),
     )?;
 
     let persisted_attempt_id = submission.attempt.id.clone();
-    conn.execute(
-        "UPDATE attempts SET mode = 'endless', suite_id = ?1 WHERE id = ?2",
-        params![session.id, persisted_attempt_id],
-    )?;
-    submission.attempt.mode = AttemptMode::Endless;
-    submission.attempt.suite_id = Some(session.id.clone());
 
     if !session
         .completed_asset_ids
@@ -343,6 +340,9 @@ fn submit_endless_passage_in_transaction(
         next_asset_id,
     };
     store_submit_idempotent(conn, &cmd.idempotency_key, &result)?;
+    // Session advance, idempotency replay and retention must either all commit
+    // or all roll back. The outer endless transaction supplies that boundary.
+    prune_terminal_attempts_in_transaction(conn)?;
     Ok(result)
 }
 

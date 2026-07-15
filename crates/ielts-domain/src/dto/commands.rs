@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{Activity, AttemptMode};
+use crate::domain::{Activity, AttemptMode, ScoreScale, WritingTaskType};
 use crate::dto::{AttemptRecord, PracticeAssetV2, WritingEvaluationV4};
 use crate::error::ErrorEnvelope;
 
@@ -68,6 +68,20 @@ pub struct ListHistoryQuery {
     pub min_score: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_score: Option<f64>,
+    /// Unit for `min_score` / `max_score`. A mixed Activity query must provide
+    /// this explicitly because Reading accuracy (ratio) and Writing band scores
+    /// are not comparable numbers.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "score_scale"
+    )]
+    pub score_scale: Option<ScoreScale>,
+    /// Applies only to writing history. Omitted keeps unlabelled legacy rows
+    /// visible in the all-writing view; an explicit Task 1/2 filter excludes
+    /// rows whose historic source cannot be proven.
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "task_type")]
+    pub task_type: Option<WritingTaskType>,
 }
 
 fn default_limit() -> u32 {
@@ -145,6 +159,50 @@ pub struct ExportHistoryResult {
     pub format: HistoryExportFormat,
     pub body: String,
     pub record_count: u32,
+}
+
+/// Canonical SQLite-owned retention policy for durable practice history.
+/// `None` means unlimited retention: terminal attempts are never pruned
+/// automatically. Draft/active/reviewing work is never part of this policy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct HistoryRetentionPolicyDto {
+    // Keep `null` on the wire for unlimited. Omitting it would make the UI
+    // unable to distinguish a real unlimited policy from a malformed reply.
+    #[serde(default)]
+    pub max_terminal_attempts: Option<u32>,
+}
+
+/// Update the one and only history-retention policy. `null` explicitly means
+/// unlimited retention; finite values are validated by the Rust repository.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct SetHistoryRetentionPolicyCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_terminal_attempts: Option<u32>,
+}
+
+/// Returned only after the setting write and any immediate pruning commit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct SetHistoryRetentionPolicyResult {
+    pub policy: HistoryRetentionPolicyDto,
+    pub pruned_attempt_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -358,6 +416,11 @@ pub struct SaveDraftCommand {
     pub content_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_snapshot: Option<String>,
+    /// Required by the writing repository at runtime. It stays optional in
+    /// the transport DTO only so older clients receive a clear validation
+    /// error instead of a serde decode failure.
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "task_type")]
+    pub task_type: Option<WritingTaskType>,
     /// Client-generated idempotency key.
     pub idempotency_key: String,
 }

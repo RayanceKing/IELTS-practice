@@ -7,9 +7,10 @@ use tauri::State;
 
 use crate::app::state::AppDb;
 use ielts_db::{
-    get_open_reading_draft_for_scope, list_assets, load_practice_asset_payload,
-    patch_reading_answer, save_reading_draft, submit_reading_attempt, AssetIndexEntry,
-    ReadingDraftCommand, ReadingSubmitCommand, ReadingSubmitResult,
+    export_reading_archive, get_open_reading_draft_for_scope, import_reading_archive_value,
+    list_assets, load_pdf_data_url, load_practice_asset_payload, patch_reading_answer,
+    save_reading_draft, submit_reading_attempt, AssetIndexEntry, ReadingArchiveImportResult,
+    ReadingArchiveSnapshot, ReadingDraftCommand, ReadingSubmitCommand, ReadingSubmitResult,
 };
 
 fn map_err(err: ielts_db::DbError) -> ErrorEnvelope {
@@ -38,6 +39,35 @@ pub fn reading_get_asset_payload(
     match db.with_conn(|conn| load_practice_asset_payload(conn, &asset_id)) {
         Ok(v) => CommandResponse::success(v),
         Err(e) => CommandResponse::failure(map_err(e)),
+    }
+}
+
+#[tauri::command]
+pub fn reading_get_pdf_data_url(db: State<'_, AppDb>, asset_id: String) -> CommandResponse<String> {
+    match db.with_conn(|conn| load_pdf_data_url(conn, &asset_id)) {
+        Ok(value) => CommandResponse::success(value),
+        Err(e) => CommandResponse::failure(map_err(e)),
+    }
+}
+
+/// Rust-owned, one-snapshot export for the Reading Library archive download.
+#[tauri::command]
+pub fn reading_export_archive(db: State<'_, AppDb>) -> CommandResponse<ReadingArchiveSnapshot> {
+    match db.with_conn(export_reading_archive) {
+        Ok(snapshot) => CommandResponse::success(snapshot),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+/// Validate every archive record before writing, then commit all or none.
+#[tauri::command]
+pub fn reading_import_archive(
+    db: State<'_, AppDb>,
+    value: serde_json::Value,
+) -> CommandResponse<ReadingArchiveImportResult> {
+    match db.with_conn(|conn| import_reading_archive_value(conn, &value)) {
+        Ok(result) => CommandResponse::success(result),
+        Err(error) => CommandResponse::failure(map_err(error)),
     }
 }
 

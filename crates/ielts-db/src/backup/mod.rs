@@ -13,18 +13,48 @@ use ielts_domain::dto::{
     SecretRef, SettingEntry,
 };
 
-use crate::attempts::upsert_attempt;
+use crate::attempts::{parse_writing_task_type, upsert_attempt};
 use crate::migrate::current_version;
 use crate::settings::{list_secret_refs, list_settings, put_secret_ref, upsert_setting};
 use crate::sqlite::{DbError, DbResult};
 
-pub const BACKUP_SCHEMA_VERSION: u32 = 2;
+pub const BACKUP_SCHEMA_VERSION: u32 = 4;
 const LEGACY_BACKUP_SCHEMA_VERSION: u32 = 1;
 
 // Parent tables precede their children. Restore inserts in this order and
 // clears in reverse order, so foreign keys remain enabled for the whole
 // transaction.
 const CANONICAL_TABLES: &[&str] = &[
+    "practice_assets",
+    "writing_topics",
+    "reading_suites",
+    "attempts",
+    "history_retention_policy",
+    "attempt_answers",
+    "attempt_annotations",
+    "writing_evaluations",
+    "writing_drafts",
+    "attempt_idempotency",
+    "evaluation_sessions",
+    "evaluation_checkpoints",
+    "evaluation_events",
+    "evaluation_lineage",
+    "reading_suite_items",
+    "endless_sessions",
+    "mode_idempotency",
+    "coach_threads",
+    "coach_messages",
+    "vocabulary_items",
+    "vocabulary_review_state",
+    "dictionary_entries",
+    "settings",
+    "migration_meta",
+];
+
+// Schema v3 has first-class writing topics but predates the independent
+// retention-policy table. Keep the exact package shape so its checksum stays
+// meaningful and old backups remain importable.
+const V3_CANONICAL_TABLES: &[&str] = &[
     "practice_assets",
     "writing_topics",
     "reading_suites",
@@ -49,6 +79,44 @@ const CANONICAL_TABLES: &[&str] = &[
     "settings",
     "migration_meta",
 ];
+
+// Schema v2 predates the first-class writing topic projection. Keep its
+// immutable package shape explicit: adding an empty table after checksum
+// verification would forge the backup instead of importing it compatibly.
+const V2_CANONICAL_TABLES: &[&str] = &[
+    "practice_assets",
+    "reading_suites",
+    "attempts",
+    "attempt_answers",
+    "attempt_annotations",
+    "writing_evaluations",
+    "writing_drafts",
+    "attempt_idempotency",
+    "evaluation_sessions",
+    "evaluation_checkpoints",
+    "evaluation_events",
+    "evaluation_lineage",
+    "reading_suite_items",
+    "endless_sessions",
+    "mode_idempotency",
+    "coach_threads",
+    "coach_messages",
+    "vocabulary_items",
+    "vocabulary_review_state",
+    "dictionary_entries",
+    "settings",
+    "migration_meta",
+];
+
+fn snapshot_tables_for_schema(schema_version: u32) -> &'static [&'static str] {
+    if schema_version >= 4 {
+        CANONICAL_TABLES
+    } else if schema_version == 3 {
+        V3_CANONICAL_TABLES
+    } else {
+        V2_CANONICAL_TABLES
+    }
+}
 
 pub fn create_backup_package(conn: &Connection, app_version: &str) -> DbResult<BackupPackage> {
     let attempts = load_all_attempts(conn)?;
@@ -134,8 +202,11 @@ pub fn validate_backup(package: &BackupPackage) -> DbResult<Vec<String>> {
         return Ok(warnings);
     }
 
-    validate_v2_counts(package)?;
-    let tables = table_map(&package.database)?;
+    validate_snapshot_counts(package)?;
+    let tables = table_map(
+        &package.database,
+        snapshot_tables_for_schema(package.manifest.schema_version),
+    )?;
     validate_json_cells(&tables)?;
     validate_logical_references(&tables)?;
     validate_redundant_views(package, &tables)?;
@@ -171,7 +242,7 @@ pub fn import_backup(
     // the transaction. This verifies CHECK/UNIQUE/FK constraints without
     // leaving any persistent mutation.
     let tx = conn.unchecked_transaction()?;
-    match restore_v2_snapshot(&tx, package) {
+    match restore_snapshot(&tx, package) {
         Ok(()) => {
             report.attempt_imported = package.manifest.attempt_count;
             report.settings_imported = package.manifest.settings_count;
@@ -345,12 +416,18 @@ fn validate_target_schema(conn: &Connection, package: &BackupPackage) -> DbResul
     Ok(())
 }
 
-fn restore_v2_snapshot(tx: &Transaction<'_>, package: &BackupPackage) -> DbResult<()> {
-    let tables = table_map(&package.database)?;
+fn restore_snapshot(tx: &Transaction<'_>, package: &BackupPackage) -> DbResult<()> {
+    let source_tables = snapshot_tables_for_schema(package.manifest.schema_version);
+    let tables = table_map(&package.database, source_tables)?;
     for table in CANONICAL_TABLES.iter().rev() {
+        // Old snapshots have no independent policy. Preserve the target row
+        // until the legacy app/settings value below has a chance to migrate.
+        if *table == "history_retention_policy" && !source_tables.contains(table) {
+            continue;
+        }
         tx.execute(&format!("DELETE FROM {}", quote_identifier(table)), [])?;
     }
-    for table_name in CANONICAL_TABLES {
+    for table_name in source_tables {
         let table = tables[table_name];
         let columns = table
             .columns
@@ -385,6 +462,16 @@ fn restore_v2_snapshot(tx: &Transaction<'_>, package: &BackupPackage) -> DbResul
             params![secret.name, value_json, secret.updated_at],
         )?;
     }
+    if package.manifest.schema_version == 2 {
+        // A v2 package has no canonical writing-topic rows. Its restored
+        // settings are the only cold-import source, so discard any checkpoint
+        // marker carried by an intermediate v2 build before the next topic
+        // query seeds the new projection.
+        crate::writing::topics::reset_legacy_writing_topics_import_marker(tx)?;
+    }
+    if package.manifest.schema_version < 4 {
+        crate::history::restore_legacy_history_retention_policy(tx)?;
+    }
     assert_no_foreign_key_violations(tx)?;
     Ok(())
 }
@@ -402,8 +489,11 @@ fn assert_no_foreign_key_violations(conn: &Connection) -> DbResult<()> {
     Ok(())
 }
 
-fn table_map<'a>(tables: &'a [BackupTable]) -> DbResult<HashMap<&'a str, &'a BackupTable>> {
-    let allowed = CANONICAL_TABLES.iter().copied().collect::<HashSet<_>>();
+fn table_map<'a>(
+    tables: &'a [BackupTable],
+    required_tables: &[&str],
+) -> DbResult<HashMap<&'a str, &'a BackupTable>> {
+    let allowed = required_tables.iter().copied().collect::<HashSet<_>>();
     let mut out = HashMap::new();
     for table in tables {
         if !allowed.contains(table.name.as_str()) {
@@ -442,7 +532,7 @@ fn table_map<'a>(tables: &'a [BackupTable]) -> DbResult<HashMap<&'a str, &'a Bac
             )));
         }
     }
-    for required in CANONICAL_TABLES {
+    for required in required_tables {
         if !out.contains_key(required) {
             return Err(DbError::Validation(format!(
                 "backup is incomplete; missing canonical table: {required}"
@@ -452,7 +542,7 @@ fn table_map<'a>(tables: &'a [BackupTable]) -> DbResult<HashMap<&'a str, &'a Bac
     Ok(out)
 }
 
-fn validate_v2_counts(package: &BackupPackage) -> DbResult<()> {
+fn validate_snapshot_counts(package: &BackupPackage) -> DbResult<()> {
     if package.manifest.table_count != package.database.len() as u32 {
         return Err(DbError::Validation(format!(
             "manifest table_count {} != payload {}",
@@ -482,7 +572,7 @@ fn validate_v2_counts(package: &BackupPackage) -> DbResult<()> {
     }
     if package.manifest.database_schema_version == 0 {
         return Err(DbError::Validation(
-            "backup database_schema_version is required for schema v2".into(),
+            "backup database_schema_version is required for snapshot backups".into(),
         ));
     }
     Ok(())
@@ -578,7 +668,9 @@ fn validate_logical_references(tables: &HashMap<&str, &BackupTable>) -> DbResult
     let threads = text_set(tables["coach_threads"], "id")?;
     let vocab = text_set(tables["vocabulary_items"], "id")?;
 
-    require_refs(tables["writing_topics"], "asset_id", &assets)?;
+    if let Some(topics) = tables.get("writing_topics") {
+        require_refs(topics, "asset_id", &assets)?;
+    }
     require_optional_refs(tables["attempts"], "asset_id", &assets)?;
     require_optional_refs(tables["attempts"], "suite_id", &suites)?;
     require_refs(tables["attempt_answers"], "attempt_id", &attempts)?;
@@ -847,7 +939,7 @@ fn looks_like_secret_text(value: &str) -> bool {
 fn verify_checksum(package: &BackupPackage) -> DbResult<()> {
     if package.manifest.schema_version >= 2 && package.manifest.checksum_sha256.is_empty() {
         return Err(DbError::Validation(
-            "checksum_sha256 is required for backup schema v2".into(),
+            "checksum_sha256 is required for snapshot backup schemas".into(),
         ));
     }
     let expected = checksum_package(package)?;
@@ -928,7 +1020,7 @@ fn load_all_attempt_summaries(conn: &Connection) -> DbResult<Vec<AttemptRecord>>
     let mut stmt = conn.prepare(
         "SELECT id, activity, asset_id, mode, suite_id, status, started_at, submitted_at, completed_at,
                 duration_ms, score_value, score_scale, correct_count, question_count, title_snapshot,
-                prompt_snapshot, content_text, schema_version
+                prompt_snapshot, content_text, schema_version, task_type
          FROM attempts
          ORDER BY COALESCE(submitted_at, started_at) DESC",
     )?;
@@ -978,6 +1070,7 @@ fn load_all_attempt_summaries(conn: &Connection) -> DbResult<Vec<AttemptRecord>>
             title_snapshot: row.get(14)?,
             prompt_snapshot: row.get(15)?,
             content_text: row.get(16)?,
+            task_type: parse_writing_task_type(row.get(18)?),
             answers: Vec::new(),
             annotations: Vec::new(),
         })

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale};
+use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale, WritingTaskType};
 use ielts_domain::dto::{
     AttemptRecord, HistoryExportFormat, ListHistoryQuery, UpsertSettingCommand,
 };
@@ -64,8 +64,30 @@ fn sample_attempt(
         title_snapshot: Some(title.into()),
         prompt_snapshot: None,
         content_text: Some("body".into()),
+        task_type: (activity == Activity::Writing).then_some(WritingTaskType::Task2),
         answers: vec![],
         annotations: vec![],
+    }
+}
+
+fn score_query(
+    activity: Option<Activity>,
+    min_score: Option<f64>,
+    max_score: Option<f64>,
+    score_scale: Option<ScoreScale>,
+) -> ListHistoryQuery {
+    ListHistoryQuery {
+        activity,
+        limit: 50,
+        offset: 0,
+        cursor: None,
+        search: None,
+        start_date: None,
+        end_date: None,
+        min_score,
+        max_score,
+        score_scale,
+        task_type: None,
     }
 }
 
@@ -120,6 +142,8 @@ fn unified_history_pagination_and_filters() {
             end_date: None,
             min_score: None,
             max_score: None,
+            score_scale: None,
+            task_type: None,
         },
     )
     .unwrap();
@@ -140,6 +164,8 @@ fn unified_history_pagination_and_filters() {
             end_date: None,
             min_score: None,
             max_score: None,
+            score_scale: None,
+            task_type: None,
         },
     )
     .unwrap();
@@ -158,6 +184,8 @@ fn unified_history_pagination_and_filters() {
             end_date: None,
             min_score: None,
             max_score: None,
+            score_scale: None,
+            task_type: None,
         },
     )
     .unwrap();
@@ -176,6 +204,8 @@ fn unified_history_pagination_and_filters() {
             end_date: None,
             min_score: None,
             max_score: None,
+            score_scale: None,
+            task_type: None,
         },
     )
     .unwrap();
@@ -190,7 +220,7 @@ fn unified_history_pagination_and_filters() {
     );
 
     let csv = export_history(&conn, HistoryExportFormat::Csv, None).unwrap();
-    assert!(csv.body.contains("id,activity,title"));
+    assert!(csv.body.contains("id,activity,task_type,title"));
     assert!(csv.record_count >= 3);
 
     let md = export_history(
@@ -206,11 +236,74 @@ fn unified_history_pagination_and_filters() {
             end_date: None,
             min_score: None,
             max_score: None,
+            score_scale: None,
+            task_type: None,
         }),
     )
     .unwrap();
     assert!(md.body.contains("# IELTS Practice History"));
     assert_eq!(md.record_count, 2);
+}
+
+#[test]
+fn score_range_never_compares_reading_ratios_with_writing_bands() {
+    let dir = tempdir().unwrap();
+    let conn = open_v2(dir.path().join("score-scale.db"));
+
+    for (id, activity, score) in [
+        ("reading-high", Activity::Reading, 0.85),
+        ("reading-low", Activity::Reading, 0.6),
+        ("writing-band", Activity::Writing, 6.5),
+    ] {
+        upsert_attempt(
+            &conn,
+            &sample_attempt(id, activity, id, score, "2025-02-01T00:00:00Z"),
+        )
+        .unwrap();
+    }
+
+    let ratio = list_history(
+        &conn,
+        &score_query(None, Some(0.7), Some(0.9), Some(ScoreScale::Ratio)),
+    )
+    .unwrap();
+    assert_eq!(ratio.items.len(), 1);
+    assert_eq!(ratio.items[0].id, "reading-high");
+
+    let bands = list_history(
+        &conn,
+        &score_query(None, Some(6.0), Some(7.0), Some(ScoreScale::Band9)),
+    )
+    .unwrap();
+    assert_eq!(bands.items.len(), 1);
+    assert_eq!(bands.items[0].id, "writing-band");
+
+    // Existing explicit-activity callers keep their unambiguous behavior.
+    let inferred_ratio = list_history(
+        &conn,
+        &score_query(Some(Activity::Reading), Some(0.7), Some(0.9), None),
+    )
+    .unwrap();
+    assert_eq!(inferred_ratio.items.len(), 1);
+    assert_eq!(inferred_ratio.items[0].id, "reading-high");
+
+    let ambiguous = list_history(&conn, &score_query(None, Some(0.7), None, None)).unwrap_err();
+    assert!(ambiguous.to_string().contains("scoreScale"));
+    assert!(list_history(
+        &conn,
+        &score_query(
+            Some(Activity::Reading),
+            Some(0.7),
+            None,
+            Some(ScoreScale::Band9),
+        ),
+    )
+    .is_err());
+    assert!(list_history(
+        &conn,
+        &score_query(Some(Activity::Reading), Some(0.7), Some(9.0), None),
+    )
+    .is_err());
 }
 
 #[test]
@@ -305,6 +398,8 @@ fn backup_roundtrip_dry_run_and_restore() {
                 end_date: None,
                 min_score: None,
                 max_score: None,
+                score_scale: None,
+                task_type: None,
             }
         )
         .unwrap()
@@ -330,6 +425,8 @@ fn backup_roundtrip_dry_run_and_restore() {
             end_date: None,
             min_score: None,
             max_score: None,
+            score_scale: None,
+            task_type: None,
         },
     )
     .unwrap();

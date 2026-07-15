@@ -7,11 +7,12 @@ use ielts_db::{
     advance_endless, cancel_endless, create_endless_session, create_memorize_session,
     create_suite_session, finish_memorize_session, get_endless_session, get_open_reading_draft,
     get_open_reading_draft_for_scope, get_suite_session, import_asset_payload_file, list_history,
-    migrate, open_connection, remaining_pool, save_suite_passage_draft, submit_endless_passage,
-    submit_reading_attempt, submit_suite_passage, AdvanceEndlessCommand, CreateEndlessCommand,
-    CreateMemorizeCommand, CreateSuiteCommand, DbOpenOptions, PassageStatus,
-    ReadingQuestionProgress, ReadingSubmitCommand, SaveSuitePassageDraftCommand,
-    SubmitEndlessCommand, SubmitSuitePassageCommand, SuiteAssetSeed, TimerMode, TimerState,
+    migrate, open_connection, patch_reading_answer, remaining_pool, save_reading_draft,
+    save_suite_passage_draft, submit_endless_passage, submit_reading_attempt, submit_suite_passage,
+    AdvanceEndlessCommand, CreateEndlessCommand, CreateMemorizeCommand, CreateSuiteCommand,
+    DbOpenOptions, PassageStatus, ReadingDraftCommand, ReadingQuestionProgress,
+    ReadingSubmitCommand, SaveSuitePassageDraftCommand, SubmitEndlessCommand,
+    SubmitSuitePassageCommand, SuiteAssetSeed, TimerMode, TimerState,
 };
 use ielts_domain::domain::{Activity, AttemptMode, SuiteFlowMode, SuiteStatus};
 use ielts_domain::dto::ListHistoryQuery;
@@ -645,8 +646,8 @@ fn endless_pool_and_advance() {
             "SELECT COUNT(*) FROM attempts WHERE suite_id = ?1",
             [&session.id],
             |row| row.get(0),
-    )
-    .unwrap();
+        )
+        .unwrap();
     assert_eq!(persisted_attempts, 1);
 
     let advanced = advance_endless(
@@ -710,7 +711,10 @@ fn endless_submit_accepts_only_the_current_uncompleted_asset() {
         .contains("already completed in this session"));
 
     let persisted = get_endless_session(&conn, &session.id).unwrap();
-    assert_eq!(persisted.current_asset_id.as_deref(), Some(current_asset.as_str()));
+    assert_eq!(
+        persisted.current_asset_id.as_deref(),
+        Some(current_asset.as_str())
+    );
     assert_eq!(persisted.completed_asset_ids, vec![first_asset]);
     let attempt_count: i64 = conn
         .query_row(
@@ -764,6 +768,8 @@ fn memorize_excluded_from_history() {
             end_date: None,
             min_score: None,
             max_score: None,
+            score_scale: None,
+            task_type: None,
             limit: 50,
             offset: 0,
             cursor: None,
@@ -774,4 +780,64 @@ fn memorize_excluded_from_history() {
     assert!(page.items.iter().any(|i| i.id == "normal-1"));
 
     finish_memorize_session(&conn, &mem.attempt.id).unwrap();
+}
+
+#[test]
+fn generic_reading_writes_cannot_mutate_a_memorize_attempt() {
+    let (dir, conn) = open_db();
+    seed_assets(&conn, &dir, &["normal-asset"]);
+    let memorize = create_memorize_session(
+        &conn,
+        &CreateMemorizeCommand {
+            asset_id: "normal-asset".into(),
+            title_snapshot: None,
+            idempotency_key: Some("memorize-identity".into()),
+        },
+    )
+    .unwrap();
+    let attempt_id = memorize.attempt.id.clone();
+
+    assert!(patch_reading_answer(&conn, &attempt_id, "q1", &json!("TRUE"), false).is_err());
+    assert!(save_reading_draft(
+        &conn,
+        &ReadingDraftCommand {
+            attempt_id: attempt_id.clone(),
+            asset_id: "normal-asset".into(),
+            asset_revision: None,
+            asset_fingerprint: None,
+            answers: json!({ "q1": "TRUE" }),
+            marked_questions: vec![],
+            question_timeline: vec![],
+            title_snapshot: None,
+            idempotency_key: "illegal-memorize-draft".into(),
+        },
+    )
+    .is_err());
+    assert!(submit_reading_attempt(
+        &conn,
+        &ReadingSubmitCommand {
+            attempt_id: attempt_id.clone(),
+            asset_id: "normal-asset".into(),
+            asset_revision: None,
+            asset_fingerprint: None,
+            answers: json!({ "q1": "TRUE", "q2": "A" }),
+            marked_questions: vec![],
+            question_timeline: vec![],
+            duration_ms: Some(1_000),
+            title_snapshot: None,
+            idempotency_key: "illegal-memorize-submit".into(),
+        },
+    )
+    .is_err());
+
+    let persisted: (String, Option<String>, String) = conn
+        .query_row(
+            "SELECT mode, suite_id, status FROM attempts WHERE id = ?1",
+            [&attempt_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(persisted.0, "memorize");
+    assert_eq!(persisted.1, None);
+    assert_eq!(persisted.2, "active");
 }

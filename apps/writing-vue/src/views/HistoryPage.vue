@@ -61,26 +61,29 @@
         </div>
 
         <div class="filter-item">
-          <label>分数范围</label>
+          <label>{{ scoreFilterLabel }}</label>
           <div class="score-range">
             <input 
               type="number" 
               v-model.number="filters.min_score"
-              min="0"
-              max="9"
-              step="0.5"
-              placeholder="最低分"
+              :min="scoreFilterBounds.min"
+              :max="scoreFilterBounds.max"
+              :step="scoreFilterBounds.step"
+              :disabled="!scoreFilterEnabled"
+              :placeholder="scoreFilterEnabled ? `最低${scoreFilterUnit}` : '先选择任务类型'"
             />
             <span>至</span>
             <input 
               type="number" 
               v-model.number="filters.max_score"
-              min="0"
-              max="9"
-              step="0.5"
-              placeholder="最高分"
+              :min="scoreFilterBounds.min"
+              :max="scoreFilterBounds.max"
+              :step="scoreFilterBounds.step"
+              :disabled="!scoreFilterEnabled"
+              :placeholder="scoreFilterEnabled ? `最高${scoreFilterUnit}` : '先选择任务类型'"
             />
           </div>
+          <p v-if="!scoreFilterEnabled" class="score-range-hint">请先选择阅读或具体写作 Task；混合历史不能把准确率和 Band 分数混在一起筛选。</p>
         </div>
 
         <button class="btn btn-warm-sand" @click="resetFilters">重置筛选</button>
@@ -108,13 +111,13 @@
             <h2>4-Dimensional Scoring Analysis</h2>
           </div>
           <RadarChart
-            v-if="statistics.count > 0"
+            v-if="statistics.count > 0 && isKnownWritingTaskType(statistics.latest_task_type)"
             :currentScores="statistics.latest"
             :averageScores="statistics.average"
             :taskType="statistics.latest_task_type"
           />
           <div v-else class="empty-chart">
-            <p>暂无可对比的数据</p>
+            <p>{{ statistics.count > 0 ? '最新记录未标注任务类型，无法展示 Task 专项雷达图' : '暂无可对比的数据' }}</p>
           </div>
           <div v-if="statistics.count > 0" class="radar-metrics">
             <div class="radar-metric">
@@ -155,7 +158,7 @@
               </thead>
               <tbody>
                 <tr>
-                  <td>{{ statistics.latest_task_type === 'task1' ? 'Task Achievement' : 'Task Response' }}</td>
+                  <td>{{ getTaskCriterionLabel(statistics.latest_task_type) }}</td>
                   <td>{{ statistics.latest.tr_ta }}</td>
                   <td>{{ statistics.average.tr_ta }}</td>
                   <td :class="getDifferenceClass(statistics.latest.tr_ta - statistics.average.tr_ta)">
@@ -266,21 +269,21 @@
 
           <div class="essay-content" @click="viewDetail(essay.id)">
             <div class="essay-header">
-              <span :class="['task-badge', essay.task_type]">
+              <span :class="['task-badge', getRecordTaskClass(essay)]">
                 {{ getRecordTypeLabel(essay) }}
               </span>
-              <span class="essay-date">{{ formatDate(essay.submitted_at) }}</span>
+              <span class="essay-date">{{ formatDate(essay.submittedAt) }}</span>
             </div>
 
             <div class="essay-title">
-              {{ essay.display_topic_title || getTopicTitle(essay.topic_title) }}
+              {{ essay.title }}
             </div>
 
             <div class="essay-stats">
               <span class="stat-item">{{ getRecordDurationLabel(essay) }}</span>
               <span class="stat-item">{{ getRecordSizeLabel(essay) }}</span>
-              <span :class="['stat-item', 'score', getScoreClass(essay.total_score)]">
-                {{ formatDate(essay.submitted_at).split(' ')[0] }}
+              <span :class="['stat-item', 'score', getScoreClass(essay.scoreValue)]">
+                {{ formatDate(essay.submittedAt).split(' ')[0] }}
               </span>
             </div>
           </div>
@@ -366,7 +369,7 @@
               <div class="info-grid">
                 <div class="info-item">
                   <span class="info-label">任务类型</span>
-                  <span>{{ detailData.task_type === 'task1' ? 'Task 1' : 'Task 2' }}</span>
+                  <span>{{ getRecordTypeLabel(detailData) }}</span>
                 </div>
                 <div class="info-item">
                   <span class="info-label">字数</span>
@@ -548,8 +551,8 @@ const HISTORY_CSV_HEADERS = [
 const trendRecords = computed(() => {
   if (!essaysList.value) return [];
   return [...essaysList.value].sort((a, b) => {
-    const ta = new Date(a.submitted_at || a.created_at || 0).getTime()
-    const tb = new Date(b.submitted_at || b.created_at || 0).getTime()
+    const ta = new Date(a.submittedAt || 0).getTime()
+    const tb = new Date(b.submittedAt || 0).getTime()
     return ta - tb
   }).slice(-15)
 })
@@ -558,10 +561,10 @@ const trendUsesPercentScale = computed(() => trendRecords.value.some((record) =>
 
 const trendData = computed(() => {
   return trendRecords.value.map((record) => {
-    const d = new Date(record.submitted_at || record.created_at);
+    const d = new Date(record.submittedAt || 0);
     const score = record.activity === 'reading'
-      ? Number(record.reading_accuracy || 0)
-      : Number(record.total_score ?? record.overall_score ?? 0) * (trendUsesPercentScale.value ? 10 : 1)
+      ? Number(record.scoreValue || 0) * 100
+      : Number(record.scoreValue || 0) * (trendUsesPercentScale.value ? 10 : 1)
     return {
       date: `${d.getMonth() + 1}/${d.getDate()}`,
       score
@@ -588,10 +591,28 @@ const filters = ref({
   task_type: '',
   start_date: '',  // ISO 字符串
   end_date: '',    // ISO 字符串
-  min_score: null, // 数字 0.5步长
-  max_score: null, // 数字 0.5步长
+  min_score: null, // 阅读为 0–100 百分比；写作为 0–9 Band
+  max_score: null,
   search: ''       // 后端 LIKE 查询
 })
+
+function scoreScaleForTaskType(taskType) {
+  if (taskType === 'reading') return 'ratio'
+  if (taskType === 'task1' || taskType === 'task2') return 'band9'
+  return null
+}
+
+const scoreFilterScale = computed(() => scoreScaleForTaskType(filters.value.task_type))
+const scoreFilterEnabled = computed(() => scoreFilterScale.value !== null)
+const scoreFilterBounds = computed(() => scoreFilterScale.value === 'ratio'
+  ? { min: 0, max: 100, step: 1 }
+  : { min: 0, max: 9, step: 0.5 })
+const scoreFilterLabel = computed(() => scoreFilterScale.value === 'ratio'
+  ? '阅读正确率范围（%）'
+  : scoreFilterScale.value === 'band9'
+    ? '写作 Band 分数范围'
+    : '分数范围')
+const scoreFilterUnit = computed(() => scoreFilterScale.value === 'ratio' ? '正确率（%）' : 'Band 分数')
 
 // 批量选择
 const selectedIds = ref([])
@@ -727,6 +748,36 @@ function buildApiFilters(source = filters.value) {
   return apiFilters
 }
 
+function buildHistoryQuery(source = filters.value, { limit, offset = 0 } = {}) {
+  const taskType = source.task_type === 'task1' || source.task_type === 'task2'
+    ? source.task_type
+    : null
+  const activity = source.task_type === 'reading'
+    ? 'reading'
+    : taskType
+      ? 'writing'
+      : null
+  const scoreScale = scoreScaleForTaskType(source.task_type)
+  const scoreValue = (value) => {
+    if (value === null || value === '') return null
+    const numeric = Number(value)
+    return scoreScale === 'ratio' ? numeric / 100 : numeric
+  }
+
+  return {
+    activity,
+    limit,
+    offset,
+    search: source.search || '',
+    startDate: source.start_date || '',
+    endDate: source.end_date || '',
+    minScore: scoreValue(source.min_score),
+    maxScore: scoreValue(source.max_score),
+    scoreScale,
+    taskType
+  }
+}
+
 function shouldLoadWritingHistory(source = filters.value) {
   return source.task_type !== 'reading'
 }
@@ -742,6 +793,24 @@ function validateFilters(source = filters.value) {
 
   if (source.min_score !== null && source.max_score !== null && source.min_score > source.max_score) {
     return '最低分不能高于最高分'
+  }
+
+  const scoreScale = scoreScaleForTaskType(source.task_type)
+  const hasScoreRange = source.min_score !== null || source.max_score !== null
+  if (hasScoreRange && !scoreScale) {
+    return '请先选择阅读或具体写作 Task，再按分数筛选'
+  }
+  if (hasScoreRange) {
+    const upper = scoreScale === 'ratio' ? 100 : 9
+    for (const value of [source.min_score, source.max_score]) {
+      if (value === null || value === '') continue
+      const numeric = Number(value)
+      if (!Number.isFinite(numeric) || numeric < 0 || numeric > upper) {
+        return scoreScale === 'ratio'
+          ? '阅读正确率必须在 0–100% 之间'
+          : '写作 Band 分数必须在 0–9 之间'
+      }
+    }
   }
 
   return ''
@@ -852,29 +921,18 @@ async function loadEssays() {
   }
 
   try {
-    const activity =
-      filtersSnapshot.task_type === 'reading'
-        ? 'reading'
-        : filtersSnapshot.task_type && filtersSnapshot.task_type !== 'reading'
-          ? 'writing'
-          : null
     const offset = (paginationSnapshot.page - 1) * paginationSnapshot.limit
-    const page = await historyRepository.listHistory({
-      activity,
+    const query = buildHistoryQuery(filtersSnapshot, {
       limit: paginationSnapshot.limit,
-      offset,
-      search: filtersSnapshot.search || '',
-      startDate: filtersSnapshot.start_date || '',
-      endDate: filtersSnapshot.end_date || '',
-      minScore: filtersSnapshot.min_score,
-      maxScore: filtersSnapshot.max_score
+      offset
     })
+    const page = await historyRepository.listHistory(query)
     if (!listRequestGate.isCurrent(requestId)) return
 
     essaysList.value = page.items || []
     total.value = Number(page.total || 0)
-    writingHistoryTotal.value = activity === 'reading' ? 0 : total.value
-    readingHistoryTotal.value = activity === 'writing' ? 0 : total.value
+    writingHistoryTotal.value = query.activity === 'reading' ? 0 : total.value
+    readingHistoryTotal.value = query.activity === 'writing' ? 0 : total.value
     keepVisibleSelections()
     await loadStatistics({
       totalCount: Number(page.total || 0),
@@ -1085,75 +1143,28 @@ function downloadCsvFile(filename, csvContent) {
 
 // 导出CSV
 async function exportCSV() {
-  // Prefer unified repository (single source). Falls through to legacy dual export on failure.
-  try {
-    const filtersSnapshot = { ...filters.value }
-    const activity =
-      filtersSnapshot.task_type === 'reading'
-        ? 'reading'
-        : filtersSnapshot.task_type && filtersSnapshot.task_type !== 'reading'
-          ? 'writing'
-          : null
-    const { result } = await historyRepository.exportHistory('csv', {
-      activity,
-      search: filtersSnapshot.search || '',
-      startDate: filtersSnapshot.start_date || '',
-      endDate: filtersSnapshot.end_date || '',
-      minScore: filtersSnapshot.min_score,
-      maxScore: filtersSnapshot.max_score
-    })
-    // ExportHistoryResult is { format, body, recordCount } — never stringify the object.
-    const csvBody = typeof result === 'string' ? result : (result?.body ?? '')
-    if (csvBody) {
-      const blob = new Blob([csvBody], { type: 'text/csv;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      const dateStr = new Date().toISOString().slice(0, 10)
-      a.href = url
-      a.download = `ielts-history-${dateStr}.csv`
-      a.click()
-      URL.revokeObjectURL(url)
-      return
-    }
-  } catch (err) {
-    console.warn('unified export failed, falling back', err)
+  clearPageNotice()
+  const filtersSnapshot = { ...filters.value }
+  const validationError = validateFilters(filtersSnapshot)
+  if (validationError) {
+    setPageNotice('error', validationError)
+    return
   }
 
-  clearPageNotice()
-
   try {
-    const filtersSnapshot = { ...filters.value }
-    const shouldExportWriting = shouldLoadWritingHistory(filtersSnapshot)
-    const shouldExportReading = shouldLoadReadingHistory(filtersSnapshot)
-    // 导出"当前筛选结果全量"，非"当前页"
-    const [writingCsv, readingResult] = await Promise.all([
-      shouldExportWriting ? essaysApi.exportCSV(buildApiFilters(filtersSnapshot)) : Promise.resolve(''),
-      shouldExportReading ? practiceHistory.listAll({ activity: 'reading' }) : Promise.resolve({ data: [] })
-    ])
-    // essaysApi.exportCSV returns the CSV body string (not the ExportHistoryResult object)
-    const writingBody = typeof writingCsv === 'string'
-      ? writingCsv
-      : (writingCsv?.body ?? '')
-    const writingLines = String(writingBody || '').split(/\r?\n/).filter(Boolean)
-    const readingRows = shouldExportReading
-      ? buildReadingHistoryCsvRows(filterReadingHistory(
-        (Array.isArray(readingResult.data) ? readingResult.data : []).map(normalizeReadingHistoryRecord),
-        filtersSnapshot
-      ))
-      : []
-    const header = writingLines[0] || HISTORY_CSV_HEADERS.join(',')
-    const csvContent = [header, ...writingLines.slice(1), ...readingRows].join('\n')
-
-    // 生成带筛选范围的文件名
+    const { result } = await historyRepository.exportHistory('csv', buildHistoryQuery(filtersSnapshot, {
+      limit: 10_000
+    }))
+    const csvBody = typeof result === 'string' ? result : (result?.body ?? '')
+    if (!csvBody) throw new Error('历史导出未返回内容')
     const dateStr = new Date().toISOString().split('T')[0]
     const filterSuffix = []
-    if (filters.value.task_type) filterSuffix.push(filters.value.task_type)
-    if (filters.value.start_date || filters.value.end_date) filterSuffix.push('date-filtered')
-    if (filters.value.min_score !== null || filters.value.max_score !== null) filterSuffix.push('score-filtered')
+    if (filtersSnapshot.task_type) filterSuffix.push(filtersSnapshot.task_type)
+    if (filtersSnapshot.start_date || filtersSnapshot.end_date) filterSuffix.push('date-filtered')
+    if (filtersSnapshot.min_score !== null || filtersSnapshot.max_score !== null) filterSuffix.push('score-filtered')
     const filename = `ielts-history-${dateStr}${filterSuffix.length > 0 ? '-' + filterSuffix.join('-') : ''}.csv`
-
-    // 下载CSV文件
-    downloadCsvFile(filename, csvContent)
+    downloadCsvFile(filename, csvBody)
+    setPageNotice('success', '历史 CSV 已导出。')
   } catch (err) {
     console.error('导出CSV失败:', err)
     setPageNotice('error', `导出失败：${err.message || '请重试'}`)
@@ -1207,7 +1218,9 @@ async function loadStatistics({ totalCount = total.value, rangeValue = statistic
           lr: parseFloat(result.average.avg_lr || 0),
           gra: parseFloat(result.average.avg_gra || 0)
         },
-        latest_task_type: result.latest.task_type || 'task2',
+        latest_task_type: isKnownWritingTaskType(result.latest.task_type)
+          ? result.latest.task_type
+          : null,
         latest_date: result.latest.submitted_at
       }
     } else {
@@ -1238,7 +1251,26 @@ function getTopicTitle(titleJson) {
 
 function getRecordTypeLabel(record) {
   if (record?.activity === 'reading') return '阅读'
-  return record?.task_type === 'task1' ? 'Task 1' : 'Task 2'
+  const taskType = record?.taskType ?? record?.task_type
+  if (taskType === 'task1') return 'Task 1'
+  if (taskType === 'task2') return 'Task 2'
+  return '未标注'
+}
+
+function getRecordTaskClass(record) {
+  if (record?.activity === 'reading') return 'reading'
+  const taskType = record?.taskType ?? record?.task_type
+  return isKnownWritingTaskType(taskType) ? taskType : 'unlabeled'
+}
+
+function isKnownWritingTaskType(taskType) {
+  return taskType === 'task1' || taskType === 'task2'
+}
+
+function getTaskCriterionLabel(taskType) {
+  if (taskType === 'task1') return 'Task Achievement'
+  if (taskType === 'task2') return 'Task Response'
+  return 'Task Criterion'
 }
 
 function getRecordDurationLabel(record) {
@@ -1249,21 +1281,24 @@ function getRecordDurationLabel(record) {
     const seconds = duration % 60
     return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
   }
-  return record?.task_type === 'task1' ? '20 min' : '40 min'
+  const taskType = record?.taskType ?? record?.task_type
+  if (taskType === 'task1') return '20 min'
+  if (taskType === 'task2') return '40 min'
+  return '—'
 }
 
 function getRecordSizeLabel(record) {
   if (record?.activity === 'reading') {
-    return `${Number(record.total_questions || record.word_count || 0)} 题`
+    return `${Number(record.questionCount || 0)} 题`
   }
-  return `字数 ${record?.word_count || 0}`
+  return '—'
 }
 
 function formatRecordScore(record) {
   if (record?.activity === 'reading') {
-    return `${Number(record.reading_accuracy || 0)}%`
+    return record.scoreDisplay || '—'
   }
-  return Number(record?.total_score || 0).toFixed(1)
+  return record?.scoreDisplay || '—'
 }
 
 function getTopicSourceLabel(source) {
@@ -1306,6 +1341,13 @@ watch(filters, () => {
   pagination.value.page = 1
   debouncedLoadEssays()
 }, { deep: true })
+
+watch(() => filters.value.task_type, (nextTaskType, previousTaskType) => {
+  if (scoreScaleForTaskType(nextTaskType) !== scoreScaleForTaskType(previousTaskType)) {
+    filters.value.min_score = null
+    filters.value.max_score = null
+  }
+})
 
 watch(() => pagination.value.page, () => {
   loadEssays()

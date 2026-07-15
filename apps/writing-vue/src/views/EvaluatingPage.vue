@@ -53,6 +53,12 @@
           </div>
         </section>
 
+        <section v-if="error" class="glass-card rail-section evaluation-error" role="alert">
+          <h3>评测未完成</h3>
+          <p>{{ error.message }}</p>
+          <p class="status-meta">草稿仍保存在本机；可直接重试，或取消后返回写作页继续修改。</p>
+        </section>
+
         <section class="glass-card rail-section flex-1 overflow-hidden flex-col">
           <div class="rail-head header-fixed">
             <h3>实时日志</h3>
@@ -86,6 +92,7 @@ import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { evaluate, getErrorMessage, resolveApiErrorMessage } from '@/api/client.js'
 import { getDraft } from '@/api/writing-repository.js'
+import { requireWritingAttemptMode } from '@/api/writing-mode.js'
 
 const props = defineProps({
   sessionId: {
@@ -254,6 +261,9 @@ function handleEvent(event) {
         code: event.data.code,
         message: event.data.message || getErrorMessage(event.data.code)
       }
+      currentStage.value = 'failed'
+      stageMessage.value = error.value.message
+      statusMessage.value = error.value.message
       break
 
     case 'cancelled':
@@ -273,6 +283,7 @@ async function hydrateSessionState() {
     if (draft) {
       tempDraft.value = {
         task_type: draft.taskType || draft.task_type || '',
+        mode: draft.mode || '',
         topic_id: normalizeTopicId(draft.assetId ?? draft.asset_id),
         topic_text: draft.promptSnapshot || draft.prompt_snapshot || '',
         content: draft.contentText || draft.content_text || '',
@@ -296,9 +307,16 @@ async function hydrateSessionState() {
 async function handleCancel() {
   if (isRetrying.value) return
   try {
-    await evaluate.cancel(props.sessionId)
+    const cancelled = await evaluate.cancel(props.sessionId)
+    if (!cancelled?.cancelled) {
+      throw new Error('评测未能取消，请稍后重试')
+    }
   } catch (err) {
     console.error('取消失败:', err)
+    const message = resolveApiErrorMessage(err, String(err?.code || 'cancel_failed'))
+    error.value = { code: 'cancel_failed', message }
+    appendLog('error', `取消失败：${message}`)
+    return
   }
   await router.push({
     name: 'Compose',
@@ -313,6 +331,12 @@ function normalizeTopicId(value) {
 
 function buildRetryPayload() {
   const draft = tempDraft.value || {}
+  let mode = null
+  try {
+    mode = requireWritingAttemptMode(draft.mode)
+  } catch {
+    return null
+  }
   const rawTaskType = String(draft.task_type || '').trim()
   const taskType = rawTaskType === 'task1' ? 'task1' : (rawTaskType === 'task2' ? 'task2' : '')
   const topicId = normalizeTopicId(draft.topic_id)
@@ -339,6 +363,7 @@ function buildRetryPayload() {
   }
 
   return {
+    mode,
     task_type: taskType,
     topic_id: topicId,
     topic_text: topicText,
@@ -355,7 +380,7 @@ async function handleRetry() {
   if (!retryPayload) {
     error.value = {
       code: 'start_failed',
-      message: '缺少可重试的题目或作文内容，请返回写作页重新提交'
+      message: '缺少可重试的写作模式、题目或作文内容，请返回写作页重新提交'
     }
     appendLog('error', error.value.message)
     return
@@ -373,6 +398,7 @@ async function handleRetry() {
 
     const result = await evaluate.start({
       sessionId: props.sessionId,
+      mode: retryPayload.mode,
       task_type: retryPayload.task_type,
       topic_id: retryPayload.topic_id,
       topic_text: retryPayload.topic_id ? null : retryPayload.topic_text,
@@ -433,6 +459,7 @@ function stageLabel(key, fallbackMessage = '') {
   if (key === 'scoring') return '评分中'
   if (key === 'reviewing') return '详解生成中'
   if (key === 'completed') return '已完成'
+  if (key === 'failed') return '评测失败'
   if (typeof fallbackMessage === 'string' && fallbackMessage.trim()) return fallbackMessage.trim()
   return '评测中'
 }

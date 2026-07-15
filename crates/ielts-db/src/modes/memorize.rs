@@ -76,6 +76,7 @@ pub fn create_memorize_session(
         ),
         prompt_snapshot: None,
         content_text: None,
+        task_type: None,
         answers: vec![],
         annotations: vec![],
     };
@@ -127,6 +128,7 @@ pub fn finish_memorize_session(conn: &Connection, attempt_id: &str) -> DbResult<
         title_snapshot: None,
         prompt_snapshot: None,
         content_text: None,
+        task_type: None,
         answers: vec![],
         annotations: vec![],
     })

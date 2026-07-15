@@ -8,18 +8,15 @@ import {
   normalizeReadingSuitePayload
 } from './contracts'
 
-interface RefreshOptions { refresh?: boolean }
 interface CoachOptions { onEvent?: (event: unknown) => void }
 
 export const readingLibraryApi = {
-  async listAssets(options: RefreshOptions = {}) {
-    return practiceAssets.listAll({ activity: READING_ACTIVITY }, {
-      refresh: Boolean(options.refresh)
-    })
+  async listAssets() {
+    return practiceAssets.listAll({ activity: READING_ACTIVITY })
   },
 
-  async getAsset(assetId: string, options: RefreshOptions = {}) {
-    return practiceAssets.get(READING_ACTIVITY, assetId, options)
+  async getAsset(assetId: string) {
+    return practiceAssets.get(READING_ACTIVITY, assetId)
   }
 }
 
