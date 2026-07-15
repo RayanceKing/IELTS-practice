@@ -72,10 +72,13 @@ jobs:
       matrix:
         include:
           - platform: windows-latest
+            platformKey: windows
             args: ''
           - platform: macos-latest
+            platformKey: macos
             args: '--target aarch64-apple-darwin'
           - platform: ubuntu-22.04
+            platformKey: linux
             args: ''
     runs-on: ${{ matrix.platform }}
     steps:
@@ -107,7 +110,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Verify non-empty Tauri bundle
-        run: python developer/tests/ci/verify_tauri_bundle.py --report developer/tests/e2e/reports/tauri-bundle-${{ matrix.platform }}.json
+        run: python developer/tests/ci/verify_tauri_bundle.py --platform ${{ matrix.platformKey }} --report developer/tests/e2e/reports/tauri-bundle-${{ matrix.platform }}.json
       - name: Upload bundle manifest
         if: always()
         uses: actions/upload-artifact@v4

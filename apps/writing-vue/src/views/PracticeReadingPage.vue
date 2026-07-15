@@ -99,22 +99,6 @@
           </button>
         </div>
       </div>
-      <div class="settings-section">
-        <h3 class="settings-title">背景颜色</h3>
-        <div class="settings-options">
-          <button
-            v-for="option in themeModeOptions"
-            :key="option.value"
-            class="settings-option"
-            :class="{ active: readingThemeMode === option.value }"
-            type="button"
-            :data-mode="option.value"
-            @click="selectReadingTheme(option.value)"
-          >
-            {{ option.label }}
-          </button>
-        </div>
-      </div>
       <div class="settings-section" id="reading-coach-setting-section">
         <h3 class="settings-title">AI 教练</h3>
         <div class="settings-options">
@@ -431,7 +415,6 @@ import { useReadingTimer } from '@/modules/practice-reading/useReadingTimer'
 import { useReadingAttempt } from '@/modules/practice-reading/useReadingAttempt'
 import {
   readingFontSizeOptions as fontSizeOptions,
-  readingThemeModeOptions as themeModeOptions,
   useReadingUiPreferences
 } from '@/modules/practice-reading/useReadingUiPreferences'
 import { useReadingInteractions } from '@/modules/practice-reading/useReadingInteractions'
@@ -524,7 +507,6 @@ const {
   notesText,
   notesError,
   readingFontSize,
-  readingThemeMode,
   suiteAutoAdvance,
   readingPageClassList: preferencePageClassList,
   readingPageStyle,
@@ -534,13 +516,11 @@ const {
   handleNotesDialogKeydown,
   closeFloatingPanels,
   selectReadingFont,
-  selectReadingTheme,
   setSuiteAutoAdvance,
   loadReadingNotes,
   clearReadingNotesDraft
 } = useReadingUiPreferences({
-  assetSource: () => asset.value,
-  onThemeChanged: () => syncDropzoneThemeStyles()
+  assetSource: () => asset.value
 })
 
 const activeSuiteSessionId = computed(() => {
@@ -662,8 +642,6 @@ const {
   handleDrop,
   findNativeDropzonesByQuestionId,
   ensureDropzoneHolder,
-  applyDropzoneThemeStyle,
-  syncDropzoneThemeStyles,
   syncDropzoneControl,
   setReadOnlyDomControls,
   clearDragHoverState,
@@ -673,7 +651,6 @@ const {
 } = useReadingInteractions({
   payloadSource: () => payload.value,
   reviewModeSource: reviewMode,
-  themeModeSource: readingThemeMode,
   getAnswerValue,
   getRawAnswer,
   assignAnswer,
@@ -2338,9 +2315,9 @@ function getQuestionKindLabel(kind) {
   display: grid;
   gap: 3px;
   padding: 10px;
-  border: 1px solid rgba(49, 95, 103, 0.22);
+  border: 1px solid var(--atlas-accent-ring);
   border-radius: var(--radius-md);
-  background: rgba(106, 204, 199, 0.1);
+  background: var(--atlas-accent-soft);
 }
 
 .suite-progress-mini span {
@@ -2732,22 +2709,22 @@ function getQuestionKindLabel(kind) {
 
 /* Legacy opensource reading exam shell: compact header, split panes, bottom question nav. */
 .reading-page {
-  --reading-line: #d7dde5;
-  --reading-panel: #ffffff;
-  --reading-panel-alt: #edf2f9;
-  --reading-text: #1f2937;
-  --reading-muted: #64748b;
-  --reading-accent: #2563eb;
-  --reading-success: #15803d;
-  --reading-danger: #b91c1c;
-  --reading-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-  --reading-dropzone-bg: #eff6ff;
-  --reading-dropzone-border: #93c5fd;
-  --reading-dropzone-drag-bg: #dbeafe;
+  --reading-line: var(--atlas-line);
+  --reading-panel: var(--atlas-glass-elevated);
+  --reading-panel-alt: var(--atlas-glass-pressed);
+  --reading-text: var(--atlas-ink);
+  --reading-muted: var(--atlas-ink-soft);
+  --reading-accent: var(--atlas-accent);
+  --reading-success: var(--atlas-success);
+  --reading-danger: var(--atlas-danger);
+  --reading-shadow: var(--atlas-shadow);
+  --reading-dropzone-bg: var(--atlas-accent-soft);
+  --reading-dropzone-border: var(--atlas-accent-ring);
+  --reading-dropzone-drag-bg: var(--color-brand-soft-strong);
   --reading-dropzone-drag-border: var(--reading-accent);
-  --reading-pool-drag-bg: rgba(37, 99, 235, 0.08);
-  --reading-drag-item-bg: #eff6ff;
-  --reading-drag-item-border: #bfdbfe;
+  --reading-pool-drag-bg: var(--atlas-accent-soft);
+  --reading-drag-item-bg: var(--atlas-glass-pressed);
+  --reading-drag-item-border: var(--atlas-accent-ring);
   --reading-nav-height: 72px;
   box-sizing: border-box;
   display: flex;
@@ -2757,32 +2734,15 @@ function getQuestionKindLabel(kind) {
   min-height: 100vh;
   overflow: hidden;
   padding-bottom: var(--reading-nav-height);
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  background: var(--atlas-glass-pressed);
   color: var(--reading-text);
-  font-family: "SF Pro Text", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  font-family: var(--font-family-base);
 }
 
 .reading-page *,
 .reading-page *::before,
 .reading-page *::after {
   box-sizing: border-box;
-}
-
-.reading-page.dark-mode {
-  --reading-line: #334155;
-  --reading-panel: #1e293b;
-  --reading-panel-alt: #0f172a;
-  --reading-text: #f8fafc;
-  --reading-muted: #cbd5e1;
-  --reading-dropzone-bg: #1e293b;
-  --reading-dropzone-border: #475569;
-  --reading-dropzone-drag-bg: #1e3a8a;
-  --reading-dropzone-drag-border: #3b82f6;
-  --reading-pool-drag-bg: rgba(59, 130, 246, 0.2);
-  --reading-drag-item-bg: #334155;
-  --reading-drag-item-border: #64748b;
-  background: #020617;
-  color: var(--reading-text);
 }
 
 .reading-header.header {
@@ -2847,12 +2807,6 @@ function getQuestionKindLabel(kind) {
 #review-nav-bar button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-.reading-page.dark-mode #review-nav-bar button {
-  border-color: rgba(148, 163, 184, 0.42);
-  background: #1e293b;
-  color: #f8fafc;
 }
 
 .header-controls,
@@ -2920,37 +2874,6 @@ function getQuestionKindLabel(kind) {
   background: var(--reading-accent) !important;
   color: #ffffff !important;
   font-weight: 600;
-}
-
-.reading-page.dark-mode .reading-header.header {
-  border-bottom-color: var(--reading-line);
-  background: rgba(30, 41, 59, 0.94);
-}
-
-.reading-page.dark-mode .reading-floating-panel {
-  border-color: var(--reading-line);
-  background: var(--reading-panel);
-  color: var(--reading-text);
-}
-
-.reading-page.dark-mode .reading-stat,
-.reading-page.dark-mode .header-btn,
-.reading-page.dark-mode .practice-nav .controls button,
-.reading-page.dark-mode .practice-nav .q-item {
-  border-color: var(--reading-line);
-  background: var(--reading-panel-alt);
-  color: #f8fafc;
-}
-
-.reading-page.dark-mode .header-btn:hover:not(:disabled),
-.reading-page.dark-mode .practice-nav .controls button:hover:not(:disabled),
-.reading-page.dark-mode .practice-nav .q-item:hover {
-  background: #334155;
-}
-
-.reading-page.dark-mode .submit-btn {
-  background: var(--reading-accent) !important;
-  color: #ffffff !important;
 }
 
 .overlay {
@@ -3256,31 +3179,14 @@ function getQuestionKindLabel(kind) {
 #reading-divider:hover,
 #reading-divider:focus-visible,
 #reading-divider.is-dragging {
-  border-color: #60a5fa;
-  background: linear-gradient(180deg, #dbeafe 0%, #93c5fd 100%);
+  border-color: var(--atlas-accent-alt);
+  background: var(--color-brand-gradient);
 }
 
 #right {
   min-width: 0;
   background: var(--reading-panel-alt);
   padding: 12px 14px;
-}
-
-.reading-page.dark-mode #reading-divider {
-  border-color: var(--reading-line);
-  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
-}
-
-.reading-page.dark-mode #reading-divider::before {
-  background: rgba(203, 213, 225, 0.62);
-  box-shadow: -3px 0 0 rgba(203, 213, 225, 0.32), 3px 0 0 rgba(203, 213, 225, 0.32);
-}
-
-.reading-page.dark-mode #reading-divider:hover,
-.reading-page.dark-mode #reading-divider:focus-visible,
-.reading-page.dark-mode #reading-divider.is-dragging {
-  border-color: #60a5fa;
-  background: linear-gradient(180deg, #1e3a8a 0%, #1d4ed8 100%);
 }
 
 .reading-html {
@@ -3371,20 +3277,6 @@ function getQuestionKindLabel(kind) {
   margin: 14px 0;
   border-collapse: collapse;
   background: #ffffff;
-}
-
-.reading-page.dark-mode .reading-html input[type="text"],
-.reading-page.dark-mode .reading-html textarea,
-.reading-page.dark-mode .reading-html select,
-.reading-page.dark-mode .practice-nav select,
-.reading-page.dark-mode .practice-nav input[type="text"] {
-  border-color: var(--reading-line);
-  background: var(--reading-panel-alt);
-  color: var(--reading-text);
-}
-
-.reading-page.dark-mode .reading-html table {
-  background: var(--reading-panel);
 }
 
 .reading-html th,
@@ -3491,12 +3383,6 @@ function getQuestionKindLabel(kind) {
   box-shadow: var(--reading-shadow);
 }
 
-.reading-page.dark-mode .reading-html .group,
-.reading-page.dark-mode #results.review-panel {
-  border-color: var(--reading-line);
-  background: var(--reading-panel);
-}
-
 .reading-explanation-panel {
   display: grid;
   gap: 10px;
@@ -3574,15 +3460,6 @@ function getQuestionKindLabel(kind) {
   transition: border-color 0.16s ease, background 0.16s ease;
 }
 
-.reading-page.dark-mode .reading-html .paragraph-dropzone,
-.reading-page.dark-mode .reading-html .match-dropzone,
-.reading-page.dark-mode .reading-html [data-vue-dropzone="true"],
-.reading-page.dark-mode .dragdrop-slot {
-  border-color: #475569 !important;
-  background: #1e293b !important;
-  color: var(--reading-muted);
-}
-
 .reading-html .paragraph-dropzone.drag-over,
 .reading-html .match-dropzone.drag-over,
 .reading-html .drag-over,
@@ -3590,15 +3467,6 @@ function getQuestionKindLabel(kind) {
   border-color: var(--reading-dropzone-drag-border);
   background: var(--reading-dropzone-drag-bg);
   box-shadow: none;
-}
-
-.reading-page.dark-mode .reading-html .paragraph-dropzone.drag-over,
-.reading-page.dark-mode .reading-html .match-dropzone.drag-over,
-.reading-page.dark-mode .reading-html [data-vue-dropzone="true"].drag-over,
-.reading-page.dark-mode .reading-html .drag-over,
-.reading-page.dark-mode .dragdrop-slot.drag-over {
-  border-color: #3b82f6 !important;
-  background: #1e3a8a !important;
 }
 
 .reading-html .paragraph-dropzone.dropzone-filled,
@@ -3627,12 +3495,12 @@ function getQuestionKindLabel(kind) {
 
 .reading-html .drop-target-summary.drag-over {
   border-bottom-color: var(--reading-accent);
-  background: #dbeafe;
+  background: var(--atlas-accent-soft);
 }
 
 .reading-html .drop-target-summary.dropzone-filled {
   border-bottom-color: var(--reading-success);
-  background: #dcfce7;
+  background: var(--atlas-accent-soft);
   color: var(--reading-success);
   font-weight: 600;
 }
@@ -3646,19 +3514,6 @@ function getQuestionKindLabel(kind) {
   color: inherit;
   cursor: grab;
   font-weight: inherit;
-}
-
-.reading-page.dark-mode .reading-html .drop-target-summary {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.reading-page.dark-mode .reading-html .drop-target-summary.drag-over {
-  background: #1e3a8a;
-}
-
-.reading-page.dark-mode .reading-html .drop-target-summary.dropzone-filled {
-  background: #064e3b;
-  color: #dcfce7;
 }
 
 .reading-html .paragraph-label {
@@ -3688,21 +3543,10 @@ function getQuestionKindLabel(kind) {
   box-shadow: none;
 }
 
-.reading-page.dark-mode .reading-html .pool-items.drag-over,
-.reading-page.dark-mode .reading-html .options-pool.drag-over,
-.reading-page.dark-mode .reading-html .headings-pool.drag-over {
-  border-color: var(--reading-dropzone-drag-border);
-  background: var(--reading-pool-drag-bg);
-}
-
 .reading-html .dropped-items:empty::after {
   content: "拖到这里";
   color: #7b8a98;
   font-size: 0.82rem;
-}
-
-.reading-page.dark-mode .reading-html .dropped-items:empty::after {
-  color: #94a3b8;
 }
 
 .reading-html .drag-item,
@@ -3724,14 +3568,6 @@ function getQuestionKindLabel(kind) {
   user-select: none;
 }
 
-.reading-page.dark-mode .reading-html .drag-item,
-.reading-page.dark-mode .dragdrop-chip,
-.reading-page.dark-mode .reading-html .dragdrop-chip {
-  border-color: #64748b !important;
-  background: #334155 !important;
-  color: #f8fafc;
-}
-
 .reading-html .drag-item.dragging,
 .dragdrop-chip.dragging,
 .reading-html .dragging {
@@ -3746,22 +3582,9 @@ function getQuestionKindLabel(kind) {
   background: var(--reading-drag-item-bg);
 }
 
-.reading-page.dark-mode .reading-html .drag-item--assigned,
-.reading-page.dark-mode .dragdrop-chip-assigned,
-.reading-page.dark-mode .reading-html .dragdrop-chip-assigned {
-  border-color: #64748b !important;
-  background: #334155 !important;
-}
-
 .dragdrop-option.selected {
-  border-color: #93c5fd;
-  background: #dbeafe;
-}
-
-.reading-page.dark-mode .dragdrop-option.selected {
-  border-color: #3b82f6;
-  background: #1e40af;
-  color: #ffffff;
+  border-color: var(--atlas-accent-ring);
+  background: var(--atlas-accent-soft);
 }
 
 .dragdrop-option:disabled:not(.selected) {
@@ -3786,11 +3609,6 @@ function getQuestionKindLabel(kind) {
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.06);
   overflow: visible;
-}
-
-.reading-page.dark-mode .practice-nav {
-  border-color: var(--reading-line);
-  background: var(--reading-panel);
 }
 
 .practice-nav .title {
@@ -3847,43 +3665,23 @@ function getQuestionKindLabel(kind) {
 }
 
 .practice-nav .q-item.answered {
-  border-color: #93c5fd;
-  background: #dbeafe;
+  border-color: var(--atlas-accent-ring);
+  background: var(--atlas-accent-soft);
 }
 
 .practice-nav .q-item.active,
 .practice-nav .q-item.answered.active {
   border-color: var(--reading-accent);
-  background: #eff6ff;
+  background: var(--atlas-accent-soft);
   color: var(--reading-accent);
   font-weight: 600;
-}
-
-.reading-page.dark-mode .practice-nav .q-item.answered {
-  border-color: #3b82f6;
-  background: #1e3a8a;
-  color: #ffffff;
-}
-
-.reading-page.dark-mode .practice-nav .q-item.active,
-.reading-page.dark-mode .practice-nav .q-item.answered.active {
-  border-color: var(--reading-accent);
-  background: #1e40af;
-  color: #ffffff;
 }
 
 .practice-nav .q-item.correct,
 .practice-nav .q-item.review-correct {
   border-color: var(--reading-success);
-  background: #dcfce7;
+  background: var(--atlas-accent-soft);
   color: var(--reading-success);
-}
-
-.reading-page.dark-mode .practice-nav .q-item.correct,
-.reading-page.dark-mode .practice-nav .q-item.review-correct {
-  border-color: var(--reading-success);
-  background: #064e3b;
-  color: #dcfce7;
 }
 
 .practice-nav .q-item.incorrect,
@@ -3891,13 +3689,6 @@ function getQuestionKindLabel(kind) {
   border-color: var(--reading-danger);
   background: #fee2e2;
   color: var(--reading-danger);
-}
-
-.reading-page.dark-mode .practice-nav .q-item.incorrect,
-.reading-page.dark-mode .practice-nav .q-item.review-incorrect {
-  border-color: var(--reading-danger);
-  background: #7f1d1d;
-  color: #fee2e2;
 }
 
 .practice-nav .q-item.marked::after {
@@ -3908,7 +3699,7 @@ function getQuestionKindLabel(kind) {
   height: 10px;
   border: 2px solid #ffffff;
   border-radius: 999px;
-  background: #f59e0b;
+  background: var(--atlas-warning);
   content: "";
 }
 
@@ -3928,16 +3719,10 @@ function getQuestionKindLabel(kind) {
   line-height: 1;
 }
 
-.reading-page.dark-mode .mark-question-button {
-  border-color: #475569;
-  background: rgba(15, 23, 42, 0.82);
-  color: var(--reading-muted);
-}
-
 .mark-question-button.active {
-  border-color: #f59e0b;
-  background: #fffbeb;
-  color: #b45309;
+  border-color: var(--atlas-warning);
+  background: var(--atlas-accent-soft);
+  color: var(--atlas-accent-strong);
 }
 
 .mark-question-button:disabled {
@@ -3954,9 +3739,9 @@ function getQuestionKindLabel(kind) {
   min-height: 36px;
   align-items: center;
   padding: 4px 10px;
-  border: 1px solid #bfdbfe;
+  border: 1px solid var(--atlas-accent-ring);
   border-radius: 8px;
-  background: #eff6ff;
+  background: var(--atlas-accent-soft);
 }
 
 .suite-progress-mini span {
@@ -3977,10 +3762,10 @@ function getQuestionKindLabel(kind) {
   bottom: calc(100% + 8px);
   margin: 0;
   padding: 8px 10px;
-  border: 1px solid #fde68a;
+  border: 1px solid var(--atlas-accent-ring);
   border-radius: 8px;
-  background: #fffbeb;
-  color: #92400e;
+  background: var(--atlas-accent-soft);
+  color: var(--atlas-accent-strong);
   font-size: 0.86rem;
   box-shadow: var(--reading-shadow);
 }
@@ -4177,9 +3962,9 @@ function getQuestionKindLabel(kind) {
   padding: 10px 14px;
   border: 0;
   border-radius: 999px;
-  background: linear-gradient(135deg, #0f766e, #0e7490);
-  color: #ffffff;
-  box-shadow: 0 12px 24px rgba(15, 118, 110, 0.28);
+  background: var(--color-brand-gradient);
+  color: var(--color-white);
+  box-shadow: var(--atlas-shadow-high);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
@@ -4197,10 +3982,10 @@ function getQuestionKindLabel(kind) {
   overflow: hidden;
   width: min(380px, calc(100vw - 24px));
   max-height: min(68vh, 560px);
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 22px 40px rgba(15, 23, 42, 0.24);
+  border: 1px solid var(--atlas-rim);
+  border-radius: var(--atlas-radius-sm);
+  background: var(--atlas-glass-elevated);
+  box-shadow: var(--atlas-shadow-high);
   touch-action: none;
 }
 
@@ -4214,12 +3999,12 @@ function getQuestionKindLabel(kind) {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
-  background: #f8fafc;
+  border-bottom: 1px solid var(--atlas-line);
+  background: var(--atlas-glass-pressed);
 }
 
 .reading-coach-panel__title {
-  color: #0f172a;
+  color: var(--atlas-ink);
   font-size: 13px;
   font-weight: 700;
 }
@@ -4227,7 +4012,7 @@ function getQuestionKindLabel(kind) {
 .reading-coach-panel__close {
   border: 0;
   background: transparent;
-  color: #334155;
+  color: var(--atlas-ink-soft);
   cursor: pointer;
   font-size: 16px;
 }
@@ -4236,13 +4021,13 @@ function getQuestionKindLabel(kind) {
 .reading-coach-panel__error {
   min-height: 22px;
   padding: 8px 12px 0;
-  color: #0f766e;
+  color: var(--atlas-accent-alt);
   font-size: 12px;
 }
 
 .reading-coach-panel__status.is-error,
 .reading-coach-panel__error {
-  color: #b91c1c;
+  color: var(--atlas-danger);
 }
 
 .reading-coach-panel__messages {
@@ -4251,7 +4036,7 @@ function getQuestionKindLabel(kind) {
   gap: 8px;
   overflow: auto;
   padding: 10px 12px;
-  background: #f8fafc;
+  background: var(--atlas-glass-pressed);
 }
 
 .reading-coach-msg {
@@ -4265,20 +4050,20 @@ function getQuestionKindLabel(kind) {
 
 .reading-coach-msg.user {
   justify-self: end;
-  background: #dbeafe;
-  color: #1e3a8a;
+  background: var(--atlas-accent-soft);
+  color: var(--atlas-accent-strong);
 }
 
 .reading-coach-msg.assistant {
   justify-self: start;
-  border: 1px solid rgba(148, 163, 184, 0.26);
-  background: #ffffff;
-  color: #0f172a;
+  border: 1px solid var(--atlas-line);
+  background: var(--atlas-glass-elevated);
+  color: var(--atlas-ink);
 }
 
 .reading-coach-msg.error {
-  border-color: rgba(185, 28, 28, 0.35);
-  color: #991b1b;
+  border-color: var(--atlas-danger);
+  color: var(--atlas-danger);
 }
 
 .reading-coach-panel__actions,
@@ -4291,10 +4076,10 @@ function getQuestionKindLabel(kind) {
 
 .reading-coach-chip {
   padding: 4px 8px;
-  border: 1px solid rgba(15, 118, 110, 0.28);
+  border: 1px solid var(--atlas-accent-ring);
   border-radius: 999px;
-  background: #ffffff;
-  color: #0f766e;
+  background: var(--atlas-glass-elevated);
+  color: var(--atlas-accent-strong);
   cursor: pointer;
   font: inherit;
   font-size: 11px;
@@ -4310,12 +4095,12 @@ function getQuestionKindLabel(kind) {
   display: grid;
   gap: 6px;
   padding: 8px 12px 0;
-  color: #334155;
+  color: var(--atlas-ink-soft);
   font-size: 12px;
 }
 
 .reading-coach-panel__selected-context span {
-  color: #64748b;
+  color: var(--atlas-ink-faint);
   font-size: 11px;
   font-weight: 700;
 }
@@ -4331,16 +4116,18 @@ function getQuestionKindLabel(kind) {
   display: flex;
   gap: 8px;
   padding: 10px 12px 12px;
-  border-top: 1px solid rgba(148, 163, 184, 0.3);
-  background: #ffffff;
+  border-top: 1px solid var(--atlas-line);
+  background: var(--atlas-glass-elevated);
 }
 
 .reading-coach-panel__input {
   flex: 1;
   min-width: 0;
   padding: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.45);
-  border-radius: 8px;
+  border: 1px solid var(--atlas-line);
+  border-radius: var(--atlas-radius-sm);
+  background: var(--atlas-glass-pressed);
+  color: var(--atlas-ink);
   font: inherit;
   font-size: 12px;
 }
@@ -4348,9 +4135,9 @@ function getQuestionKindLabel(kind) {
 .reading-coach-panel__send {
   padding: 0 12px;
   border: 0;
-  border-radius: 8px;
-  background: #0f766e;
-  color: #ffffff;
+  border-radius: var(--atlas-radius-sm);
+  background: var(--color-brand-gradient);
+  color: var(--color-white);
   cursor: pointer;
   font: inherit;
   font-size: 12px;

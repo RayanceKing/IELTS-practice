@@ -5,7 +5,7 @@ import { upsertAnnotation, listAnnotations, deleteAnnotation } from '@/api/enric
 const NOTES_STORAGE_PREFIX = 'practice_reading_notes_'
 const SUITE_AUTO_ADVANCE_STORAGE_KEY = 'suite_auto_advance_after_submit'
 const FONT_KEY = 'reading_font_size'
-const THEME_KEY = 'reading_theme_mode'
+const LEGACY_THEME_KEY = 'reading_theme_mode'
 
 export const readingFontSizeOptions = [
   { value: 'normal', label: 'A' },
@@ -13,19 +13,12 @@ export const readingFontSizeOptions = [
   { value: 'xlarge', label: 'A', style: { fontSize: '1.25rem' } }
 ] as const
 
-export const readingThemeModeOptions = [
-  { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' }
-] as const
-
 export type ReadingFontSize = (typeof readingFontSizeOptions)[number]['value']
-export type ReadingThemeMode = (typeof readingThemeModeOptions)[number]['value']
 
 type AssetLike = { id?: string | null } | null | undefined
 
 type ReadingUiPreferencesOptions = {
   assetSource: () => AssetLike
-  onThemeChanged?: () => void
 }
 
 function takeLocal(key: string): string | null {
@@ -42,10 +35,6 @@ function isFontSize(value: string | null | undefined): value is ReadingFontSize 
   return readingFontSizeOptions.some((option) => option.value === value)
 }
 
-function isThemeMode(value: string | null | undefined): value is ReadingThemeMode {
-  return readingThemeModeOptions.some((option) => option.value === value)
-}
-
 /**
  * Reading chrome preferences — Tauri SQLite settings only.
  * One-shot migrates leftover localStorage keys into frontend-preferences.
@@ -59,7 +48,6 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
   const notesText = ref('')
   const notesError = ref('')
   const readingFontSize = ref<ReadingFontSize>('normal')
-  const readingThemeMode = ref<ReadingThemeMode>('light')
   const suiteAutoAdvance = ref(true)
   let suppressNotesPersist = false
   let notesLoadSequence = 0
@@ -68,8 +56,7 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
   let notesReturnFocus: HTMLElement | null = null
 
   const readingPageClassList = computed(() => ({
-    [`font-${readingFontSize.value}`]: true,
-    'dark-mode': readingThemeMode.value === 'dark'
+    [`font-${readingFontSize.value}`]: true
   }))
   const readingPageStyle = computed(() => ({
     '--reading-font-scale': readingFontSize.value === 'xlarge'
@@ -96,8 +83,8 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
     await preferences.hydrate()
     const storedFont = migrateLocalIfMissing(FONT_KEY)
     if (isFontSize(storedFont)) readingFontSize.value = storedFont
-    const storedTheme = migrateLocalIfMissing(THEME_KEY)
-    if (isThemeMode(storedTheme)) readingThemeMode.value = storedTheme
+    takeLocal(LEGACY_THEME_KEY)
+    preferences.set(LEGACY_THEME_KEY, '')
     const storedSuiteFlow = migrateLocalIfMissing(SUITE_AUTO_ADVANCE_STORAGE_KEY)
     if (storedSuiteFlow === 'true' || storedSuiteFlow === 'false') {
       suiteAutoAdvance.value = storedSuiteFlow === 'true'
@@ -160,14 +147,6 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
     if (!isFontSize(value)) return
     readingFontSize.value = value
     preferences.set(FONT_KEY, value)
-  }
-
-  function selectReadingTheme(value: string) {
-    if (!isThemeMode(value)) return
-    readingThemeMode.value = value
-    options.onThemeChanged?.()
-    void nextTick(() => options.onThemeChanged?.())
-    preferences.set(THEME_KEY, value)
   }
 
   function setSuiteAutoAdvance(value: unknown) {
@@ -279,7 +258,6 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
     notesText,
     notesError,
     readingFontSize,
-    readingThemeMode,
     suiteAutoAdvance,
     readingPageClassList,
     readingPageStyle,
@@ -289,7 +267,6 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
     handleNotesDialogKeydown,
     closeFloatingPanels,
     selectReadingFont,
-    selectReadingTheme,
     setSuiteAutoAdvance,
     loadReadingNotes,
     clearReadingNotesDraft

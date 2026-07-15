@@ -1,5 +1,5 @@
 /* Writing-specific component helpers.
- * Tokens come from styles/design-system; do not redeclare brand colors here.
+ * Tokens come from styles/opensource-skin.css; do not redeclare visual values.
  */
 
 .writing-surface {

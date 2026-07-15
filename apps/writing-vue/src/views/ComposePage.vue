@@ -671,16 +671,32 @@ async function submitEssay() {
 
 <style scoped>
 .compose-page {
+  --compose-accent: var(--atlas-accent);
+  --compose-accent-alt: var(--atlas-accent-alt);
+  --compose-ink: var(--atlas-ink);
+  --compose-muted: var(--atlas-ink-soft);
+  --compose-glass: var(--atlas-glass);
+  --compose-glass-strong: var(--atlas-glass-elevated);
+  --compose-rim: var(--atlas-rim);
+  --compose-line: var(--atlas-line);
+  position: relative;
+  isolation: isolate;
   display: grid;
-  gap: 20px;
-  animation: rise-in 0.45s var(--ease-smooth);
+  gap: 18px;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 2px;
+  color: var(--compose-ink);
+  background: transparent;
+  border-radius: 32px;
+  animation: compose-enter 360ms var(--lg-easing-spring, cubic-bezier(0.22, 1, 0.36, 1)) both;
 }
 
 .practice-shell {
   display: grid;
-  grid-template-columns: minmax(360px, 0.84fr) minmax(0, 1.16fr);
-  gap: 24px;
-  min-height: calc(100vh - 176px);
+  grid-template-columns: minmax(350px, 0.86fr) minmax(0, 1.14fr);
+  gap: 18px;
+  min-height: calc(100vh - 168px);
 }
 
 .draft-banner {
@@ -688,9 +704,17 @@ async function submitEssay() {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  padding: 18px 20px;
-  background: var(--lg-bg-elevated);
-  border: 1px solid var(--lg-border-color);
+  padding: 17px 20px;
+  border: 1px solid var(--compose-rim);
+  border-radius: 20px;
+  background:
+    linear-gradient(115deg, rgba(255, 255, 255, 0.82), rgba(244, 245, 255, 0.54)),
+    linear-gradient(135deg, rgba(102, 126, 234, 0.12), rgba(118, 75, 162, 0.08));
+  box-shadow:
+    0 16px 30px rgba(73, 79, 139, 0.1),
+    inset 0 1px 1px rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
 }
 
 .draft-banner__copy {
@@ -700,11 +724,12 @@ async function submitEssay() {
 }
 
 .draft-banner__copy strong {
-  font-size: 18px;
+  font-size: 17px;
+  letter-spacing: -0.01em;
 }
 
 .draft-banner__copy p {
-  color: var(--text-secondary);
+  color: var(--compose-muted);
   font-size: 14px;
 }
 
@@ -716,10 +741,23 @@ async function submitEssay() {
 .practice-left {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  max-height: calc(100vh - 176px);
+  gap: 20px;
+  min-width: 0;
+  max-height: calc(100vh - 168px);
   padding: 24px;
   overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--compose-rim);
+  border-radius: 26px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.74), rgba(246, 247, 255, 0.42)),
+    var(--compose-glass);
+  box-shadow:
+    0 20px 42px rgba(54, 63, 117, 0.1),
+    inset 0 1px 1px rgba(255, 255, 255, 0.9),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(28px) saturate(155%);
+  -webkit-backdrop-filter: blur(28px) saturate(155%);
 }
 
 .compose-hero {
@@ -733,20 +771,24 @@ async function submitEssay() {
 }
 
 .compose-hero__copy h1 {
-  font-size: clamp(1.8rem, 2.8vw, 2.7rem);
-  line-height: 1.05;
-  letter-spacing: -0.02em;
+  font-size: clamp(1.85rem, 2.8vw, 2.55rem);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  color: var(--compose-ink);
 }
 
 .hero-chip {
   display: inline-flex;
   width: fit-content;
-  padding: 6px 12px;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 11px;
   border-radius: 999px;
-  background: rgba(201, 100, 66, 0.14);
-  color: var(--primary-color);
-  font-size: 12px;
-  font-weight: 600;
+  border: 1px solid rgba(102, 126, 234, 0.22);
+  background: rgba(102, 126, 234, 0.12);
+  color: var(--compose-accent);
+  font-size: 11px;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -754,64 +796,69 @@ async function submitEssay() {
 .compose-hero__metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 9px;
 }
 
 .hero-metric {
   display: grid;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.52);
-  border: 1px solid var(--lg-border-color);
+  gap: 5px;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--compose-line);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.46);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
 }
 
 .hero-metric__label {
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--compose-muted);
 }
 
 .hero-metric strong {
-  font-size: 20px;
-  font-weight: 600;
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 700;
   line-height: 1.1;
+  color: var(--compose-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compose-config-top {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 13px;
 }
 
 .config-toolbar {
-  display: flex;
-  flex-wrap: nowrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px;
-  border: 1px solid var(--lg-border-color);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.52);
-  backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
-  -webkit-backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+  padding: 9px;
+  border: 1px solid var(--compose-line);
+  border-radius: 19px;
+  background: rgba(248, 249, 255, 0.58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
 }
 
 .config-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
+  min-width: 0;
+  padding: 3px;
 }
 
 .config-label {
+  padding-left: 7px;
   font-size: 10px;
-  font-weight: 600;
-  color: var(--text-muted);
+  font-weight: 700;
+  color: var(--compose-muted);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding-left: 6px;
 }
 
 .field-row {
@@ -821,9 +868,9 @@ async function submitEssay() {
 }
 
 .select-sm {
-  min-height: 38px;
-  padding: 6px 12px;
-  border-radius: 999px;
+  min-height: 40px;
+  padding: 7px 12px;
+  border-radius: 12px;
 }
 
 .prompt-display {
@@ -838,18 +885,17 @@ async function submitEssay() {
 
 .topic-input {
   min-height: 132px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.72);
+  border-radius: 18px;
 }
 
 .topic-status {
-  padding: 16px;
-  color: var(--text-muted);
+  padding: 15px;
+  color: var(--compose-muted);
   font-size: 14px;
   text-align: center;
-  background: rgba(255, 255, 255, 0.4);
-  border-radius: var(--radius-md);
-  border: 1px dashed var(--lg-border-color);
+  background: rgba(255, 255, 255, 0.36);
+  border: 1px dashed var(--compose-line);
+  border-radius: 16px;
 }
 
 .topic-status--error {
@@ -864,10 +910,11 @@ async function submitEssay() {
 }
 
 .prompt-content {
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.48);
   padding: 18px;
-  border-radius: 16px;
-  border: 1px solid var(--lg-border-color);
+  border: 1px solid var(--compose-line);
+  border-radius: 18px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
 }
 
 .prompt-meta {
@@ -889,14 +936,15 @@ async function submitEssay() {
 }
 
 .inline-select {
-  min-width: 138px;
+  min-width: 0;
+  width: 100%;
 }
 
 .prompt-text {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 500;
-  line-height: 1.8;
-  color: var(--text-primary);
+  line-height: 1.75;
+  color: var(--compose-ink);
   white-space: pre-wrap;
 }
 
@@ -905,11 +953,26 @@ async function submitEssay() {
 }
 
 .compose-editor {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  min-height: calc(100vh - 176px);
+  gap: 15px;
+  min-width: 0;
+  min-height: calc(100vh - 168px);
   padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--compose-rim);
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 95% 0%, rgba(102, 126, 234, 0.18), transparent 24rem),
+    radial-gradient(circle at 0% 100%, rgba(118, 75, 162, 0.12), transparent 26rem),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(247, 248, 255, 0.54));
+  box-shadow:
+    0 20px 42px rgba(54, 63, 117, 0.11),
+    inset 0 1px 1px rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
 }
 
 .compose-editor::before,
@@ -918,7 +981,7 @@ async function submitEssay() {
   position: absolute;
   border-radius: 999px;
   pointer-events: none;
-  z-index: -1;
+  z-index: 0;
 }
 
 .compose-editor::before {
@@ -926,7 +989,7 @@ async function submitEssay() {
   height: 320px;
   top: -120px;
   right: -90px;
-  background: radial-gradient(circle, rgba(167, 186, 255, 0.28), transparent 70%);
+  background: radial-gradient(circle, rgba(102, 126, 234, 0.2), transparent 70%);
 }
 
 .compose-editor::after {
@@ -934,7 +997,12 @@ async function submitEssay() {
   height: 260px;
   left: -70px;
   bottom: -110px;
-  background: radial-gradient(circle, rgba(216, 233, 183, 0.34), transparent 70%);
+  background: radial-gradient(circle, rgba(118, 75, 162, 0.13), transparent 70%);
+}
+
+.compose-editor > * {
+  position: relative;
+  z-index: 1;
 }
 
 .editor-head {
@@ -942,9 +1010,9 @@ async function submitEssay() {
   justify-content: space-between;
   align-items: center;
   gap: 18px;
-  padding: 18px 22px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.36);
-  background: rgba(255, 255, 255, 0.24);
+  padding: 21px 24px 16px;
+  border-bottom: 1px solid rgba(126, 135, 183, 0.16);
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .editor-head__copy {
@@ -955,10 +1023,11 @@ async function submitEssay() {
 }
 
 .editor-head__copy h2 {
-  font-size: clamp(1.65rem, 2.5vw, 2.2rem);
+  font-size: clamp(1.6rem, 2.5vw, 2.15rem);
   line-height: 1;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.035em;
   margin: 0;
+  color: var(--compose-ink);
 }
 
 .editor-head__stats {
@@ -972,10 +1041,14 @@ async function submitEssay() {
   flex-direction: row;
   align-items: center;
   gap: 10px;
-  padding: 8px 13px;
+  min-height: 42px;
+  padding: 7px 13px;
   border-radius: var(--radius-full);
-  background: rgba(255, 255, 255, 0.62);
-  border: 1px solid var(--lg-border-color);
+  background: rgba(255, 255, 255, 0.66);
+  border: 1px solid var(--compose-rim);
+  box-shadow:
+    0 6px 15px rgba(54, 63, 117, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
 }
 
 .word-badge span,
@@ -984,13 +1057,14 @@ async function submitEssay() {
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--compose-muted);
 }
 
 .word-badge strong {
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1;
   letter-spacing: -0.02em;
+  color: var(--compose-accent);
 }
 
 .word-badge.is-warning strong,
@@ -1002,23 +1076,27 @@ async function submitEssay() {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 0 22px;
+  padding: 0 24px;
 }
 
 .essay-input {
   flex: 1;
-  min-height: 460px;
-  width: calc(100% - 36px);
-  max-width: calc(100% - 36px);
+  min-height: 450px;
+  width: calc(100% - 40px);
+  max-width: calc(100% - 40px);
   box-sizing: border-box;
-  margin: 0 18px;
-  padding: 26px 24px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.76);
+  margin: 0 20px;
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.84);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.76);
   font-size: 18px;
   line-height: 1.8;
-  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.75);
+  color: var(--compose-ink);
+  box-shadow:
+    0 10px 26px rgba(54, 63, 117, 0.06),
+    inset 0 1px 2px rgba(255, 255, 255, 0.88);
+  resize: vertical;
 }
 
 .editor-footer {
@@ -1026,13 +1104,15 @@ async function submitEssay() {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  width: calc(100% - 36px);
-  max-width: calc(100% - 36px);
+  width: calc(100% - 40px);
+  max-width: calc(100% - 40px);
   box-sizing: border-box;
-  margin: 0 18px 18px;
-  padding: 14px 14px 6px;
-  border-radius: 999px;
-  background: linear-gradient(to top, rgba(255, 255, 255, 0.46), rgba(255, 255, 255, 0.2));
+  margin: 0 20px 20px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 18px;
+  background: rgba(247, 248, 255, 0.48);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
 }
 
 .word-status {
@@ -1043,7 +1123,7 @@ async function submitEssay() {
 
 .word-status strong {
   font-size: 16px;
-  color: var(--text-primary);
+  color: var(--compose-ink);
 }
 
 .editor-actions {
@@ -1058,53 +1138,79 @@ async function submitEssay() {
 
 .toggle-group {
   display: flex;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid rgba(126, 135, 183, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: inset 0 1px 2px rgba(54, 63, 117, 0.08);
 }
 
 .toggle-item {
   display: inline-flex;
+  flex: 1 1 0;
   align-items: center;
   justify-content: center;
-  padding: 7px 13px;
-  border: 1px solid var(--lg-border-color);
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.45);
-  color: var(--text-secondary);
+  background: transparent;
+  color: var(--compose-muted);
   cursor: pointer;
-  transition: all var(--duration-fast) ease;
+  transition:
+    color var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
+    background var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
+    box-shadow var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
+    transform var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease);
 }
 
 .toggle-item:hover {
-  background: rgba(255, 255, 255, 0.72);
+  color: var(--compose-ink);
+  background: rgba(255, 255, 255, 0.54);
 }
 
 .toggle-item.active {
-  background: linear-gradient(135deg, var(--color-terracotta), var(--color-coral));
-  border-color: rgba(201, 100, 66, 0.4);
-  color: var(--color-ivory);
-  box-shadow: 0 6px 16px rgba(201, 100, 66, 0.28);
+  background: var(--color-brand-gradient, linear-gradient(135deg, #667eea, #764ba2));
+  border-color: rgba(255, 255, 255, 0.42);
+  color: #fff;
+  box-shadow:
+    0 6px 16px rgba(102, 126, 234, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 .toggle-item__label {
+  overflow: hidden;
   font-size: 13px;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dialog-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(15, 23, 42, 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
-  z-index: 20;
+  z-index: 30;
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
 }
 
 .dialog {
   max-width: 420px;
   width: 100%;
   overflow: visible;
+  padding: 25px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.24);
 }
 
 .dialog h3 {
@@ -1116,6 +1222,112 @@ async function submitEssay() {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 20px;
+}
+
+.compose-page :is(.textarea, .select) {
+  width: 100%;
+  color: var(--compose-ink);
+  border: 1px solid rgba(126, 135, 183, 0.24);
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.88),
+    0 4px 10px rgba(54, 63, 117, 0.035);
+  transition:
+    border-color var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
+    box-shadow var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
+    background var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease);
+}
+
+.compose-page :is(.textarea, .select)::placeholder {
+  color: var(--atlas-ink-soft);
+}
+
+.compose-page :is(.textarea, .select):focus {
+  outline: none;
+  border-color: rgba(102, 126, 234, 0.68);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    0 0 0 4px rgba(102, 126, 234, 0.14),
+    inset 0 1px 1px rgba(255, 255, 255, 0.94);
+}
+
+.compose-page .inline-message {
+  padding: 11px 13px;
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  border-radius: 13px;
+  background: rgba(102, 126, 234, 0.09);
+  color: var(--compose-ink);
+  font-size: 14px;
+}
+
+.compose-page .inline-message-error {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(254, 242, 242, 0.72);
+  color: #b91c1c;
+}
+
+.compose-page .btn {
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 7px 16px rgba(54, 63, 117, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
+  transition:
+    transform var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
+    box-shadow var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease),
+    background var(--lg-duration-normal, 220ms) var(--lg-easing-spring, ease);
+}
+
+.compose-page .btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 12px 22px rgba(54, 63, 117, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+}
+
+.compose-page :is(.btn-brand, .btn-primary) {
+  border-color: rgba(255, 255, 255, 0.38);
+  background: var(--color-brand-gradient, linear-gradient(135deg, #667eea, #764ba2));
+  color: #fff;
+  box-shadow:
+    0 10px 22px rgba(102, 126, 234, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.26);
+}
+
+.compose-page :is(.btn-secondary, .btn-warm-sand) {
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--compose-ink);
+}
+
+.compose-page .btn:active:not(:disabled),
+.toggle-item:active {
+  transform: scale(0.98);
+}
+
+.compose-page .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  box-shadow: none;
+}
+
+.compose-page :is(.btn, .toggle-item, .textarea, .select):focus-visible {
+  outline: 3px solid rgba(102, 126, 234, 0.52);
+  outline-offset: 3px;
+}
+
+@keyframes compose-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.992);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @media (max-width: 1240px) {
@@ -1130,8 +1342,7 @@ async function submitEssay() {
   }
 
   .config-toolbar {
-    flex-direction: column;
-    align-items: stretch;
+    grid-template-columns: 1fr;
     border-radius: 18px;
   }
 }
@@ -1154,6 +1365,10 @@ async function submitEssay() {
     border-radius: 16px;
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .editor-actions {
+    justify-content: flex-end;
   }
 }
 
@@ -1180,8 +1395,40 @@ async function submitEssay() {
   }
 
   .essay-input {
+    width: calc(100% - 24px);
+    max-width: calc(100% - 24px);
     margin: 0 12px;
     padding: 18px;
+  }
+
+  .editor-footer {
+    width: calc(100% - 24px);
+    max-width: calc(100% - 24px);
+    margin: 0 12px 12px;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .compose-page :is(.practice-left, .compose-editor, .draft-banner, .dialog) {
+    background: #fff;
+    border-color: #475569;
+  }
+
+  .compose-page :is(.textarea, .select, .toggle-group) {
+    background: #fff;
+    border-color: #475569;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compose-page,
+  .compose-page *,
+  .compose-page *::before,
+  .compose-page *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
   }
 }
 </style>

@@ -12,27 +12,7 @@
           </svg>
         </span>
         <span class="hero-brand-text">IELTS Practice</span>
-        <span class="hero-brand-subtitle">项目仅授权ZYZ Reading Walks 提供分发，小红书号：276752989</span>
-        <a
-          href="https://www.xiaohongshu.com/user/profile/5b4d76744eacab058489e72f"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="hero-badge hero-badge--cta hero-badge--redbook"
-          aria-label="小红书主页"
-        >
-          小红书
-        </a>
-        <a
-          href="https://github.com/sallowayma-git/IELTS-practice"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-hover-link"
-          aria-label="GitHub Repository"
-        >
-          <svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
-          </svg>
-        </a>
+        <span class="hero-brand-subtitle">Rust + SQLite 原生桌面练习链路</span>
       </h1>
     </div>
 
@@ -216,94 +196,6 @@
     />
 
 
-    <div id="theme-switcher-modal" class="theme-modal" :class="{ show: themeSwitcherOpen }">
-      <div class="theme-modal-content">
-        <div class="theme-modal-header">
-          <h3 class="heading-serif">🎨 主题切换</h3>
-          <button
-            class="theme-modal-close"
-            type="button"
-            data-index-action="hide-theme-switcher"
-            aria-label="关闭"
-            @click="themeSwitcherOpen = false"
-          >
-            ×
-          </button>
-        </div>
-        <div class="theme-modal-body">
-          <div class="theme-options-viewport" role="presentation">
-            <div class="theme-options theme-options-glass">
-              <div
-                v-for="theme in backgroundThemes"
-                :key="theme.value"
-                class="theme-card"
-              >
-                <div :class="['theme-card-bg', theme.previewClass]"></div>
-                <div class="theme-card-glass-layer">
-                  <div class="theme-card-header">
-                    <h4 class="theme-card-title">{{ theme.title }}</h4>
-                    <div class="theme-card-subtitle">
-                      <span>{{ theme.subtitle }}</span>
-                    </div>
-                  </div>
-                  <div class="theme-card-footer">
-                    <span class="theme-card-tag">{{ theme.tag }}</span>
-                    <button
-                      class="theme-card-btn"
-                      type="button"
-                      data-index-action="switch-bg-theme"
-                      :data-action-value="theme.value"
-                      @click="applyBackgroundTheme(theme.value)"
-                    >
-                      应用
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div id="license-modal" :class="{ show: licenseModalVisible }">
-      <div class="lm-card">
-        <h2 class="lm-title">开源项目使用须知</h2>
-        <div class="lm-body">
-          <p>
-            感谢使用！本项目是免费软件，采用 <strong>GPL-3.0 License</strong> 发布。
-          </p>
-          <p class="lm-warning">
-            我们明确反对任何形式的倒卖、改名后二次分发、牟利、使用该项目商业引流等行为。
-          </p>
-          <p>
-            本项目的初衷是自由使用、学习与改进，而不是作为倒卖工具获取不正当收益。
-          </p>
-          <p>
-            腾讯文档：
-            <a
-              href="https://docs.qq.com/doc/DSXZhWUtqeVN0d1ZT"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="lm-warning"
-            >
-              问题反馈
-            </a>
-          </p>
-          <div class="lm-info-box">
-            <p>
-              任何分发、修改或再发布行为，都必须遵守 GPL-3.0 协议，包括<strong>公开源码、保留开源许可，并尊重用户的自由</strong>。
-            </p>
-          </div>
-        </div>
-        <div class="lm-footer">
-          <button class="lm-btn" type="button" data-index-action="accept-license" @click="acceptGplLicense">
-            我已了解
-          </button>
-        </div>
-      </div>
-    </div>
-
     <p v-if="localMessage" class="practice-local-message" role="status">{{ localMessage }}</p>
   </div>
 </template>
@@ -348,7 +240,6 @@ const {
 } = useReadingHistory()
 const { createReadingSuite } = useReadingSuite()
 const READING_BACKUP_STORAGE_KEY = 'practice_reading_archive_backups_v1'
-const LICENSE_STORAGE_KEY = 'hasSeenGplLicense'
 const MAX_READING_BACKUPS = 10
 const SUITE_FLOW_MODE_STORAGE_KEY = 'suite_flow_mode'
 const SUITE_FREQUENCY_SCOPE_STORAGE_KEY = 'suite_frequency_scope'
@@ -396,30 +287,6 @@ const practiceTrendRanges = [
   { value: 'recent20', label: '最近20次', limit: 20 }
 ]
 
-const backgroundThemes = [
-  {
-    value: 'misty-mountain',
-    title: '晨雾群山',
-    subtitle: '⛰️ Misty Mountain',
-    tag: '动态',
-    previewClass: 'theme-bg-misty'
-  },
-  {
-    value: 'teal-ocean',
-    title: '深海孤航',
-    subtitle: '⛵ Teal Ocean',
-    tag: '动态',
-    previewClass: 'theme-bg-ocean'
-  },
-  {
-    value: 'floral-bloom',
-    title: '落日雾花',
-    subtitle: '🌸 Floral Bloom',
-    tag: '静态',
-    previewClass: 'theme-bg-floral'
-  }
-]
-
 const practiceWidgetOptions = [
   {
     value: 'heatmap',
@@ -460,7 +327,6 @@ const suiteFrequencyOptions = [
 const customSuiteCategories = ['P1', 'P2', 'P3']
 
 const activeView = ref('overview')
-const licenseModalVisible = ref(false)
 const selectedCategory = ref('all')
 const selectedType = ref('all')
 const selectedHistoryType = ref('all')
@@ -474,7 +340,6 @@ const practiceSummaryExpanded = ref(true)
 const practiceTrendRange = ref('recent10')
 const activePracticeWidget = ref('heatmap')
 const practiceWidgetSelectorOpen = ref(false)
-const themeSwitcherOpen = ref(false)
 const clockOpen = ref(false)
 const clockNow = ref(new Date())
 let clockTimer = 0
@@ -676,7 +541,6 @@ onMounted(async () => {
   selectedSuiteFrequencyScope.value = suitePreference.frequencyScope
   syncViewFromRoute()
   loadReadingData()
-  initLicenseModal()
   updateLiquidIndicator()
   updateSegmentedIndicators()
   scheduleBrowsePositionRestore()
@@ -798,26 +662,6 @@ function openGlobalSettings(event) {
   event?.preventDefault?.()
   event?.stopImmediatePropagation?.()
   router.push({ name: 'Settings' }).catch(() => {})
-}
-
-function hasAcceptedLicense() {
-  return preferences.get(LICENSE_STORAGE_KEY, 'false') === 'true'
-}
-
-function initLicenseModal() {
-  if (hasAcceptedLicense()) return
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      licenseModalVisible.value = true
-    })
-  })
-}
-
-function acceptGplLicense(event) {
-  event?.preventDefault?.()
-  event?.stopImmediatePropagation?.()
-  preferences.set(LICENSE_STORAGE_KEY, 'true')
-  licenseModalVisible.value = false
 }
 
 function getRecordAssetKey(record) {
@@ -1749,10 +1593,10 @@ function formatDurationShort(durationSec) {
 }
 
 function getScoreColor(percentage) {
-  if (percentage >= 85) return '#16a34a'
-  if (percentage >= 70) return '#ca8a04'
-  if (percentage >= 55) return '#ea580c'
-  return '#dc2626'
+  if (percentage >= 85) return 'var(--atlas-success)'
+  if (percentage >= 70) return 'var(--atlas-accent)'
+  if (percentage >= 55) return 'var(--atlas-warning)'
+  return 'var(--atlas-danger)'
 }
 
 function normalizeQuestionKind(value) {
@@ -1839,21 +1683,6 @@ function clearPracticeCache() {
     }
   }
   showLocalMessage('阅读练习临时缓存已清除。')
-}
-
-function switchBackgroundTheme() {
-  themeSwitcherOpen.value = true
-}
-
-function applyBackgroundTheme(themeName) {
-  const nextTheme = backgroundThemes.some((theme) => theme.value === themeName)
-    ? themeName
-    : 'misty-mountain'
-  preferences.set('three_bg_theme', nextTheme)
-  window.dispatchEvent(new CustomEvent('shui-bg-theme-change', { detail: { theme: nextTheme } }))
-  themeSwitcherOpen.value = false
-  const label = backgroundThemes.find((theme) => theme.value === nextTheme)?.title || nextTheme
-  showLocalMessage(`主题已切换：${label}`)
 }
 
 function showLocalMessage(message) {
@@ -2144,9 +1973,9 @@ function updateSegmentedIndicators() {
   background-image: linear-gradient(135deg, rgba(252, 214, 172, 0.32), rgba(173, 228, 210, 0.28)), linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(250, 244, 236, 0.9));
   padding: var(--space-xl);
   border-radius: var(--border-radius-xl);
-  border: 1px solid rgba(232, 189, 145, 0.35);
+  border: 1px solid var(--atlas-rim);
   transition: all var(--transition-normal);
-  box-shadow: 0 18px 46px rgba(215, 180, 140, 0.2), 0 10px 28px rgba(53, 192, 161, 0.14);
+  box-shadow: var(--atlas-shadow);
   position: relative;
   overflow: hidden;
   backdrop-filter: blur(14px);
@@ -2159,7 +1988,7 @@ function updateSegmentedIndicators() {
   left: 0;
   right: 0;
   height: 4px;
-  background: linear-gradient(120deg, #f6b26b 0%, #35c0a1 100%);
+  background: var(--color-brand-gradient);
   opacity: 0.9;
 }
 
@@ -2394,7 +2223,7 @@ function updateSegmentedIndicators() {
   flex-direction: column;
   gap: var(--space-md);
   transition: all var(--transition-normal);
-  box-shadow: 0 18px 46px rgba(215, 180, 140, 0.2), 0 10px 28px rgba(53, 192, 161, 0.14);
+  box-shadow: var(--atlas-shadow);
   position: relative;
   backdrop-filter: blur(12px);
 }
@@ -2445,10 +2274,10 @@ function updateSegmentedIndicators() {
   opacity: 0.95;
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--border-radius-lg);
-  border: 1px solid rgba(232, 189, 145, 0.4);
-  background: linear-gradient(135deg, #f6b26b, #35c0a1);
-  color: #0f1416;
-  box-shadow: 0 8px 20px rgba(215, 180, 140, 0.14), 0 4px 10px rgba(53, 192, 161, 0.12);
+  border: 1px solid var(--atlas-rim);
+  background: var(--color-brand-gradient);
+  color: var(--color-white);
+  box-shadow: var(--atlas-shadow);
 }
 
 .exam-list-empty {
@@ -3186,9 +3015,9 @@ function updateSegmentedIndicators() {
 }
 
 .practice-library-open-source .category-card {
-  background: var(--bloom-surface);
-  background-image: var(--bloom-sheen), linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(250, 244, 236, 0.9));
-  border: 1px solid var(--bloom-border);
+  background: var(--atlas-glass);
+  background-image: var(--atlas-sheen);
+  border: 1px solid var(--atlas-rim);
   border-radius: var(--shui-radius-lg);
   box-shadow: 0 24px 50px rgba(15, 23, 42, 0.18);
   backdrop-filter: blur(24px);
@@ -3204,7 +3033,7 @@ function updateSegmentedIndicators() {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(145deg, rgba(255, 216, 155, 0.08), rgba(106, 204, 199, 0.08));
+  background: var(--atlas-accent-soft);
   pointer-events: none;
   mix-blend-mode: screen;
 }
@@ -3258,8 +3087,9 @@ function updateSegmentedIndicators() {
 
 .practice-library-open-source .hero-btn--warn,
 .practice-library-open-source .hero-panel .btn.btn-warning {
-  background-image: linear-gradient(135deg, rgba(255, 216, 155, 0.85), rgba(255, 216, 155, 1));
-  color: #3b1f00;
+  background-image: none;
+  background: var(--atlas-accent-soft);
+  color: var(--atlas-ink);
 }
 
 .practice-library-open-source .shui-glass-btn {
@@ -3436,17 +3266,15 @@ function updateSegmentedIndicators() {
 }
 
 .practice-library-open-source #browse-view .exam-item-action-btn[data-action="start"] {
-  background: linear-gradient(135deg, rgba(255, 216, 155, 0.3), rgba(106, 204, 199, 0.25));
-  border-color: rgba(255, 216, 155, 0.4);
-  color: #2d5a58;
+  background: var(--atlas-accent-soft);
+  border-color: var(--atlas-accent-ring);
+  color: var(--atlas-accent-strong);
 }
 
 .practice-library-open-source #browse-view .exam-item-action-btn[data-action="start"]:hover {
-  background: linear-gradient(135deg, rgba(255, 216, 155, 0.5), rgba(106, 204, 199, 0.4));
-  border-color: rgba(106, 204, 199, 0.5);
-  box-shadow:
-    0 8px 20px rgba(106, 204, 199, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 1);
+  background: var(--color-brand-soft-strong);
+  border-color: var(--atlas-accent);
+  box-shadow: var(--atlas-shadow);
 }
 
 .practice-library-open-source .hero-card {
@@ -3700,8 +3528,8 @@ function updateSegmentedIndicators() {
   flex: 1 1 0;
   min-width: 8px;
   border-radius: 999px 999px 4px 4px;
-  background: linear-gradient(180deg, rgba(106, 204, 199, 0.95), rgba(255, 216, 155, 0.78));
-  box-shadow: 0 8px 18px rgba(53, 192, 161, 0.16);
+  background: var(--color-brand-gradient);
+  box-shadow: var(--atlas-shadow);
 }
 
 .practice-library-open-source .practice-trend-options,
@@ -3725,7 +3553,7 @@ function updateSegmentedIndicators() {
 
 .practice-library-open-source .practice-trend-option.active,
 .practice-library-open-source .practice-custom-option.active {
-  background: linear-gradient(135deg, rgba(255, 216, 155, 0.72), rgba(106, 204, 199, 0.56));
+  background: var(--atlas-accent-soft);
 }
 
 .practice-library-open-source .practice-custom-card__header-actions {
@@ -3879,7 +3707,7 @@ function updateSegmentedIndicators() {
   width: max(8px, var(--radar-value));
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(255, 216, 155, 0.94), rgba(106, 204, 199, 0.86));
+  background: var(--color-brand-gradient);
 }
 
 .practice-library-open-source .practice-radar-summary {
@@ -3918,7 +3746,7 @@ function updateSegmentedIndicators() {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(255, 216, 155, 0.94), rgba(106, 204, 199, 0.86));
+  background: var(--color-brand-gradient);
   transition: width 0.28s ease;
 }
 

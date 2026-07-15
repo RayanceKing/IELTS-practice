@@ -1,4 +1,2 @@
-/* Design system entry: Atlas HeroUI/Shui is the single visual source of truth. */
-@import './tokens.css';
-@import './aliases.css';
+/* Legacy structural entrypoint. Brand tokens intentionally do not live here. */
 @import './base.css';

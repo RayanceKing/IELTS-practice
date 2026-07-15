@@ -25,6 +25,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 REPORT = ROOT / "developer/tests/e2e/reports/suite-practice-flow-report.json"
 READING_SCREENSHOT = ROOT / "developer/tests/e2e/reports/reading-practice-current.png"
+LIBRARY_SCREENSHOT = ROOT / "developer/tests/e2e/reports/library-current.png"
+SETTINGS_SCREENSHOT = ROOT / "developer/tests/e2e/reports/settings-current.png"
+HISTORY_SCREENSHOT = ROOT / "developer/tests/e2e/reports/history-current.png"
+COMPOSE_SCREENSHOT = ROOT / "developer/tests/e2e/reports/compose-current.png"
+TOPICS_SCREENSHOT = ROOT / "developer/tests/e2e/reports/topics-current.png"
 READING_P95_BUDGET_MS = 3000
 
 
@@ -141,9 +146,12 @@ def blocked(reason: str, missing: list[str]) -> int:
               "status": "blocked", "exitCode": 2, "target": "packaged-tauri-2",
               "reason": reason, "missingDependencies": missing,
               "checks": {"launch": "blocked", "vueRoutes": "blocked", "readingIpc": "blocked",
+                         "uiRouteVisuals": "blocked",
                          "bundledResources": "blocked", "readingView": "blocked",
                          "readingPerformance": "blocked", "notesDialog": "blocked",
                          "readingSubmitBoundary": "blocked",
+                         "backupPathBoundary": "blocked",
+                         "updaterBoundary": "blocked",
                          "sqliteRestart": "blocked"}}
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -236,6 +244,61 @@ def wait_for_reading_view(driver: Driver, timeout_seconds: int = 30):
     raise RuntimeError(f"Reading view did not become ready: {last}")
 
 
+def capture_route_visual(driver: Driver, route: str, selector: str, screenshot: Path) -> dict:
+    driver.script("location.hash = arguments[0]; return location.hash", [route])
+    wait_for_value(driver, f"""
+        const root = document.querySelector({selector!r});
+        const transitioning = document.querySelector('.page-enter-active, .page-enter-to, .page-leave-active, .page-leave-to');
+        return location.hash === {route!r}
+          && root
+          && root.getBoundingClientRect().width > 0
+          && root.getBoundingClientRect().height > 0
+          && !transitioning;
+    """)
+    # Vue out-in transitions can remove their classes one frame before the
+    # outgoing page is actually painted. Capture stable route pixels only.
+    time.sleep(0.45)
+    metrics = driver.script(f"""
+        const root = document.querySelector({selector!r});
+        const rect = root.getBoundingClientRect();
+        const offenders = Array.from(document.body.querySelectorAll('*'))
+          .map((element) => {{
+            const value = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            const className = typeof element.className === 'string'
+              ? element.className
+              : (element.className?.baseVal || '');
+            return {{
+              tag: element.tagName,
+              id: element.id || '',
+              className,
+              left: value.left,
+              right: value.right,
+              width: value.width,
+              display: style.display,
+              position: style.position
+            }};
+          }})
+          .filter((item) => item.display !== 'none' && item.width > 0 && (item.left < -2 || item.right > innerWidth + 2))
+          .sort((left, right) => Math.max(right.right - innerWidth, -right.left) - Math.max(left.right - innerWidth, -left.left))
+          .slice(0, 12);
+        return {{
+          width: rect.width,
+          height: rect.height,
+          scrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+          viewportWidth: innerWidth,
+          textLength: root.textContent.trim().length,
+          offenders
+        }};
+    """)
+    driver.screenshot(screenshot)
+    if not isinstance(metrics, dict) or metrics.get("width", 0) < 320 or metrics.get("height", 0) < 120:
+        raise RuntimeError(f"route {route} root is collapsed: {metrics}")
+    if metrics.get("scrollWidth", 0) > metrics.get("viewportWidth", 0) + 24:
+        raise RuntimeError(f"route {route} has unexpected horizontal overflow: {metrics}")
+    return {**metrics, "screenshot": str(screenshot.resolve())}
+
+
 def main() -> int:
     explicit_app = os.environ.get("TAURI_APP_BINARY")
     app_candidates = (ROOT / "target/release/ielts-practice-tauri.exe",
@@ -278,10 +341,28 @@ def main() -> int:
         driver.create(str(app.resolve()))
         checks["launch"] = "passed"
         wait_for_vue(driver)
-        for route in ("#/writing", "#/settings", "#/history", "#/"):
+        for route in ("#/writing", "#/topics", "#/settings", "#/history", "#/"):
             reached = driver.script("location.hash=arguments[0]; return location.hash === arguments[0]", [route])
             if not reached: raise RuntimeError(f"Vue hash route failed: {route}")
         checks["vueRoutes"] = "passed"
+        metadata["uiRouteVisuals"] = {
+            "library": capture_route_visual(
+                driver, "#/", "[data-practice-reading-home]", LIBRARY_SCREENSHOT
+            ),
+            "compose": capture_route_visual(
+                driver, "#/writing", ".compose-page", COMPOSE_SCREENSHOT
+            ),
+            "topics": capture_route_visual(
+                driver, "#/topics", ".topic-manage-page", TOPICS_SCREENSHOT
+            ),
+            "settings": capture_route_visual(
+                driver, "#/settings", "[data-writing-settings]", SETTINGS_SCREENSHOT
+            ),
+            "history": capture_route_visual(
+                driver, "#/history", ".history-page", HISTORY_SCREENSHOT
+            ),
+        }
+        checks["uiRouteVisuals"] = "passed"
         result = driver.script("return window.__TAURI_INTERNALS__ ? window.__TAURI_INTERNALS__.invoke('reading_list_assets') : null")
         assets = (result or {}).get("data") if isinstance(result, dict) else None
         if not assets: raise RuntimeError("Tauri IPC bridge unavailable or reading_list_assets returned empty")
@@ -402,6 +483,47 @@ def main() -> int:
         if isinstance(negative, dict) and negative.get("resolved") and (negative.get("value") or {}).get("ok"):
             raise RuntimeError("reading_submit_attempt accepted forbidden client payload/answerKey")
         checks["readingSubmitBoundary"] = "passed"
+        created_backup = driver.script(
+            "return window.__TAURI_INTERNALS__.invoke('create_backup', {appVersion: null})"
+        )
+        if not isinstance(created_backup, dict) or not created_backup.get("ok"):
+            raise RuntimeError(f"create_backup failed: {created_backup}")
+        backups = driver.script("return window.__TAURI_INTERNALS__.invoke('list_backups')")
+        backup_items = (backups or {}).get("data", []) if isinstance(backups, dict) else []
+        if not backup_items:
+            raise RuntimeError(f"list_backups returned no authorized grants: {backups}")
+        if any("path" in item or not item.get("grantId") for item in backup_items):
+            raise RuntimeError(f"list_backups leaked raw callable paths: {backup_items}")
+        preview = driver.script(
+            "return window.__TAURI_INTERNALS__.invoke('import_backup_path', {grantId: arguments[0], dryRun: true})",
+            [backup_items[0]["grantId"]],
+        )
+        if not isinstance(preview, dict) or not preview.get("ok"):
+            raise RuntimeError(f"authorized backup dry-run failed: {preview}")
+        forged_grant = driver.script(
+            "return window.__TAURI_INTERNALS__.invoke('import_backup_path', {grantId: 'forged-e2e-grant', dryRun: true})"
+        )
+        if not isinstance(forged_grant, dict) or forged_grant.get("ok"):
+            raise RuntimeError(f"forged backup path grant was not rejected: {forged_grant}")
+        forged_error = forged_grant.get("error") or {}
+        if forged_error.get("code") != "backup.path_grant":
+            raise RuntimeError(f"forged backup rejection used the wrong boundary: {forged_grant}")
+        checks["backupPathBoundary"] = "passed"
+        updater_status = driver.script(
+            "return window.__TAURI_INTERNALS__.invoke('check_for_updates')"
+        )
+        if not isinstance(updater_status, dict):
+            raise RuntimeError(f"check_for_updates returned an invalid status: {updater_status}")
+        if updater_status.get("configured") or updater_status.get("stage") != "unconfigured":
+            raise RuntimeError(f"development updater did not fail closed: {updater_status}")
+        restart_without_install = driver.script("""
+            return window.__TAURI_INTERNALS__.invoke('restart_after_update')
+              .then(value => ({resolved: true, value}))
+              .catch(error => ({resolved: false, error: String(error)}));
+        """)
+        if not isinstance(restart_without_install, dict) or restart_without_install.get("resolved"):
+            raise RuntimeError(f"restart_after_update bypassed install state: {restart_without_install}")
+        checks["updaterBoundary"] = "passed"
         marker = f"e2e-{int(time.time())}"
         saved = driver.script("return window.__TAURI_INTERNALS__.invoke('upsert_setting', {cmd:{namespace:'e2e', key:'restartMarker', value:arguments[0]}})", [marker])
         if not isinstance(saved, dict) or not saved.get("ok"): raise RuntimeError(f"upsert_setting failed: {saved}")

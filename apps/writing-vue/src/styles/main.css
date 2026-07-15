@@ -1,5 +1,6 @@
-/* App styles entrypoint.
- * Visual source of truth lives in ./design-system (Atlas HeroUI/Shui).
- * Keep this file free of competing :root brand tokens.
+/* Shipping style entrypoint.
+ * The base file supplies reset/layout primitives only. All visual tokens and
+ * product surfaces come from opensource-skin.css, the single Liquid Glass source.
  */
-@import './design-system/index.css';
+@import './design-system/base.css';
+@import './opensource-skin.css';

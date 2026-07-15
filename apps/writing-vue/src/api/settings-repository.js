@@ -79,8 +79,8 @@ export async function pickBackupImportPath() {
   return unwrapCommandResponse(response, 'pick_backup_import_path') || null
 }
 
-export async function importBackupPath(path, dryRun = true) {
-  const response = await invokeCommand('import_backup_path', { path, dryRun })
+export async function importBackupPath(grantId, dryRun = true) {
+  const response = await invokeCommand('import_backup_path', { grantId, dryRun })
   return { source: 'tauri', report: unwrapCommandResponse(response, 'import_backup_path') }
 }
 

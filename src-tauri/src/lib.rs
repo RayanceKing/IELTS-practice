@@ -34,9 +34,6 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
@@ -47,6 +44,8 @@ pub fn run() {
         .manage(paths)
         .manage(db)
         .manage(vault)
+        .manage(commands::backup::BackupImportGrants::default())
+        .manage(commands::diagnostics::UpdaterRuntimeState::default())
         .invoke_handler(tauri::generate_handler![
             commands::ai::ai_test_provider,
             commands::ai::ai_list_configs,
@@ -55,6 +54,8 @@ pub fn run() {
             commands::ai::ai_set_default_config,
             commands::diagnostics::get_app_info,
             commands::diagnostics::check_for_updates,
+            commands::diagnostics::install_update,
+            commands::diagnostics::restart_after_update,
             commands::diagnostics::get_startup_diagnostics,
             commands::diagnostics::get_performance_budgets,
             commands::diagnostics::get_query_plan_baselines,

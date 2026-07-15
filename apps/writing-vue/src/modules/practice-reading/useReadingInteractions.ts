@@ -54,7 +54,6 @@ interface AssignAnswerOptions {
 interface ReadingInteractionsOptions {
   payloadSource?: MaybeRefOrGetter<ReadingInteractionPayload | null | undefined>
   reviewModeSource?: MaybeRefOrGetter<boolean | undefined>
-  themeModeSource?: MaybeRefOrGetter<string | undefined>
   getAnswerValue: (questionId: string) => string
   getRawAnswer: (questionId: string) => ReadingAnswerValue
   assignAnswer: (questionId: string, value: ReadingAnswerValue, options?: AssignAnswerOptions) => void
@@ -87,10 +86,6 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
 
   function reviewMode() {
     return Boolean(resolveSource(options.reviewModeSource))
-  }
-
-  function themeMode() {
-    return String(resolveSource(options.themeModeSource) || '').trim()
   }
 
   function getInteraction(questionId: string): ReadingInteraction | null {
@@ -520,7 +515,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
     return holder
   }
 
-  function applyDropzoneThemeStyle(dropzone: HTMLElement | null | undefined) {
+  function clearDropzoneInlineStyle(dropzone: HTMLElement | null | undefined) {
     if (!dropzone) {
       return
     }
@@ -537,27 +532,26 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
       })
       return
     }
-    const isDark = themeMode() === 'dark'
-    dropzone.style.setProperty('--reading-dropzone-bg', isDark ? '#1e293b' : '#eff6ff')
-    dropzone.style.setProperty('--reading-dropzone-border', isDark ? '#475569' : '#93c5fd')
-    dropzone.style.backgroundColor = isDark ? '#1e293b' : ''
-    dropzone.style.borderColor = isDark ? '#475569' : ''
+    dropzone.style.removeProperty('--reading-dropzone-bg')
+    dropzone.style.removeProperty('--reading-dropzone-border')
+    dropzone.style.backgroundColor = ''
+    dropzone.style.borderColor = ''
     dropzone.querySelectorAll?.('.drag-item, .dragdrop-chip').forEach((chip) => {
       const element = chip as HTMLElement
-      element.style.backgroundColor = isDark ? '#334155' : ''
-      element.style.borderColor = isDark ? '#64748b' : ''
-      element.style.color = isDark ? '#f8fafc' : ''
+      element.style.backgroundColor = ''
+      element.style.borderColor = ''
+      element.style.color = ''
     })
   }
 
-  function syncDropzoneThemeStyles() {
+  function syncDropzoneVisualStyles() {
     if (typeof document === 'undefined') {
       return
     }
     document.querySelectorAll(
       '.paragraph-dropzone, .match-dropzone, .drop-target-summary, [data-vue-dropzone="true"]'
     ).forEach((dropzone) => {
-      applyDropzoneThemeStyle(dropzone as HTMLElement)
+      clearDropzoneInlineStyle(dropzone as HTMLElement)
     })
     syncDragSelectionDomState()
   }
@@ -619,7 +613,7 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
       dropzone.tabIndex = reviewMode() ? -1 : 0
       dropzone.setAttribute('role', 'button')
       dropzone.setAttribute('aria-label', `第 ${getDisplayLabel(questionId)} 题目标，当前${label || '未作答'}`)
-      applyDropzoneThemeStyle(dropzone)
+      clearDropzoneInlineStyle(dropzone)
 
       const holder = ensureDropzoneHolder(dropzone)
       if (!holder) {
@@ -698,8 +692,8 @@ export function useReadingInteractions(options: ReadingInteractionsOptions) {
     clearDragHoverState,
     findNativeDropzonesByQuestionId,
     ensureDropzoneHolder,
-    applyDropzoneThemeStyle,
-    syncDropzoneThemeStyles,
+    clearDropzoneInlineStyle,
+    syncDropzoneVisualStyles,
     syncDropzoneControl,
     setReadOnlyDomControls,
     aliasesFor,

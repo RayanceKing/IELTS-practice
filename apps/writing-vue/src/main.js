@@ -1,10 +1,9 @@
 import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import App from './App.vue'
-// Single design-system import chain: Atlas HeroUI/Shui tokens → aliases → base.
+import './assets/writing-design.css'
 import './styles/main.css'
 import './styles/a11y-performance.css'
-import './assets/writing-design.css'
 
 const SESSION_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,127}$/i
 

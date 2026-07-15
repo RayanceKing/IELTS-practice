@@ -29,24 +29,25 @@
       "dangerousDisableAssetCspModification": false,
       "freezePrototype": true,
       "capabilities": [
-        "main",
-        "library",
-        "data-transfer",
-        "updater",
-        "diagnostics"
+        "main"
       ]
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "allowDowngrades": false
+    },
     "resources": {
       "../assets/resource-pack/reading": "reading"
     },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/henry.w@example.net",
+      "icons/256x256.png",
+      "icons/icon.ico",
       "icons/icon.png"
     ],
     "category": "Education",
@@ -55,10 +56,11 @@
   },
   "plugins": {
     "updater": {
-      "active": false,
       "endpoints": [],
-      "dialog": true,
-      "pubkey": ""
+      "pubkey": "",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

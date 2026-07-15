@@ -333,8 +333,8 @@ function formatPassageScore(entry) {
   justify-content: center;
   min-height: 42px;
   border-radius: var(--radius-md);
-  color: #315f67;
-  background: rgba(106, 204, 199, 0.16);
+  color: var(--atlas-accent-strong);
+  background: var(--atlas-accent-soft);
   font-weight: 800;
 }
 

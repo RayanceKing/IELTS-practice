@@ -779,8 +779,8 @@ function writeNew() {
 }
 
 :deep(.highlight-spelling) {
-  background: rgba(201, 100, 66, 0.1);
-  border-bottom: 2px solid var(--color-terracotta);
+  background: var(--atlas-accent-soft);
+  border-bottom: 2px solid var(--atlas-accent);
 }
 
 :deep(.highlight-word_choice) {

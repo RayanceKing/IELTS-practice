@@ -62,6 +62,45 @@ def check_tauri_contract() -> dict[str, Any]:
         failures.append("frontendDist must be ../dist/writing")
     if not str(build.get("beforeBuildCommand") or "").startswith("npm --prefix apps/writing-vue"):
         failures.append("beforeBuildCommand must build apps/writing-vue")
+    capabilities = ((config.get("app") or {}).get("security") or {}).get("capabilities")
+    if capabilities != ["main"]:
+        failures.append("shipping window must only receive the main capability")
+
+    capability_dir = ROOT / "src-tauri/capabilities"
+    capability_files = sorted(path.name for path in capability_dir.glob("*.json"))
+    if capability_files != ["main.json"]:
+        failures.append(f"unexpected capability files: {capability_files}")
+
+    bundle = config.get("bundle") or {}
+    if bundle.get("createUpdaterArtifacts") is not False:
+        failures.append("base config must disable updater artifacts; release overlay enables them")
+    if ((bundle.get("windows") or {}).get("allowDowngrades")) is not False:
+        failures.append("Windows installers must reject version downgrades")
+    for icon in bundle.get("icon") or []:
+        if not (ROOT / "src-tauri" / icon).is_file():
+            failures.append(f"bundle icon does not exist: {icon}")
+
+    updater = (config.get("plugins") or {}).get("updater") or {}
+    if set(updater).difference({"endpoints", "pubkey", "windows"}):
+        failures.append("updater config contains non-Tauri fields")
+    if updater.get("endpoints") or updater.get("pubkey"):
+        failures.append("base updater config must be unconfigured; release overlay injects public inputs")
+
+    cargo_toml = (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8")
+    rust_shell = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+    for plugin in ("tauri-plugin-fs", "tauri-plugin-shell", "tauri-plugin-process"):
+        if plugin in cargo_toml:
+            failures.append(f"unused privileged plugin dependency remains: {plugin}")
+    for plugin in ("tauri_plugin_fs", "tauri_plugin_shell", "tauri_plugin_process"):
+        if plugin in rust_shell:
+            failures.append(f"unused privileged plugin registration remains: {plugin}")
+    diagnostics = (ROOT / "src-tauri/src/commands/diagnostics.rs").read_text(encoding="utf-8")
+    for command in ("install_update", "restart_after_update"):
+        if command not in diagnostics or command not in rust_shell:
+            failures.append(f"native updater command is not registered: {command}")
+    evaluating_page = (ROOT / "apps/writing-vue/src/views/EvaluatingPage.vue").read_text(encoding="utf-8")
+    if "Math.random" in evaluating_page:
+        failures.append("evaluation progress animation must not use random timing")
     serialized = json.dumps(config).lower()
     for retired in ("electron", "fastify", "file://"):
         if retired in serialized:
@@ -70,7 +109,7 @@ def check_tauri_contract() -> dict[str, Any]:
     return {
         "name": "Tauri shipping contract",
         "status": "fail" if failures else "pass",
-        "detail": failures or "Vue frontendDist and Tauri-only host contract verified",
+        "detail": failures or "Tauri-only host, least privilege, and release-overlay contract verified",
     }
 
 
@@ -111,6 +150,10 @@ def main() -> int:
         run_command(
             "Reading mode flow core",
             ["node", "developer/tests/js/readingModeFlowCore.test.mjs"],
+        ),
+        run_command(
+            "Phase 10 release contract",
+            [sys.executable, "developer/tests/ci/release_contract_test.py"],
         ),
         run_command("Vue production build", ["npm.cmd", "--prefix", "apps/writing-vue", "run", "build"]),
         run_command("Rust workspace check", ["cargo", "check", "--workspace", "--locked"]),

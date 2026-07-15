@@ -1,10 +1,17 @@
 <template>
-  <div class="app-shell">
+  <div class="app-shell atlas-source-ui">
     <a class="a11y-skip-link" href="#app-main-content">跳到主要内容</a>
     <div id="a11y-status-live" class="a11y-status-live" role="status" aria-live="polite" aria-atomic="true"></div>
     <ShuiBackground />
     <NavBar v-if="showShellNav" />
-    <main id="app-main-content" :class="['app-main', { 'app-main--frameless': !showShellNav }]" tabindex="-1">
+    <main
+      id="app-main-content"
+      :class="['app-main', {
+        'app-main--frameless': !showShellNav,
+        'app-main--library-shell': isLibraryRoute
+      }]"
+      tabindex="-1"
+    >
       <router-view v-slot="{ Component }">
         <transition v-if="showRouteTransition" name="page" mode="out-in">
           <component :is="Component" :key="routeViewKey" />
@@ -27,7 +34,8 @@ const framelessRouteNames = new Set([
   'PracticeReadingSuite',
   'PracticeReadingReview'
 ])
-const showShellNav = computed(() => !framelessRouteNames.has(route.name))
+const isLibraryRoute = computed(() => route.name === 'PracticeLibrary')
+const showShellNav = computed(() => !framelessRouteNames.has(route.name) && !isLibraryRoute.value)
 const prefersReducedMotion = computed(() => {
   if (typeof window === 'undefined' || !window.matchMedia) return false
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -57,6 +65,11 @@ const routeViewKey = computed(() => route.path || String(route.name || route.ful
 }
 
 .app-main--frameless {
+  width: 100%;
+  padding: 0;
+}
+
+.app-main--library-shell {
   width: 100%;
   padding: 0;
 }

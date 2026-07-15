@@ -2,7 +2,8 @@
   <div class="topic-manage-page">
     <div class="page-header">
       <div class="header-content">
-        <h2 class="page-title heading-serif">Question <em>Bank</em> <span class="count-badge" v-if="displayCount > 0">{{ displayCount }}</span></h2>
+        <span class="topic-eyebrow">Question bank</span>
+        <h2 class="page-title heading-serif">写作题库 <span class="count-badge" v-if="displayCount > 0">{{ displayCount }}</span></h2>
       </div>
       <div class="header-actions">
         <button class="btn btn-warm-sand" @click="showImportDialog = true">
@@ -1114,9 +1115,9 @@ onBeforeUnmount(() => {
 }
 
 .inline-message-success {
-  background: #ecfdf5;
-  color: #166534;
-  border: 1px solid #bbf7d0;
+  background: var(--atlas-accent-soft);
+  color: var(--atlas-accent-strong);
+  border: 1px solid var(--atlas-accent-ring);
 }
 
 .inline-message-error {
@@ -1155,13 +1156,13 @@ onBeforeUnmount(() => {
 }
 
 .import-preview {
-  background: #f0fdf4;
-  color: #15803d;
+  background: var(--atlas-accent-soft);
+  color: var(--atlas-accent-strong);
   padding: 12px;
   border-radius: 8px;
   text-align: center;
   margin-bottom: 16px;
-  border: 1px solid #bbf7d0;
+  border: 1px solid var(--atlas-accent-ring);
 }
 
 .loading-state, .empty-state {
@@ -1555,13 +1556,13 @@ onBeforeUnmount(() => {
 }
 
 .topic-manage-page .badge.task1 {
-  background: rgba(209, 233, 172, 0.52);
-  color: #384d1e;
+  background: var(--atlas-accent-soft);
+  color: var(--atlas-accent-alt);
 }
 
 .topic-manage-page .badge.task2 {
-  background: rgba(186, 187, 255, 0.44);
-  color: #393b8e;
+  background: var(--color-brand-soft-strong);
+  color: var(--atlas-accent-strong);
 }
 
 .topic-manage-page .category-badge {
@@ -1572,7 +1573,7 @@ onBeforeUnmount(() => {
 }
 
 .topic-manage-page .difficulty {
-  color: #c07d2f;
+  color: var(--atlas-warning);
   letter-spacing: 1px;
 }
 
@@ -1640,15 +1641,15 @@ onBeforeUnmount(() => {
 }
 
 .topic-manage-page .error-banner {
-  color: #8d2a2a;
-  background: rgba(245, 211, 211, 0.72);
-  border: 1px solid rgba(181, 51, 51, 0.26);
+  color: var(--atlas-danger);
+  background: var(--color-error-bg);
+  border: 1px solid var(--atlas-danger);
 }
 
 .topic-manage-page .import-preview {
-  color: #215f2f;
-  background: rgba(203, 243, 205, 0.58);
-  border: 1px solid rgba(83, 120, 93, 0.28);
+  color: var(--atlas-accent-strong);
+  background: var(--atlas-accent-soft);
+  border: 1px solid var(--atlas-accent-ring);
 }
 
 @media (max-width: 980px) {

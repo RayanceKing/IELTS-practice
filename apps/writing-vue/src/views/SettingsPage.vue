@@ -63,7 +63,7 @@
 
       <section class="hero-panel hero-section system-management-panel">
         <h3 class="heading-serif">系统与外观</h3>
-        <p class="hero-panel__muted">主题、缓存、引导与题库工具。</p>
+        <p class="hero-panel__muted">统一 Liquid Glass 视觉、缓存、引导与题库工具。</p>
         <div class="hero-settings-actions">
           <button class="btn btn-warning hero-btn hero-btn--warn" id="clear-cache-btn" type="button" @click="clearAppCache">
             清除缓存
@@ -71,9 +71,7 @@
           <button class="btn btn-warning hero-btn hero-btn--warn" id="load-library-btn" type="button" @click="openWritingTopicLibrary">
             加载题库
           </button>
-          <button class="btn btn-warning hero-btn hero-btn--warn" id="theme-switcher-btn-entry" type="button" @click="switchBackgroundTheme">
-            主题切换
-          </button>
+          <p class="visual-system-note" role="status">Liquid Glass 视觉已统一</p>
           <button class="btn btn-warning hero-btn hero-btn--warn" id="show-onboarding-btn" type="button" @click="startOnboardingTour">
             显示引导
           </button>
@@ -436,7 +434,7 @@
           </div>
           <div v-if="!nativeBackups.length" class="settings-empty">暂无完整备份文件。可先点「备份全部数据」。</div>
           <div v-else class="settings-list">
-            <div v-for="backup in nativeBackups" :key="backup.path" class="settings-list__row">
+            <div v-for="backup in nativeBackups" :key="backup.grantId" class="settings-list__row">
               <div class="settings-list__main">
                 <div class="settings-list__title">
                   <strong>{{ backup.name }}</strong>
@@ -444,7 +442,7 @@
                 </div>
                 <div class="settings-list__meta">
                   <span>{{ formatBytes(backup.sizeBytes || backup.size_bytes || 0) }}</span>
-                  <span class="settings-path-clip">{{ backup.path }}</span>
+                  <span class="settings-path-clip">{{ backup.displayPath }}</span>
                 </div>
               </div>
               <div class="settings-actions">
@@ -576,72 +574,44 @@
       </div>
     </div>
 
-    <div v-if="updateDialogOpen" class="dialog-overlay" role="dialog" aria-modal="true" @click.self="updateDialogOpen = false">
+    <div v-if="updateDialogOpen" class="dialog-overlay" role="dialog" aria-modal="true" @click.self="closeUpdateDialog">
       <div class="dialog card">
         <h3>应用更新</h3>
-        <p>{{ updateStatus.message }}</p>
+        <p aria-live="polite">{{ updateStatus.message }}</p>
         <p>当前版本：{{ updateStatus.currentVersion || appVersion }}</p>
         <p v-if="updateStatus.latestVersion">最新版本：{{ updateStatus.latestVersion }}</p>
+        <p v-if="updateStatus.body">{{ updateStatus.body }}</p>
+        <progress
+          v-if="updateInstalling"
+          class="update-progress"
+          :value="updateProgressPercent ?? undefined"
+          :max="updateProgressPercent == null ? undefined : 100"
+          aria-label="更新下载进度"
+        />
+        <p v-if="updateInstalling && updateProgressPercent != null">{{ updateProgressPercent }}%</p>
         <div class="dialog-actions">
-          <button class="btn btn-warm-sand" type="button" @click="updateDialogOpen = false">关闭</button>
-          <button class="btn btn-brand" type="button" :disabled="updateChecking || !updateStatus.configured" @click="checkUpdates">
+          <button class="btn btn-warm-sand" type="button" :disabled="updateInstalling || updateRestarting" @click="closeUpdateDialog">关闭</button>
+          <button class="btn btn-brand" type="button" :disabled="updateChecking || updateInstalling || updateRestarting" @click="checkUpdates">
             {{ updateChecking ? '检查中...' : '重新检查' }}
           </button>
-        </div>
-      </div>
-    </div>
-
-    <div
-      id="theme-switcher-modal"
-      class="theme-modal"
-      :class="{ show: themeSwitcherOpen }"
-      @click.self="hideThemeSwitcher"
-    >
-      <div class="theme-modal-content">
-        <div class="theme-modal-header">
-          <h3 class="heading-serif">🎨 主题切换</h3>
           <button
-            class="theme-modal-close"
+            v-if="updateStatus.updateAvailable && !updateStatus.requiresRestart"
+            class="btn btn-brand"
             type="button"
-            data-index-action="hide-theme-switcher"
-            aria-label="关闭"
-            @click="hideThemeSwitcher"
+            :disabled="updateChecking || updateInstalling"
+            @click="installAvailableUpdate"
           >
-            ×
+            {{ updateInstalling ? '安装中...' : '下载并安装' }}
           </button>
-        </div>
-        <div class="theme-modal-body">
-          <div class="theme-options-viewport" role="presentation">
-            <div class="theme-options-glass">
-              <div
-                v-for="theme in backgroundThemes"
-                :key="theme.value"
-                class="theme-card"
-              >
-                <div :class="['theme-card-bg', theme.previewClass]"></div>
-                <div class="theme-card-glass-layer">
-                  <div class="theme-card-header">
-                    <h4 class="theme-card-title">{{ theme.title }}</h4>
-                    <div class="theme-card-subtitle">
-                      <span>{{ theme.subtitle }}</span>
-                    </div>
-                  </div>
-                  <div class="theme-card-footer">
-                    <span class="theme-card-tag">{{ theme.tag }}</span>
-                    <button
-                      class="theme-card-btn"
-                      type="button"
-                      data-index-action="switch-bg-theme"
-                      :data-action-value="theme.value"
-                      @click="applyBackgroundTheme(theme.value)"
-                    >
-                      应用
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <button
+            v-if="updateStatus.requiresRestart"
+            class="btn btn-brand"
+            type="button"
+            :disabled="updateRestarting"
+            @click="restartAfterUpdate"
+          >
+            {{ updateRestarting ? '正在重启...' : '重启完成更新' }}
+          </button>
         </div>
       </div>
     </div>
@@ -682,6 +652,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
+import { Channel } from '@tauri-apps/api/core'
 import { settings, essays, configs, prompts, topics } from '@/api/client.js'
 import { listSettings, upsertSetting, createBackup, listBackups, pickBackupImportPath, importBackupPath } from '@/api/settings-repository.js'
 import { invokeCommand } from '@/api/tauri-bridge.js'
@@ -769,12 +740,28 @@ const promptLoading = ref(false)
 const settingsImportInput = ref(null)
 const settingsBackupListOpen = ref(false)
 const settingsBackups = ref([])
-const themeSwitcherOpen = ref(false)
 const onboardingOpen = ref(false)
 const onboardingStep = ref(0)
 const updateDialogOpen = ref(false)
 const updateChecking = ref(false)
-const updateStatus = reactive({ configured: false, updateAvailable: false, currentVersion: '', latestVersion: null, message: '尚未检查更新。' })
+const updateInstalling = ref(false)
+const updateRestarting = ref(false)
+const updateProgress = reactive({ downloadedBytes: 0, contentLength: null, stage: 'idle' })
+const updateProgressPercent = computed(() => {
+  if (!updateProgress.contentLength) return null
+  return Math.min(100, Math.round((updateProgress.downloadedBytes / updateProgress.contentLength) * 100))
+})
+const updateStatus = reactive({
+  configured: false,
+  updateAvailable: false,
+  installed: false,
+  requiresRestart: false,
+  currentVersion: '',
+  latestVersion: null,
+  body: null,
+  stage: 'idle',
+  message: '尚未检查更新。'
+})
 const onboardingSteps = [
   { title: '选择练习', body: '从阅读或写作题库开始练习，进度统一保存在本机 SQLite。' },
   { title: '配置 AI', body: '在 API 配置中添加供应商密钥；密钥由系统安全存储保管。' },
@@ -827,30 +814,6 @@ const temperatureModes = [
     task1: null,
     task2: null,
     desc: '兼容旧设置并允许分别配置两个任务'
-  }
-]
-
-const backgroundThemes = [
-  {
-    value: 'misty-mountain',
-    title: '晨雾群山',
-    subtitle: '⛰️ Misty Mountain',
-    tag: '动态',
-    previewClass: 'theme-bg-misty'
-  },
-  {
-    value: 'teal-ocean',
-    title: '深海孤航',
-    subtitle: '⛵ Teal Ocean',
-    tag: '动态',
-    previewClass: 'theme-bg-ocean'
-  },
-  {
-    value: 'floral-bloom',
-    title: '落日雾花',
-    subtitle: '🌸 Floral Bloom',
-    tag: '静态',
-    previewClass: 'theme-bg-floral'
   }
 ]
 
@@ -1447,9 +1410,9 @@ async function executeConfirmAction() {
         `写作设置快照已恢复（局部，不含 API Key）：${result.settingsCount} 项设置，${result.promptCount} 个提示词，${result.apiConfigCount || 0} 个 API 元数据。`
       )
     } else if (kind === 'restore-full-backup') {
-      const path = String(payload?.path || '').trim()
-      if (!path) throw new Error('缺少备份路径')
-      await applyFullBackupRestore(path)
+      const grantId = String(payload?.grantId || '').trim()
+      if (!grantId) throw new Error('缺少备份文件授权')
+      await applyFullBackupRestore(grantId)
     }
     closeConfirmDialog()
   } catch (error) {
@@ -1474,12 +1437,7 @@ function setGlobalMessage(type, message) {
 }
 
 function handleSettingsKeydown(event) {
-  if (event?.key !== 'Escape') return
-  if (themeSwitcherOpen.value) {
-    hideThemeSwitcher()
-  } else if (settingsDetailOpen.value) {
-    hideSettingsDetail()
-  }
+  if (event?.key === 'Escape' && settingsDetailOpen.value) hideSettingsDetail()
 }
 
 function downloadJsonFile(filename, payload) {
@@ -1512,26 +1470,6 @@ function clearAppCache() {
     }
   })
   setGlobalMessage('success', `缓存已清除：${removed} 项。`)
-}
-
-function switchBackgroundTheme() {
-  themeSwitcherOpen.value = true
-}
-
-function hideThemeSwitcher() {
-  themeSwitcherOpen.value = false
-}
-
-async function applyBackgroundTheme(themeName) {
-  const nextTheme = backgroundThemes.some((theme) => theme.value === themeName)
-    ? themeName
-    : 'misty-mountain'
-  await upsertSetting('ui', 'background_theme', nextTheme)
-  document.documentElement.dataset.backgroundTheme = nextTheme
-  window.dispatchEvent(new CustomEvent('shui-bg-theme-change', { detail: { theme: nextTheme } }))
-  themeSwitcherOpen.value = false
-  const label = backgroundThemes.find((theme) => theme.value === nextTheme)?.title || nextTheme
-  setGlobalMessage('success', `主题已切换：${label}`)
 }
 
 async function startOnboardingTour(event) {
@@ -1567,14 +1505,40 @@ async function checkUpdates() {
   }
 }
 
-async function loadBackgroundTheme() {
-  const result = await listSettings('ui')
-  const entry = result.items.find((item) => item.key === 'background_theme')
-  if (!entry) return
-  const value = typeof entry.value === 'string' ? entry.value.replace(/^"|"$/g, '') : entry.value
-  if (backgroundThemes.some((theme) => theme.value === value)) {
-    document.documentElement.dataset.backgroundTheme = value
-    window.dispatchEvent(new CustomEvent('shui-bg-theme-change', { detail: { theme: value } }))
+function closeUpdateDialog() {
+  if (updateInstalling.value || updateRestarting.value) return
+  updateDialogOpen.value = false
+}
+
+async function installAvailableUpdate() {
+  updateInstalling.value = true
+  updateProgress.downloadedBytes = 0
+  updateProgress.contentLength = null
+  updateProgress.stage = 'checking'
+  const onEvent = new Channel()
+  onEvent.onmessage = (event) => {
+    updateProgress.downloadedBytes = Number(event?.downloadedBytes || 0)
+    updateProgress.contentLength = event?.contentLength == null ? null : Number(event.contentLength)
+    updateProgress.stage = String(event?.stage || 'downloading')
+    if (event?.message) updateStatus.message = event.message
+  }
+  try {
+    Object.assign(updateStatus, await invokeCommand('install_update', { onEvent }))
+  } catch (error) {
+    updateStatus.stage = 'failed'
+    updateStatus.message = `更新安装失败，当前版本保持不变：${error?.message || error}`
+  } finally {
+    updateInstalling.value = false
+  }
+}
+
+async function restartAfterUpdate() {
+  updateRestarting.value = true
+  try {
+    await invokeCommand('restart_after_update')
+  } catch (error) {
+    updateStatus.message = `重启失败：${error?.message || error}`
+    updateRestarting.value = false
   }
 }
 
@@ -1810,12 +1774,12 @@ async function restoreFullAppBackup() {
   if (backupBusy.value) return
   backupBusy.value = true
   try {
-    const path = await pickBackupImportPath()
-    if (!path) {
+    const grant = await pickBackupImportPath()
+    if (!grant) {
       setGlobalMessage('info', '已取消选择备份文件。')
       return
     }
-    await previewAndConfirmRestore(path)
+    await previewAndConfirmRestore(grant)
   } catch (error) {
     setGlobalMessage('error', '选择备份失败: ' + (error?.message || error))
   } finally {
@@ -1824,15 +1788,21 @@ async function restoreFullAppBackup() {
 }
 
 async function restoreNativeBackupFile(backup) {
-  const path = String(backup?.path || '').trim()
-  if (!path) return
-  await previewAndConfirmRestore(path)
+  const grantId = String(backup?.grantId || '').trim()
+  if (!grantId) return
+  await previewAndConfirmRestore({
+    grantId,
+    displayPath: String(backup?.displayPath || backup?.name || '应用备份')
+  })
 }
 
-async function previewAndConfirmRestore(path) {
+async function previewAndConfirmRestore(grant) {
+  const grantId = String(grant?.grantId || '').trim()
+  const displayPath = String(grant?.displayPath || '已授权备份文件')
+  if (!grantId) throw new Error('缺少备份文件授权')
   backupBusy.value = true
   try {
-    const { report } = await importBackupPath(path, true)
+    const { report } = await importBackupPath(grantId, true)
     if (!report?.ok && (report?.errors || []).length) {
       throw new Error((report.errors || []).join('; ') || '备份校验失败')
     }
@@ -1842,7 +1812,7 @@ async function previewAndConfirmRestore(path) {
       section: 'data',
       title: '恢复完整备份',
       message: [
-        `文件：${path}`,
+        `文件：${displayPath}`,
         `预检通过，将合并写入练习 ${report?.attemptImported ?? report?.attempt_imported ?? 0} 条、`,
         `设置 ${report?.settingsImported ?? report?.settings_imported ?? 0} 项`,
         secretRefs > 0 ? `、密钥引用元数据 ${secretRefs} 条` : '',
@@ -1850,7 +1820,7 @@ async function previewAndConfirmRestore(path) {
       ].join(''),
       confirmLabel: '确认恢复',
       danger: true,
-      payload: { path }
+      payload: { grantId }
     })
   } catch (error) {
     setGlobalMessage('error', '备份预检失败: ' + (error?.message || error))
@@ -1859,8 +1829,8 @@ async function previewAndConfirmRestore(path) {
   }
 }
 
-async function applyFullBackupRestore(path) {
-  const { report } = await importBackupPath(path, false)
+async function applyFullBackupRestore(grantId) {
+  const { report } = await importBackupPath(grantId, false)
   if (!report?.ok) {
     throw new Error((report?.errors || []).join('; ') || '恢复失败')
   }
@@ -1990,7 +1960,6 @@ onMounted(async () => {
   loadTopicLibraryStats()
   loadApiConfigs()
   loadPromptList()
-  loadBackgroundTheme().catch((error) => setGlobalMessage('error', `主题加载失败：${error.message}`))
   settingsBackups.value = readSettingsBackups()
   document.addEventListener('keydown', handleSettingsKeydown)
 })
@@ -3611,7 +3580,7 @@ onBeforeUnmount(() => {
 
 .settings-page#settings-view .settings-system-info__status,
 .settings-page#settings-view .system-info-status {
-  color: #10b981;
+  color: var(--atlas-accent-alt);
 }
 
 .settings-page#settings-view .settings-credit {
@@ -3645,211 +3614,6 @@ onBeforeUnmount(() => {
   height: 1px;
   opacity: 0;
   pointer-events: none;
-}
-
-.settings-page#settings-view .theme-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(15, 23, 42, 0.65);
-  opacity: 0;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  transition: opacity 0.3s ease;
-}
-
-.settings-page#settings-view .theme-modal.show {
-  display: flex;
-  opacity: 1;
-}
-
-.settings-page#settings-view .theme-modal-content {
-  width: min(900px, 92vw);
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.25),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.5);
-  transform: scale(0.95);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.settings-page#settings-view .theme-modal.show .theme-modal-content {
-  transform: scale(1);
-}
-
-.settings-page#settings-view .theme-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 24px 32px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.settings-page#settings-view .theme-modal-header h3 {
-  margin: 0;
-  color: var(--bauhaus-text-main);
-  font-size: 1.75rem;
-  font-weight: 800;
-}
-
-.settings-page#settings-view .theme-modal-close {
-  width: 36px;
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(15, 23, 42, 0.06);
-  color: #64748b;
-  cursor: pointer;
-  font-size: 20px;
-  transition:
-    transform 0.2s ease,
-    background 0.2s ease,
-    color 0.2s ease;
-}
-
-.settings-page#settings-view .theme-modal-close:hover {
-  color: #0f172a;
-  background: rgba(15, 23, 42, 0.12);
-  transform: rotate(90deg);
-}
-
-.settings-page#settings-view .theme-modal-body {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.settings-page#settings-view .theme-options-viewport {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px;
-}
-
-.settings-page#settings-view .theme-options-glass {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 24px;
-}
-
-.settings-page#settings-view .theme-card {
-  min-height: 260px;
-  position: relative;
-  overflow: hidden;
-  border-radius: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.48);
-  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.16);
-  isolation: isolate;
-}
-
-.settings-page#settings-view .theme-card-bg {
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-}
-
-.settings-page#settings-view .theme-bg-misty {
-  background:
-    linear-gradient(160deg, rgba(14, 165, 233, 0.38), rgba(148, 163, 184, 0.22)),
-    radial-gradient(circle at 24% 28%, rgba(255, 255, 255, 0.72), transparent 38%),
-    linear-gradient(135deg, #dbeafe 0%, #e0f2fe 44%, #94a3b8 100%);
-}
-
-.settings-page#settings-view .theme-bg-ocean {
-  background:
-    linear-gradient(150deg, rgba(15, 118, 110, 0.72), rgba(8, 47, 73, 0.82)),
-    radial-gradient(circle at 70% 30%, rgba(153, 246, 228, 0.42), transparent 36%),
-    linear-gradient(135deg, #0f766e 0%, #155e75 100%);
-}
-
-.settings-page#settings-view .theme-bg-floral {
-  background:
-    linear-gradient(145deg, rgba(251, 207, 232, 0.76), rgba(254, 240, 138, 0.48)),
-    radial-gradient(circle at 30% 30%, rgba(244, 114, 182, 0.44), transparent 34%),
-    linear-gradient(135deg, #fdf2f8 0%, #fed7aa 100%);
-}
-
-.settings-page#settings-view .theme-card-glass-layer {
-  height: 100%;
-  min-height: 260px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 22px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.08));
-  color: #0f172a;
-  backdrop-filter: blur(8px) saturate(140%);
-  -webkit-backdrop-filter: blur(8px) saturate(140%);
-}
-
-.settings-page#settings-view .theme-card-title {
-  margin: 0;
-  font-size: 1.3rem;
-  font-weight: 800;
-}
-
-.settings-page#settings-view .theme-card-subtitle {
-  margin-top: 6px;
-  color: rgba(15, 23, 42, 0.7);
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-.settings-page#settings-view .theme-card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.settings-page#settings-view .theme-card-tag {
-  display: inline-flex;
-  min-height: 28px;
-  align-items: center;
-  border-radius: 999px;
-  padding: 0 12px;
-  background: rgba(255, 255, 255, 0.42);
-  color: rgba(15, 23, 42, 0.76);
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.settings-page#settings-view .theme-card-btn {
-  min-width: 76px;
-  min-height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.45);
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.82);
-  color: #fff;
-  cursor: pointer;
-  font-weight: 800;
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.22);
-  transition:
-    transform 0.2s ease,
-    background 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.settings-page#settings-view .theme-card-btn:hover {
-  background: rgba(15, 23, 42, 0.94);
-  box-shadow: 0 14px 24px rgba(15, 23, 42, 0.26);
-  transform: translateY(-2px);
 }
 
 .settings-page#settings-view .settings-detail-modal {
@@ -4004,16 +3768,16 @@ onBeforeUnmount(() => {
   margin-top: 14px;
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--brand, #0f766e) 18%, transparent);
-  background: color-mix(in srgb, var(--lg-bg-elevated, rgba(255, 255, 255, 0.58)) 88%, transparent);
-  box-shadow: var(--lg-shadow-subtle, 0 6px 18px rgba(15, 23, 42, 0.06));
+  border: 1px solid color-mix(in srgb, var(--atlas-accent) 18%, transparent);
+  background: color-mix(in srgb, var(--lg-bg-elevated) 88%, transparent);
+  box-shadow: var(--lg-shadow-subtle);
 }
 
 .settings-backup-result__label {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: var(--text-secondary, #475569);
+  color: var(--text-secondary);
   margin-bottom: 6px;
 }
 
@@ -4022,7 +3786,7 @@ onBeforeUnmount(() => {
   font-family: ui-monospace, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   line-height: 1.45;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-primary);
   opacity: 0.92;
 }
 
@@ -4038,10 +3802,10 @@ onBeforeUnmount(() => {
 }
 
 .ai-settings-panel {
-  border: 1px solid color-mix(in srgb, var(--brand, #0f766e) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--atlas-accent) 22%, transparent);
 }
 
 .data-management-panel .btn-brand {
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--brand, #0f766e) 18%, transparent);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--atlas-accent) 18%, transparent);
 }
 </style>

@@ -2,7 +2,9 @@
   <div class="history-page">
     <div class="page-header page-header--workspace">
       <div class="page-header__copy">
-        <h1 class="heading-serif">Performance Analytics</h1>
+        <span class="history-eyebrow">Learning archive</span>
+        <h1 class="heading-serif">练习历史</h1>
+        <p>阅读与写作记录、趋势和复盘统一保存在本机。</p>
       </div>
       <div class="header-actions">
         <button 
@@ -1811,11 +1813,11 @@ onBeforeUnmount(() => {
 .total-score {
   text-align: center;
   padding: 32px;
-  background: var(--bloom-highlight);
+  background: var(--color-brand-gradient);
   color: var(--shui-text-strong);
   border-radius: var(--border-radius);
   margin-bottom: 20px;
-  box-shadow: var(--bloom-shadow);
+  box-shadow: var(--atlas-shadow);
 }
 
 .total-score .score-value {
