@@ -4,13 +4,13 @@ use serde_json::json;
 use tempfile::tempdir;
 
 use ielts_db::{
-    append_coach_message, attempt_score_snapshot, ensure_coach_thread, import_asset_payload_file,
-    import_dictionary, list_annotations, list_coach_messages, list_vocab, lookup_term, migrate,
-    open_connection, record_coach_failure, resolve_anchor, revalidate_annotations, review_vocab,
-    submit_reading_attempt, upsert_annotation, upsert_vocab, AppendCoachMessageCommand,
-    DbOpenOptions, DictionaryEntry, EnsureCoachThreadCommand, ImportDictionaryCommand,
-    ReadingSubmitCommand, RecordCoachFailureCommand, ReviewVocabCommand, TextAnchor,
-    UpsertAnnotationCommand, UpsertVocabCommand,
+    append_coach_message, attempt_score_snapshot, delete_annotation, ensure_coach_thread,
+    import_asset_payload_file, import_dictionary, list_annotations, list_coach_messages,
+    list_vocab, lookup_term, migrate, open_connection, record_coach_failure, resolve_anchor,
+    revalidate_annotations, review_vocab, submit_reading_attempt, upsert_annotation, upsert_vocab,
+    AppendCoachMessageCommand, DbOpenOptions, DictionaryEntry, EnsureCoachThreadCommand,
+    ImportDictionaryCommand, ReadingSubmitCommand, RecordCoachFailureCommand, ReviewVocabCommand,
+    TextAnchor, UpsertAnnotationCommand, UpsertVocabCommand,
 };
 
 fn open_db() -> (tempfile::TempDir, rusqlite::Connection) {
@@ -56,8 +56,148 @@ fn annotation_stable_anchor_and_mismatch() {
     assert_eq!(list[0].note_text.as_deref(), Some("key phrase"));
 
     let checked =
-        revalidate_annotations(&conn, "asset-1", "passage", "totally different text").unwrap();
+        revalidate_annotations(&conn, "asset-1", None, "passage", "totally different text")
+            .unwrap();
     assert_eq!(checked[0].mismatch.as_deref(), Some("text_not_found"));
+}
+
+fn seed_annotation_attempts(conn: &rusqlite::Connection) {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO practice_assets (
+            id, activity, source_kind, title, schema_version, fingerprint, created_at, updated_at
+         ) VALUES (?1, 'reading', 'builtin', 'Attempt isolation asset', 1, 'asset-fingerprint', ?2, ?2)",
+        rusqlite::params!["asset-isolated", now],
+    )
+    .unwrap();
+    for attempt_id in ["attempt-a", "attempt-b"] {
+        conn.execute(
+            "INSERT INTO attempts (
+                id, activity, asset_id, mode, status, started_at, duration_ms, schema_version,
+                created_at, updated_at
+             ) VALUES (?1, 'reading', 'asset-isolated', 'single', 'in_progress', ?2, 0, 1, ?2, ?2)",
+            rusqlite::params![attempt_id, now],
+        )
+        .unwrap();
+    }
+}
+
+fn annotation_command(
+    id: &str,
+    attempt_id: Option<&str>,
+    scope: &str,
+    kind: &str,
+    text: &str,
+) -> UpsertAnnotationCommand {
+    UpsertAnnotationCommand {
+        id: Some(id.into()),
+        attempt_id: attempt_id.map(str::to_owned),
+        asset_id: "asset-isolated".into(),
+        scope: scope.into(),
+        question_id: None,
+        kind: kind.into(),
+        anchor: TextAnchor {
+            text: text.into(),
+            before: None,
+            after: None,
+            occurrence: 0,
+            start_offset: None,
+            end_offset: None,
+            content_fingerprint: None,
+        },
+        note_text: (kind == "note").then(|| "shared reading note".into()),
+    }
+}
+
+#[test]
+fn annotation_attempt_scope_isolates_highlights_without_hiding_global_notes() {
+    let (_dir, conn) = open_db();
+    seed_annotation_attempts(&conn);
+    let attempt_a = upsert_annotation(
+        &conn,
+        &annotation_command(
+            "ann-attempt-a",
+            Some("attempt-a"),
+            "passage",
+            "highlight",
+            "alpha",
+        ),
+    )
+    .unwrap();
+    let attempt_b = upsert_annotation(
+        &conn,
+        &annotation_command(
+            "ann-attempt-b",
+            Some("attempt-b"),
+            "passage",
+            "highlight",
+            "beta",
+        ),
+    )
+    .unwrap();
+    let global_note = upsert_annotation(
+        &conn,
+        &annotation_command("ann-global-note", None, "note", "note", "reading-note"),
+    )
+    .unwrap();
+
+    let visible_to_a = list_annotations(&conn, "asset-isolated", Some("attempt-a")).unwrap();
+    let visible_to_a_ids = visible_to_a
+        .iter()
+        .map(|annotation| annotation.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(visible_to_a_ids.contains(&attempt_a.id.as_str()));
+    assert!(visible_to_a_ids.contains(&global_note.id.as_str()));
+    assert!(!visible_to_a_ids.contains(&attempt_b.id.as_str()));
+
+    let revalidated_a = revalidate_annotations(
+        &conn,
+        "asset-isolated",
+        Some("attempt-a"),
+        "passage",
+        "alpha",
+    )
+    .unwrap();
+    let revalidated_a_ids = revalidated_a
+        .iter()
+        .map(|annotation| annotation.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(revalidated_a_ids.contains(&attempt_a.id.as_str()));
+    assert!(revalidated_a_ids.contains(&global_note.id.as_str()));
+    assert!(!revalidated_a_ids.contains(&attempt_b.id.as_str()));
+    assert!(revalidated_a
+        .iter()
+        .find(|annotation| annotation.id == attempt_a.id)
+        .is_some_and(|annotation| annotation.mismatch.is_none()));
+
+    let revalidated_b = revalidate_annotations(
+        &conn,
+        "asset-isolated",
+        Some("attempt-b"),
+        "passage",
+        "beta",
+    )
+    .unwrap();
+    let revalidated_b_ids = revalidated_b
+        .iter()
+        .map(|annotation| annotation.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(revalidated_b_ids.contains(&attempt_b.id.as_str()));
+    assert!(revalidated_b_ids.contains(&global_note.id.as_str()));
+    assert!(!revalidated_b_ids.contains(&attempt_a.id.as_str()));
+
+    assert!(
+        !delete_annotation(&conn, &attempt_b.id, "asset-isolated", Some("attempt-a"),).unwrap()
+    );
+    assert!(
+        !delete_annotation(&conn, &global_note.id, "asset-isolated", Some("attempt-a"),).unwrap()
+    );
+    assert!(delete_annotation(&conn, &global_note.id, "asset-isolated", None,).unwrap());
+    assert!(delete_annotation(&conn, &attempt_a.id, "asset-isolated", Some("attempt-a"),).unwrap());
+    assert!(list_annotations(&conn, "asset-isolated", Some("attempt-b"))
+        .unwrap()
+        .iter()
+        .any(|annotation| annotation.id == attempt_b.id));
 }
 
 #[test]

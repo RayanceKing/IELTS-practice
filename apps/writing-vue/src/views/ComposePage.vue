@@ -252,6 +252,16 @@ const showDraftNotification = ref(false)
 const isRestoringDraft = ref(false)
 const topicsRequestGate = createRequestGate()
 
+function getResumeAttemptId() {
+  const raw = Array.isArray(route.query.resumeAttemptId)
+    ? route.query.resumeAttemptId[0]
+    : route.query.resumeAttemptId
+  const attemptId = String(raw || '').trim()
+  return /^attempt-[a-z0-9_-]{1,128}$/i.test(attemptId) ? attemptId : null
+}
+
+const resumeAttemptId = getResumeAttemptId()
+
 function invalidateTopicRequests() {
   topicsRequestGate.invalidate()
   topicLoading.value = false
@@ -273,7 +283,7 @@ const {
   category: selectedCategory.value,
   content: content.value,
   word_count: wordCount.value
-}))
+}), { attemptId: resumeAttemptId })
 
 const categoryOptions = computed(() => getWritingCategoryOptions(taskType.value))
 
@@ -356,8 +366,8 @@ function getRouteTopicId() {
   const rawTopicId = Array.isArray(route.query.topicId)
     ? route.query.topicId[0]
     : route.query.topicId
-  const topicId = Number(rawTopicId)
-  return Number.isInteger(topicId) && topicId > 0 ? topicId : null
+  const topicId = String(rawTopicId || '').trim()
+  return topicId && topicId.length <= 160 ? topicId : null
 }
 
 function resetComposeWorkspace() {
@@ -591,8 +601,8 @@ async function handleDiscardDraft() {
 }
 
 function handleTopicChange(event) {
-  const value = event.target.value
-  selectedTopicId.value = value ? Number(value) : null
+  const value = String(event.target.value || '').trim()
+  selectedTopicId.value = value || null
   restoreNotice.value = ''
 }
 
@@ -644,6 +654,7 @@ async function submitEssay() {
       word_count: wordCount.value
     }
     const result = await evaluate.start({
+      sessionId: resumeAttemptId || undefined,
       task_type: payload.task_type,
       topic_id: payload.topic_id,
       // Bank and free both need the prompt text for AI + history/result topic display.
@@ -652,7 +663,9 @@ async function submitEssay() {
       word_count: payload.word_count
     })
 
-    await discardDraft()
+    if (!resumeAttemptId) {
+      await discardDraft()
+    }
     stopAutoSave()
 
     router.push({

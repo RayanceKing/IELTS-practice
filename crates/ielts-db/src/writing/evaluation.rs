@@ -389,15 +389,10 @@ pub fn prepare_evaluation(
         ],
     )?;
 
-    // Mark attempt reviewing
-    tx.execute(
-        "UPDATE attempts SET status = ?1, updated_at = ?2 WHERE id = ?3",
-        params![
-            status_attempt(AttemptStatus::Reviewing),
-            now,
-            cmd.attempt_id
-        ],
-    )?;
+    // A retry reopens the same attempt. Derive its visible state from the
+    // newest evaluation row so an older result can never leak through while
+    // the retry is queued.
+    sync_attempt_from_latest_evaluation(&tx, &cmd.attempt_id, &now)?;
 
     tx.execute(
         "INSERT INTO attempt_idempotency (scope, idempotency_key, attempt_id, evaluation_id, response_json, created_at)
@@ -762,21 +757,10 @@ fn finalize_completed(
         ],
     )?;
 
-    // Persist score onto attempt
-    if let Some(score) = &evaluation.score {
-        conn.execute(
-            "UPDATE attempts SET status = ?1, score_value = ?2, score_scale = ?3, completed_at = ?4, updated_at = ?4 WHERE id = (
-                SELECT attempt_id FROM writing_evaluations WHERE id = ?5
-             )",
-            params![
-                status_attempt(AttemptStatus::Completed),
-                score.overall,
-                "band9",
-                now,
-                evaluation_id
-            ],
-        )?;
-    }
+    let session = load_session(conn, session_id)?.expect("session");
+    // Do not let an older provider request which happened to finish later
+    // overwrite the attempt-level view of a newer retry.
+    sync_attempt_from_latest_evaluation(conn, &session.attempt_id, &now)?;
 
     events.push(append_event(
         conn,
@@ -787,7 +771,6 @@ fn finalize_completed(
         json!({ "status": status_str(evaluation.status), "evaluation": &evaluation }),
     )?);
 
-    let session = load_session(conn, session_id)?.expect("session");
     Ok(EvaluationRunResult {
         session,
         evaluation,
@@ -813,13 +796,25 @@ fn finalize_failed(
     let result_json = serde_json::to_string(&evaluation).unwrap_or_else(|_| "{}".into());
     let error_json = serde_json::to_string(evaluation.error.as_ref().unwrap()).unwrap();
     conn.execute(
-        "UPDATE writing_evaluations SET status = ?1, result_json = ?2, error_json = ?3, updated_at = ?4 WHERE id = ?5",
-        params![status_str(EvaluationStatus::Failed), result_json, error_json, now, evaluation_id],
+        "UPDATE writing_evaluations
+         SET status = ?1, stage = ?2, result_json = ?3, error_json = ?4,
+             completed_at = ?5, updated_at = ?5
+         WHERE id = ?6",
+        params![
+            status_str(EvaluationStatus::Failed),
+            stage_str(evaluation.stage),
+            result_json,
+            error_json,
+            now,
+            evaluation_id,
+        ],
     )?;
     conn.execute(
         "UPDATE evaluation_sessions SET status = ?1, updated_at = ?2, completed_at = ?2 WHERE id = ?3",
         params![status_str(EvaluationStatus::Failed), now, session_id],
     )?;
+    let session = load_session(conn, session_id)?.expect("session");
+    sync_attempt_from_latest_evaluation(conn, &session.attempt_id, &now)?;
     events.push(append_event(
         conn,
         evaluation_id,
@@ -832,7 +827,6 @@ fn finalize_failed(
             "retryable": err.retryable,
         }),
     )?);
-    let session = load_session(conn, session_id)?.expect("session");
     Ok(EvaluationRunResult {
         session,
         evaluation,
@@ -865,13 +859,30 @@ fn finalize_cancelled_with_partial(
     evaluation.status = EvaluationStatus::Interrupted;
     let result_json = serde_json::to_string(&evaluation).unwrap_or_else(|_| "{}".into());
     conn.execute(
-        "UPDATE writing_evaluations SET status = ?1, result_json = ?2, updated_at = ?3 WHERE id = ?4",
-        params![status_str(EvaluationStatus::Interrupted), result_json, now, evaluation_id],
+        "UPDATE writing_evaluations
+         SET status = ?1, stage = ?2, result_json = ?3, completed_at = ?4, updated_at = ?4
+         WHERE id = ?5",
+        params![
+            status_str(EvaluationStatus::Interrupted),
+            stage_str(evaluation.stage),
+            result_json,
+            now,
+            evaluation_id,
+        ],
     )?;
     conn.execute(
-        "UPDATE evaluation_sessions SET status = ?1, cancel_requested = 1, updated_at = ?2, completed_at = ?2 WHERE id = ?3",
-        params![status_str(EvaluationStatus::Interrupted), now, session_id],
+        "UPDATE evaluation_sessions
+         SET status = ?1, stage = ?2, cancel_requested = 1, updated_at = ?3, completed_at = ?3
+         WHERE id = ?4",
+        params![
+            status_str(EvaluationStatus::Interrupted),
+            stage_str(evaluation.stage),
+            now,
+            session_id,
+        ],
     )?;
+    let session = load_session(conn, session_id)?.expect("session");
+    sync_attempt_from_latest_evaluation(conn, &session.attempt_id, &now)?;
     // Do NOT wipe attempt content / draft
     events.push(append_event(
         conn,
@@ -881,7 +892,6 @@ fn finalize_cancelled_with_partial(
         Some(evaluation.stage),
         json!({ "keptInputs": true }),
     )?);
-    let session = load_session(conn, session_id)?.expect("session");
     Ok(EvaluationRunResult {
         session,
         evaluation,
@@ -906,6 +916,7 @@ pub fn request_cancel(conn: &Connection, evaluation_id: &str) -> DbResult<bool> 
         )
     });
     evaluation.status = EvaluationStatus::Interrupted;
+    evaluation.stage = session.stage;
     let result_json =
         serde_json::to_string(&evaluation).map_err(|error| DbError::Message(error.to_string()))?;
     let tx = conn.unchecked_transaction()?;
@@ -917,23 +928,17 @@ pub fn request_cancel(conn: &Connection, evaluation_id: &str) -> DbResult<bool> 
     )?;
     tx.execute(
         "UPDATE writing_evaluations
-         SET status = ?1, result_json = ?2, completed_at = ?3, updated_at = ?3
-         WHERE id = ?4",
+         SET status = ?1, stage = ?2, result_json = ?3, completed_at = ?4, updated_at = ?4
+         WHERE id = ?5",
         params![
             status_str(EvaluationStatus::Interrupted),
+            stage_str(session.stage),
             result_json,
             now,
             evaluation_id,
         ],
     )?;
-    tx.execute(
-        "UPDATE attempts SET status = ?1, updated_at = ?2 WHERE id = ?3",
-        params![
-            status_attempt(AttemptStatus::Interrupted),
-            now,
-            session.attempt_id,
-        ],
-    )?;
+    sync_attempt_from_latest_evaluation(&tx, &session.attempt_id, &now)?;
     append_event(
         &tx,
         evaluation_id,
@@ -981,43 +986,90 @@ pub fn load_evaluation_for_attempt(
     conn: &Connection,
     attempt_id: &str,
 ) -> DbResult<Option<WritingEvaluationV4>> {
-    let result: Result<(String, Option<String>), _> = conn.query_row(
-        "SELECT id, result_json FROM writing_evaluations WHERE attempt_id = ?1 ORDER BY updated_at DESC LIMIT 1",
-        params![attempt_id],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    );
-    match result {
-        Ok((id, json)) => {
-            let Some(json) = json.filter(|value| !value.is_empty()) else {
+    match load_latest_evaluation_row(conn, attempt_id)? {
+        Some(latest) => {
+            let Some(json) = latest.result_json.filter(|value| !value.is_empty()) else {
                 return Ok(None);
             };
             let mut v: WritingEvaluationV4 = serde_json::from_str(&json)
                 .map_err(|e| DbError::Message(format!("eval parse: {e}")))?;
-            v.id = id;
+            v.id = latest.id;
             Ok(Some(v))
         }
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.into()),
+        None => Ok(None),
     }
 }
 
 pub fn recover_interrupted_sessions(conn: &Connection) -> DbResult<u32> {
-    // On boot: mark running sessions without completed_at as interrupted (process died).
+    // On boot, complete every durable state transition in one transaction. The
+    // old implementation changed only the two status columns, leaving result
+    // JSON, event replay and attempt history mutually contradictory.
     let now = chrono::Utc::now().to_rfc3339();
-    let n = conn.execute(
-        "UPDATE evaluation_sessions
-         SET status = ?1, updated_at = ?2
-         WHERE completed_at IS NULL AND status IN ('queued', 'running')",
-        params![status_str(EvaluationStatus::Interrupted), now],
-    )?;
-    conn.execute(
-        "UPDATE writing_evaluations
-         SET status = ?1, updated_at = ?2
-         WHERE completed_at IS NULL AND status IN ('queued', 'running')
-           AND id IN (SELECT evaluation_id FROM evaluation_sessions WHERE status = ?1)",
-        params![status_str(EvaluationStatus::Interrupted), now],
-    )?;
-    Ok(n as u32)
+    let tx = conn.unchecked_transaction()?;
+    let sessions = {
+        let mut stmt = tx.prepare(
+            "SELECT id, attempt_id, evaluation_id, status, stage, revision, sequence, retry_of,
+                    cancel_requested, provider_id, model, started_at, updated_at, completed_at
+             FROM evaluation_sessions
+             WHERE completed_at IS NULL AND status IN ('queued', 'running')
+             ORDER BY started_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map([], map_session)?;
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row?);
+        }
+        sessions
+    };
+
+    let mut recovered_attempts = std::collections::BTreeSet::new();
+    for session in &sessions {
+        let mut evaluation =
+            load_recoverable_evaluation(&tx, &session.evaluation_id, session.stage)?;
+        evaluation.status = EvaluationStatus::Interrupted;
+        evaluation.stage = session.stage;
+        let result_json = serde_json::to_string(&evaluation)
+            .map_err(|error| DbError::Message(error.to_string()))?;
+
+        tx.execute(
+            "UPDATE writing_evaluations
+             SET status = ?1, stage = ?2, result_json = ?3, completed_at = ?4, updated_at = ?4
+             WHERE id = ?5",
+            params![
+                status_str(EvaluationStatus::Interrupted),
+                stage_str(session.stage),
+                result_json,
+                now,
+                session.evaluation_id,
+            ],
+        )?;
+        tx.execute(
+            "UPDATE evaluation_sessions
+             SET status = ?1, completed_at = ?2, updated_at = ?2
+             WHERE id = ?3",
+            params![status_str(EvaluationStatus::Interrupted), now, session.id],
+        )?;
+        append_event(
+            &tx,
+            &session.evaluation_id,
+            session.revision,
+            "interrupted",
+            Some(session.stage),
+            json!({
+                "reason": "process_restarted",
+                "keptInputs": true,
+                "evaluation": evaluation,
+            }),
+        )?;
+        recovered_attempts.insert(session.attempt_id.clone());
+    }
+
+    for attempt_id in recovered_attempts {
+        sync_attempt_from_latest_evaluation(&tx, &attempt_id, &now)?;
+    }
+
+    tx.commit()?;
+    Ok(sessions.len() as u32)
 }
 
 fn append_event(
@@ -1167,6 +1219,136 @@ fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<EvaluationSession> {
         updated_at: row.get(12)?,
         completed_at: row.get(13)?,
     })
+}
+
+/// A retry is newer because it was created later, not because an older provider
+/// call happened to write after it. `rowid` makes the ordering deterministic
+/// when tests or fast local calls share the same timestamp.
+struct LatestEvaluationRow {
+    id: String,
+    status: EvaluationStatus,
+    result_json: Option<String>,
+    completed_at: Option<String>,
+}
+
+fn load_latest_evaluation_row(
+    conn: &Connection,
+    attempt_id: &str,
+) -> DbResult<Option<LatestEvaluationRow>> {
+    let result: Result<(String, String, Option<String>, Option<String>), rusqlite::Error> = conn
+        .query_row(
+            "SELECT id, status, result_json, completed_at
+             FROM writing_evaluations
+             WHERE attempt_id = ?1
+             ORDER BY COALESCE(started_at, updated_at) DESC, rowid DESC, id DESC
+             LIMIT 1",
+            params![attempt_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        );
+    match result {
+        Ok((id, status, result_json, completed_at)) => {
+            let status = parse_status(&status).ok_or_else(|| {
+                DbError::Validation(format!("unknown writing evaluation status for {id}"))
+            })?;
+            Ok(Some(LatestEvaluationRow {
+                id,
+                status,
+                result_json,
+                completed_at,
+            }))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Recovery must not be defeated by a missing or malformed historical JSON
+/// payload. The durable row still carries the evaluation id and current stage,
+/// enough to reconstruct a canonical interrupted result.
+fn load_recoverable_evaluation(
+    conn: &Connection,
+    evaluation_id: &str,
+    stage: EvaluationStage,
+) -> DbResult<WritingEvaluationV4> {
+    let result: Result<Option<String>, rusqlite::Error> = conn.query_row(
+        "SELECT result_json FROM writing_evaluations WHERE id = ?1",
+        params![evaluation_id],
+        |row| row.get(0),
+    );
+    let result_json = match result {
+        Ok(result_json) => result_json,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(DbError::Validation(format!(
+                "evaluation session references missing evaluation {evaluation_id}"
+            )));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let mut evaluation = result_json
+        .as_deref()
+        .filter(|json| !json.is_empty())
+        .and_then(|json| serde_json::from_str::<WritingEvaluationV4>(json).ok())
+        .unwrap_or_else(|| {
+            empty_eval(
+                evaluation_id.to_string(),
+                EvaluationStatus::Interrupted,
+                stage,
+            )
+        });
+    evaluation.id = evaluation_id.to_string();
+    Ok(evaluation)
+}
+
+/// The attempt is only a projection of its latest evaluation. Keeping that
+/// projection here prevents retry, cancellation and crash recovery paths from
+/// each inventing a subtly different answer.
+fn sync_attempt_from_latest_evaluation(
+    conn: &Connection,
+    attempt_id: &str,
+    now: &str,
+) -> DbResult<()> {
+    let Some(latest) = load_latest_evaluation_row(conn, attempt_id)? else {
+        return Ok(());
+    };
+    let completed_at = latest
+        .completed_at
+        .clone()
+        .unwrap_or_else(|| now.to_string());
+    let score = latest
+        .result_json
+        .as_deref()
+        .and_then(|json| serde_json::from_str::<WritingEvaluationV4>(json).ok())
+        .and_then(|evaluation| evaluation.score)
+        .map(|score| score.overall);
+    let (attempt_status, score_value, score_scale, completed_at) = match latest.status {
+        EvaluationStatus::Queued | EvaluationStatus::Running => {
+            (AttemptStatus::Reviewing, None, None, None)
+        }
+        EvaluationStatus::Completed | EvaluationStatus::Degraded => (
+            AttemptStatus::Completed,
+            score,
+            score.map(|_| "band9"),
+            Some(completed_at),
+        ),
+        EvaluationStatus::Failed => (AttemptStatus::Failed, None, None, Some(completed_at)),
+        EvaluationStatus::Interrupted => {
+            (AttemptStatus::Interrupted, None, None, Some(completed_at))
+        }
+    };
+    conn.execute(
+        "UPDATE attempts
+         SET status = ?1, score_value = ?2, score_scale = ?3, completed_at = ?4, updated_at = ?5
+         WHERE id = ?6",
+        params![
+            status_attempt(attempt_status),
+            score_value,
+            score_scale,
+            completed_at,
+            now,
+            attempt_id,
+        ],
+    )?;
+    Ok(())
 }
 
 fn load_evaluation_result(

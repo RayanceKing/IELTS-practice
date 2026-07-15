@@ -226,8 +226,31 @@ pub fn list_annotations(
     Ok(out)
 }
 
-pub fn delete_annotation(conn: &Connection, id: &str) -> DbResult<bool> {
-    let n = conn.execute("DELETE FROM attempt_annotations WHERE id = ?1", params![id])?;
+/// Delete an annotation only from its exact ownership scope.
+///
+/// Attempt-owned annotations must never be removable by a different attempt that
+/// happens to practice the same asset. `None` is the asset-global scope used by
+/// reading notes, so it deliberately deletes only records whose attempt id is
+/// also NULL.
+pub fn delete_annotation(
+    conn: &Connection,
+    id: &str,
+    asset_id: &str,
+    attempt_id: Option<&str>,
+) -> DbResult<bool> {
+    let n = if let Some(attempt_id) = attempt_id {
+        conn.execute(
+            "DELETE FROM attempt_annotations
+             WHERE id = ?1 AND asset_id = ?2 AND attempt_id = ?3",
+            params![id, asset_id, attempt_id],
+        )?
+    } else {
+        conn.execute(
+            "DELETE FROM attempt_annotations
+             WHERE id = ?1 AND asset_id = ?2 AND attempt_id IS NULL",
+            params![id, asset_id],
+        )?
+    };
     Ok(n > 0)
 }
 
@@ -235,10 +258,14 @@ pub fn delete_annotation(conn: &Connection, id: &str) -> DbResult<bool> {
 pub fn revalidate_annotations(
     conn: &Connection,
     asset_id: &str,
+    attempt_id: Option<&str>,
     scope: &str,
     document: &str,
 ) -> DbResult<Vec<AnnotationRecord>> {
-    let mut list = list_annotations(conn, asset_id, None)?;
+    // Keep the same visibility contract as annotation_list: an attempt sees its
+    // own annotations plus asset-global records (for example, reading notes),
+    // never annotations belonging to another attempt for the same asset.
+    let mut list = list_annotations(conn, asset_id, attempt_id)?;
     let scope_n = normalize_scope(scope);
     for ann in &mut list {
         if ann.scope != scope_n && scope_n != "any" {

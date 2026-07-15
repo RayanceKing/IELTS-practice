@@ -391,20 +391,10 @@ fn load_attempt(conn: &Connection, id: &str) -> DbResult<AttemptRecord> {
 }
 
 fn load_evaluation(conn: &Connection, attempt_id: &str) -> DbResult<Option<WritingEvaluationV4>> {
-    let result: Result<String, rusqlite::Error> = conn.query_row(
-        "SELECT result_json FROM writing_evaluations WHERE attempt_id = ?1",
-        params![attempt_id],
-        |r| r.get(0),
-    );
-    match result {
-        Ok(json) => {
-            let v: WritingEvaluationV4 = serde_json::from_str(&json)
-                .map_err(|e| DbError::Message(format!("evaluation parse: {e}")))?;
-            Ok(Some(v))
-        }
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.into()),
-    }
+    // History and Result must use the same retry ordering as the live writing
+    // command. A bare SELECT here was nondeterministic once an attempt had
+    // more than one evaluation row.
+    crate::writing::load_evaluation_for_attempt(conn, attempt_id)
 }
 
 fn activity_str(activity: Activity) -> &'static str {

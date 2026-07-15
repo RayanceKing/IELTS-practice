@@ -12,6 +12,8 @@ use crate::sqlite::{DbError, DbResult};
 #[serde(rename_all = "camelCase")]
 pub struct WritingDraft {
     pub attempt_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
     pub content_text: String,
     pub prompt_snapshot: Option<String>,
     pub task_type: Option<String>,
@@ -94,6 +96,7 @@ pub fn save_writing_draft(conn: &Connection, cmd: &SaveDraftCommand) -> DbResult
 
     Ok(WritingDraft {
         attempt_id: cmd.attempt_id.clone(),
+        asset_id: cmd.asset_id.clone(),
         content_text: content,
         prompt_snapshot: cmd.prompt_snapshot.clone(),
         task_type: mode_task_hint(cmd.mode).map(str::to_string),
@@ -105,19 +108,23 @@ pub fn save_writing_draft(conn: &Connection, cmd: &SaveDraftCommand) -> DbResult
 
 pub fn get_writing_draft(conn: &Connection, attempt_id: &str) -> DbResult<Option<WritingDraft>> {
     let mut stmt = conn.prepare(
-        "SELECT attempt_id, content_text, prompt_snapshot, task_type, word_count, idempotency_key, updated_at
-         FROM writing_drafts WHERE attempt_id = ?1",
+        "SELECT d.attempt_id, a.asset_id, d.content_text, d.prompt_snapshot, d.task_type,
+                d.word_count, d.idempotency_key, d.updated_at
+         FROM writing_drafts d
+         LEFT JOIN attempts a ON a.id = d.attempt_id
+         WHERE d.attempt_id = ?1",
     )?;
     let mut rows = stmt.query(params![attempt_id])?;
     if let Some(row) = rows.next()? {
         Ok(Some(WritingDraft {
             attempt_id: row.get(0)?,
-            content_text: row.get(1)?,
-            prompt_snapshot: row.get(2)?,
-            task_type: row.get(3)?,
-            word_count: row.get::<_, i64>(4)? as u32,
-            idempotency_key: row.get(5)?,
-            updated_at: row.get(6)?,
+            asset_id: row.get(1)?,
+            content_text: row.get(2)?,
+            prompt_snapshot: row.get(3)?,
+            task_type: row.get(4)?,
+            word_count: row.get::<_, i64>(5)? as u32,
+            idempotency_key: row.get(6)?,
+            updated_at: row.get(7)?,
         }))
     } else {
         Ok(None)

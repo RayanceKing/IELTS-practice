@@ -273,6 +273,7 @@ async function hydrateSessionState() {
     if (draft) {
       tempDraft.value = {
         task_type: draft.taskType || draft.task_type || '',
+        topic_id: normalizeTopicId(draft.assetId ?? draft.asset_id),
         topic_text: draft.promptSnapshot || draft.prompt_snapshot || '',
         content: draft.contentText || draft.content_text || '',
         word_count: draft.wordCount ?? draft.word_count ?? 0
@@ -299,16 +300,22 @@ async function handleCancel() {
   } catch (err) {
     console.error('取消失败:', err)
   }
-  router.push({ name: 'Compose' })
+  await router.push({
+    name: 'Compose',
+    query: { resumeAttemptId: props.sessionId }
+  })
+}
+
+function normalizeTopicId(value) {
+  const id = String(value ?? '').trim()
+  return id && id.length <= 160 ? id : null
 }
 
 function buildRetryPayload() {
   const draft = tempDraft.value || {}
   const rawTaskType = String(draft.task_type || '').trim()
   const taskType = rawTaskType === 'task1' ? 'task1' : (rawTaskType === 'task2' ? 'task2' : '')
-  const topicIdRaw = draft.topic_id
-  const topicIdNumber = Number(topicIdRaw)
-  const topicId = Number.isInteger(topicIdNumber) && topicIdNumber > 0 ? topicIdNumber : null
+  const topicId = normalizeTopicId(draft.topic_id)
   const topicText = String(
     draft.topic_text
     || ''
@@ -391,8 +398,18 @@ async function handleRetry() {
   }
 }
 
-function handleBack() {
-  router.push({ name: 'Compose' })
+async function handleBack() {
+  if (!isComplete.value) {
+    try {
+      await evaluate.cancel(props.sessionId)
+    } catch (err) {
+      console.warn('返回写作页前取消评测失败:', err)
+    }
+  }
+  await router.push({
+    name: 'Compose',
+    query: { resumeAttemptId: props.sessionId }
+  })
 }
 
 async function navigateToResult() {

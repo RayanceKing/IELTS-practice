@@ -14,13 +14,13 @@ export async function listAnnotations(assetId, attemptId = null) {
   return { source: 'tauri', items: unwrapCommandResponse(response, 'annotation_list') || [] }
 }
 
-export async function deleteAnnotation(id) {
-  const response = await invokeCommand('annotation_delete', { id })
+export async function deleteAnnotation(id, assetId, attemptId = null) {
+  const response = await invokeCommand('annotation_delete', { id, assetId, attemptId })
   return !!unwrapCommandResponse(response, 'annotation_delete')
 }
 
-export async function revalidateAnnotations(assetId, scope, document) {
-  const response = await invokeCommand('annotation_revalidate', { assetId, scope, document })
+export async function revalidateAnnotations(assetId, attemptId, scope, document) {
+  const response = await invokeCommand('annotation_revalidate', { assetId, attemptId, scope, document })
   return { source: 'tauri', items: unwrapCommandResponse(response, 'annotation_revalidate') || [] }
 }
 

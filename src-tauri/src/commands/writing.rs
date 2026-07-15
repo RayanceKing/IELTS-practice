@@ -1,6 +1,10 @@
 //! Writing draft + evaluation Tauri commands (Phase 5).
 
-use ielts_domain::dto::{CommandResponse, SaveDraftCommand, SubmitAttemptCommand};
+use ielts_domain::dto::{
+    CommandResponse, ImportWritingTopicsCommand, ListWritingTopicsQuery, SaveDraftCommand,
+    SubmitAttemptCommand, UpsertWritingTopicCommand, WritingTopicDto, WritingTopicImportReport,
+    WritingTopicPage, WritingTopicStatistics,
+};
 use ielts_domain::ErrorEnvelope;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -8,10 +12,12 @@ use tauri::{AppHandle, Manager, State};
 use crate::app::state::{AppDb, AppVault};
 use crate::commands::ai::{load_provider_config, load_runtime};
 use ielts_db::{
-    finish_evaluation, get_writing_draft, list_events, load_evaluation_for_attempt,
-    prepare_evaluation, request_cancel, save_writing_draft, submit_writing_attempt,
-    DeterministicProvider, EvaluationEvent, EvaluationHandle, EvaluationRunResult,
-    StartEvaluationCommand, WritingDraft, WritingProvider,
+    delete_writing_topic, finish_evaluation, get_writing_draft, import_writing_topics,
+    list_events, list_writing_topics, load_evaluation_for_attempt, prepare_evaluation,
+    request_cancel, save_writing_draft, submit_writing_attempt, upsert_writing_topic,
+    writing_topic_statistics as load_writing_topic_statistics, DeterministicProvider,
+    EvaluationEvent, EvaluationHandle,
+    EvaluationRunResult, StartEvaluationCommand, WritingDraft, WritingProvider,
 };
 
 mod openai_provider;
@@ -236,5 +242,56 @@ pub fn writing_get_evaluation(
     match db.with_conn(|conn| load_evaluation_for_attempt(conn, &attempt_id)) {
         Ok(v) => CommandResponse::success(v),
         Err(e) => CommandResponse::failure(map_err(e)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_topic_list(
+    db: State<'_, AppDb>,
+    query: ListWritingTopicsQuery,
+) -> CommandResponse<WritingTopicPage> {
+    match db.with_conn(|conn| list_writing_topics(conn, &query)) {
+        Ok(page) => CommandResponse::success(page),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_topic_upsert(
+    db: State<'_, AppDb>,
+    cmd: UpsertWritingTopicCommand,
+) -> CommandResponse<WritingTopicDto> {
+    match db.with_conn(|conn| upsert_writing_topic(conn, &cmd)) {
+        Ok(topic) => CommandResponse::success(topic),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_topic_delete(db: State<'_, AppDb>, id: String) -> CommandResponse<bool> {
+    match db.with_conn(|conn| delete_writing_topic(conn, &id)) {
+        Ok(deleted) => CommandResponse::success(deleted),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_topic_import(
+    db: State<'_, AppDb>,
+    cmd: ImportWritingTopicsCommand,
+) -> CommandResponse<WritingTopicImportReport> {
+    match db.with_conn(|conn| import_writing_topics(conn, &cmd)) {
+        Ok(report) => CommandResponse::success(report),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_topic_statistics(
+    db: State<'_, AppDb>,
+) -> CommandResponse<WritingTopicStatistics> {
+    match db.with_conn(load_writing_topic_statistics) {
+        Ok(statistics) => CommandResponse::success(statistics),
+        Err(error) => CommandResponse::failure(map_err(error)),
     }
 }

@@ -65,67 +65,45 @@ fn resolve_active_prompt(
     conn: &Connection,
     task_type: Option<WritingTaskType>,
 ) -> DbResult<Option<PromptRow>> {
-    let rows = list_settings(conn, Some(NS_PROMPTS))?;
-    let items: Vec<PromptRow> = rows
-        .into_iter()
-        .map(|e| PromptRow {
-            key: e.key,
-            value: e.value,
-        })
-        .collect();
-    if items.is_empty() {
+    // A custom evaluation prompt is task-specific policy.  If the caller has no
+    // task type, there is no safe way to select one, so use the built-in schema
+    // instruction instead of arbitrarily applying a Task 1/2 prompt.
+    let Some(task_type) = task_type else {
         return Ok(None);
-    }
+    };
 
-    let task_key = task_type.map(task_type_key);
-    // Prefer active + matching task, then active any, then first matching task, then first.
-    let active_match = items
-        .iter()
-        .find(|p| is_active(&p.value) && task_matches(&p.value, task_key));
-    if let Some(p) = active_match {
-        return Ok(Some(p.clone()));
-    }
-    let active_any = items.iter().find(|p| is_active(&p.value));
-    if let Some(p) = active_any {
-        return Ok(Some(p.clone()));
-    }
-    if let Some(task) = task_key {
-        if let Some(p) = items.iter().find(|p| task_matches(&p.value, Some(task))) {
-            return Ok(Some(p.clone()));
-        }
-    }
-    Ok(items.into_iter().next())
+    let rows = list_settings(conn, Some(NS_PROMPTS))?;
+    Ok(rows
+        .into_iter()
+        .map(|entry| PromptRow {
+            key: entry.key,
+            value: entry.value,
+        })
+        .find(|prompt| {
+            is_active(&prompt.value) && prompt_task_type(&prompt.value) == Some(task_type)
+        }))
 }
 
 fn is_active(value: &Value) -> bool {
+    // `is_active` is the current Settings contract.  Read `active` only for
+    // pre-cutover exports, and never let a stale alias override the canonical
+    // field when both are present.
     value
-        .get("active")
+        .get("is_active")
         .and_then(|v| v.as_bool())
+        .or_else(|| value.get("active").and_then(|v| v.as_bool()))
         .unwrap_or(false)
 }
 
-fn task_matches(value: &Value, task_key: Option<&str>) -> bool {
-    let Some(want) = task_key else {
-        return true;
-    };
+fn prompt_task_type(value: &Value) -> Option<WritingTaskType> {
     let raw = value
-        .get("taskType")
-        .or_else(|| value.get("task_type"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
+        .get("task_type")
+        .or_else(|| value.get("taskType"))
+        .and_then(Value::as_str)?
         .trim()
         .to_ascii_lowercase();
-    if raw.is_empty() {
-        return true;
-    }
-    raw == want || raw.replace('_', "") == want.replace('_', "")
-}
-
-fn task_type_key(task: WritingTaskType) -> &'static str {
-    match task {
-        WritingTaskType::Task1 => "task1",
-        WritingTaskType::Task2 => "task2",
-    }
+    let normalized = raw.replace([' ', '-'], "_");
+    WritingTaskType::parse_loose(&normalized)
 }
 
 fn extract_prompt_body(value: &Value) -> Option<String> {
@@ -277,5 +255,101 @@ mod tests {
         .unwrap();
         let canonical = resolve_writing_eval_policy(&conn, Some(WritingTaskType::Task2)).unwrap();
         assert!((canonical.temperature - 0.3).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn active_prompts_are_isolated_by_task_type() {
+        let conn = connection();
+        upsert_setting(
+            &conn,
+            NS_PROMPTS,
+            "task1-active",
+            &serde_json::json!({
+                "id": "task1-active",
+                "is_active": true,
+                "task_type": "task_1",
+                "body": "TASK 1 POLICY"
+            }),
+        )
+        .unwrap();
+        upsert_setting(
+            &conn,
+            NS_PROMPTS,
+            "task2-active",
+            &serde_json::json!({
+                "id": "task2-active",
+                "active": true,
+                "taskType": "task2",
+                "body": "TASK 2 POLICY"
+            }),
+        )
+        .unwrap();
+
+        let task1 = resolve_writing_eval_policy(&conn, Some(WritingTaskType::Task1)).unwrap();
+        let task2 = resolve_writing_eval_policy(&conn, Some(WritingTaskType::Task2)).unwrap();
+
+        assert_eq!(task1.prompt_id.as_deref(), Some("task1-active"));
+        assert_eq!(task1.system_prompt, "TASK 1 POLICY");
+        assert_eq!(task2.prompt_id.as_deref(), Some("task2-active"));
+        assert_eq!(task2.system_prompt, "TASK 2 POLICY");
+    }
+
+    #[test]
+    fn resolver_never_falls_back_to_another_tasks_active_prompt() {
+        let conn = connection();
+        upsert_setting(
+            &conn,
+            NS_PROMPTS,
+            "task1-inactive",
+            &serde_json::json!({
+                "id": "task1-inactive",
+                "is_active": false,
+                "task_type": "task1",
+                "body": "INACTIVE TASK 1 POLICY"
+            }),
+        )
+        .unwrap();
+        upsert_setting(
+            &conn,
+            NS_PROMPTS,
+            "task2-active",
+            &serde_json::json!({
+                "id": "task2-active",
+                "is_active": true,
+                "task_type": "task2",
+                "body": "TASK 2 POLICY"
+            }),
+        )
+        .unwrap();
+
+        let task1 = resolve_writing_eval_policy(&conn, Some(WritingTaskType::Task1)).unwrap();
+        assert_eq!(task1.prompt_id, None);
+        assert_eq!(task1.system_prompt, DEFAULT_SYSTEM_PROMPT);
+
+        let unknown = resolve_writing_eval_policy(&conn, None).unwrap();
+        assert_eq!(unknown.prompt_id, None);
+        assert_eq!(unknown.system_prompt, DEFAULT_SYSTEM_PROMPT);
+    }
+
+    #[test]
+    fn canonical_is_active_wins_over_a_stale_legacy_active_alias() {
+        let conn = connection();
+        upsert_setting(
+            &conn,
+            NS_PROMPTS,
+            "conflicting-aliases",
+            &serde_json::json!({
+                "id": "conflicting-aliases",
+                "is_active": false,
+                "active": true,
+                "task_type": "task1",
+                "body": "MUST NOT RUN"
+            }),
+        )
+        .unwrap();
+
+        let policy = resolve_writing_eval_policy(&conn, Some(WritingTaskType::Task1)).unwrap();
+        assert_eq!(policy.prompt_id, None);
+        assert_eq!(policy.system_prompt, DEFAULT_SYSTEM_PROMPT);
     }
 }

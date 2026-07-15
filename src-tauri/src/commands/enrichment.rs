@@ -50,8 +50,13 @@ pub fn annotation_list(
 }
 
 #[tauri::command]
-pub fn annotation_delete(db: State<'_, AppDb>, id: String) -> CommandResponse<bool> {
-    match db.with_conn(|conn| delete_annotation(conn, &id)) {
+pub fn annotation_delete(
+    db: State<'_, AppDb>,
+    id: String,
+    asset_id: String,
+    attempt_id: Option<String>,
+) -> CommandResponse<bool> {
+    match db.with_conn(|conn| delete_annotation(conn, &id, &asset_id, attempt_id.as_deref())) {
         Ok(v) => CommandResponse::success(v),
         Err(e) => CommandResponse::failure(map_err(e)),
     }
@@ -61,10 +66,13 @@ pub fn annotation_delete(db: State<'_, AppDb>, id: String) -> CommandResponse<bo
 pub fn annotation_revalidate(
     db: State<'_, AppDb>,
     asset_id: String,
+    attempt_id: Option<String>,
     scope: String,
     document: String,
 ) -> CommandResponse<Vec<AnnotationRecord>> {
-    match db.with_conn(|conn| revalidate_annotations(conn, &asset_id, &scope, &document)) {
+    match db.with_conn(|conn| {
+        revalidate_annotations(conn, &asset_id, attempt_id.as_deref(), &scope, &document)
+    }) {
         Ok(v) => CommandResponse::success(v),
         Err(e) => CommandResponse::failure(map_err(e)),
     }

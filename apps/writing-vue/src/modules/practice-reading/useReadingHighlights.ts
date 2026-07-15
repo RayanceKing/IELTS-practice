@@ -144,7 +144,7 @@ export function useReadingHighlights(options: ReadingHighlightControllerOptions 
     entry: HighlightRecord | null | undefined,
     targetAttemptId: string | null = null
   ) {
-    if (!isTauriRuntime() || !targetAssetId || !entry?.text) return null
+    if (!isTauriRuntime() || !targetAssetId || !targetAttemptId || !entry?.text) return null
     try {
       const { annotation } = await upsertAnnotation({
         id: entry.id || null,
@@ -171,10 +171,14 @@ export function useReadingHighlights(options: ReadingHighlightControllerOptions 
     }
   }
 
-  async function deleteHighlightFromStore(id: string | null | undefined) {
-    if (!isTauriRuntime() || !id) return false
+  async function deleteHighlightFromStore(
+    id: string | null | undefined,
+    targetAssetId: string | null | undefined = assetId(),
+    targetAttemptId: string | null = attemptId() || null
+  ) {
+    if (!isTauriRuntime() || !id || !targetAssetId || !targetAttemptId) return false
     try {
-      return await deleteAnnotation(id)
+      return await deleteAnnotation(id, targetAssetId, targetAttemptId)
     } catch (err) {
       console.warn('delete highlight failed', err)
       return false
@@ -192,10 +196,12 @@ export function useReadingHighlights(options: ReadingHighlightControllerOptions 
     targetAttemptId: string | null = null,
     documentText: string | null = null
   ) {
-    if (!isTauriRuntime() || !targetAssetId) return [] as NormalizedHighlight[]
+    // Highlights belong to an attempt. Never turn an absent attempt into an
+    // asset-wide query, because that mixes highlights from unrelated attempts.
+    if (!isTauriRuntime() || !targetAssetId || !targetAttemptId) return [] as NormalizedHighlight[]
     try {
       const { items } = documentText
-        ? await revalidateAnnotations(targetAssetId, 'passage', documentText)
+        ? await revalidateAnnotations(targetAssetId, targetAttemptId, 'passage', documentText)
         : await listAnnotations(targetAssetId, targetAttemptId)
       return normalizeHighlightSnapshot(
         (items || []).filter((item) => item.kind === 'highlight').map((item: AnnotationRecord) => ({
@@ -419,6 +425,7 @@ export function useReadingHighlights(options: ReadingHighlightControllerOptions 
       currentAttemptId = ensureAttempt()
       options.onAttemptEnsured?.()
     }
+    if (!currentAttemptId) return
     const list = Array.isArray(records) ? records : []
     const keepIds = collectHighlightAnnotationIds(list)
     const knownIds = previousIds instanceof Set
@@ -428,7 +435,7 @@ export function useReadingHighlights(options: ReadingHighlightControllerOptions 
     // persist still removes ids that dropped out before a later snapshot ran.
     for (const id of knownIds) {
       if (!keepIds.has(id)) {
-        await deleteHighlightFromStore(id)
+        await deleteHighlightFromStore(id, currentAssetId, currentAttemptId)
       }
     }
     if (generation !== highlightPersistGeneration) return
@@ -449,7 +456,7 @@ export function useReadingHighlights(options: ReadingHighlightControllerOptions 
         nodeConnected
       })
       if (cleanupId) {
-        await deleteHighlightFromStore(cleanupId)
+        await deleteHighlightFromStore(cleanupId, currentAssetId, currentAttemptId)
       }
       if (!generationCurrent) return
       if (!nodeConnected) continue

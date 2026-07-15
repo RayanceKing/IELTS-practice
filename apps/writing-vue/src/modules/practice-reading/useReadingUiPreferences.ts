@@ -228,7 +228,7 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
           notesError.value = ''
           const normalized = String(value || '').trim()
           if (!normalized) {
-            if (noteAnnotationId) await deleteAnnotation(noteAnnotationId)
+            if (noteAnnotationId) await deleteAnnotation(noteAnnotationId, String(assetId), null)
             noteAnnotationId = null
             return
           }

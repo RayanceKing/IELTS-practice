@@ -636,19 +636,17 @@ fn endless_pool_and_advance() {
             idempotency_key: "e-sub-1".into(),
         },
     )
-    .unwrap();
-    assert!(recovered.submission.idempotent_replay);
-    assert_eq!(
-        recovered.session.current_attempt_id,
-        r.session.current_attempt_id
-    );
+    .unwrap_err();
+    assert!(recovered
+        .to_string()
+        .contains("already completed in this session"));
     let persisted_attempts: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM attempts WHERE suite_id = ?1",
             [&session.id],
             |row| row.get(0),
-        )
-        .unwrap();
+    )
+    .unwrap();
     assert_eq!(persisted_attempts, 1);
 
     let advanced = advance_endless(
@@ -657,11 +655,71 @@ fn endless_pool_and_advance() {
             session_id: session.id.clone(),
         },
     )
-    .unwrap();
-    assert!(advanced.current_asset_id.is_some());
+    .unwrap_err();
+    assert!(advanced.to_string().contains("endless_advance is retired"));
+    let unchanged = get_endless_session(&conn, &session.id).unwrap();
+    assert_eq!(unchanged.current_asset_id, r.next_asset_id);
     let cancelled = cancel_endless(&conn, &session.id).unwrap();
     assert_eq!(cancelled.status, ielts_db::EndlessStatus::Cancelled);
     assert!(cancelled.current_asset_id.is_none());
+}
+
+#[test]
+fn endless_submit_accepts_only_the_current_uncompleted_asset() {
+    let (dir, conn) = open_db();
+    seed_assets(&conn, &dir, &["a", "b", "c"]);
+    let session = create_endless_session(
+        &conn,
+        &CreateEndlessCommand {
+            pool_policy: None,
+            seed: Some("endless-current-only".into()),
+            idempotency_key: Some("endless-current-only".into()),
+        },
+    )
+    .unwrap();
+    let first_asset = session.current_asset_id.clone().unwrap();
+    let submitted = submit_endless_passage(
+        &conn,
+        &endless_submit_command(&session.id, &first_asset, "endless-current-first"),
+    )
+    .unwrap();
+    let current_asset = submitted.next_asset_id.clone().unwrap();
+    let another_pending_asset = session
+        .pool
+        .iter()
+        .find(|asset_id| **asset_id != first_asset && **asset_id != current_asset)
+        .unwrap()
+        .clone();
+
+    let wrong_current = submit_endless_passage(
+        &conn,
+        &endless_submit_command(&session.id, &another_pending_asset, "endless-wrong-current"),
+    )
+    .unwrap_err();
+    assert!(wrong_current
+        .to_string()
+        .contains("must target the current asset"));
+
+    let repeated = submit_endless_passage(
+        &conn,
+        &endless_submit_command(&session.id, &first_asset, "endless-repeated-completed"),
+    )
+    .unwrap_err();
+    assert!(repeated
+        .to_string()
+        .contains("already completed in this session"));
+
+    let persisted = get_endless_session(&conn, &session.id).unwrap();
+    assert_eq!(persisted.current_asset_id.as_deref(), Some(current_asset.as_str()));
+    assert_eq!(persisted.completed_asset_ids, vec![first_asset]);
+    let attempt_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM attempts WHERE suite_id = ?1",
+            [&session.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(attempt_count, 1);
 }
 
 #[test]

@@ -357,18 +357,10 @@ const EDITOR_GROUP_LABELS = Object.freeze({
 })
 
 // 计算属性
-const filteredTopics = computed(() => {
-  const keyword = searchKeyword.value.trim().toLowerCase()
-  if (!keyword) return topicsList.value
-  return topicsList.value.filter((topic) => {
-    const title = extractTextFromTiptap(topic.title_json).toLowerCase()
-    const category = String(topic.category || '').toLowerCase()
-    return title.includes(keyword) || category.includes(keyword)
-  })
-})
-const displayCount = computed(() => (
-  searchKeyword.value.trim() ? filteredTopics.value.length : total.value
-))
+// Search/filter/pagination are SQLite queries. Filtering only the current Vue
+// page was both incomplete and a second topic-bank implementation.
+const filteredTopics = computed(() => topicsList.value)
+const displayCount = computed(() => total.value)
 const totalPages = computed(() => Math.ceil(total.value / pagination.value.limit))
 const hasActiveFilters = computed(() => (
   Boolean(filters.value.type)
@@ -410,6 +402,7 @@ async function loadTopics() {
     if (filters.value.type) activeFilters.type = filters.value.type
     if (filters.value.category) activeFilters.category = filters.value.category
     if (filters.value.difficulty > 0) activeFilters.difficulty = filters.value.difficulty
+    if (searchKeyword.value) activeFilters.search = searchKeyword.value
 
     const result = await topicsApi.list(activeFilters, pagination.value)
     if (!topicsRequestGate.isCurrent(requestId)) return
@@ -689,6 +682,11 @@ watch(filters, () => {
   pagination.value.page = 1 // 重置到第一页
   debouncedLoadTopics()
 }, { deep: true })
+
+watch(searchKeyword, () => {
+  pagination.value.page = 1
+  debouncedLoadTopics()
+})
 
 watch(() => pagination.value.page, () => {
   loadTopics() // 分页立即加载

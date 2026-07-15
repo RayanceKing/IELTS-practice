@@ -32,13 +32,6 @@ pub struct EndlessPoolPolicy {
     pub categories: Vec<String>,
     #[serde(default)]
     pub frequency_scope: Option<String>,
-    /// When true, skip assets already completed in this session.
-    #[serde(default = "default_true")]
-    pub exclude_completed: bool,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -140,7 +133,6 @@ pub fn create_endless_session(
     let policy = cmd.pool_policy.clone().unwrap_or(EndlessPoolPolicy {
         categories: vec![],
         frequency_scope: Some("all".into()),
-        exclude_completed: true,
     });
     let pool = build_endless_pool(conn, &policy, cmd.seed.as_deref().unwrap_or(id.as_str()))?;
     let first = pool.first().cloned();
@@ -168,11 +160,13 @@ pub fn get_endless_session(conn: &Connection, id: &str) -> DbResult<EndlessSessi
     load(conn, id)
 }
 
-/// Dynamic filter: remaining pool entries not yet completed (when policy says so).
+/// Endless mode never repeats a completed asset within one session.
+///
+/// This is deliberately not a policy toggle. A mode session owns one current
+/// asset, and a successful submit consumes it exactly once. Letting callers
+/// opt out created a contradictory state where `current_asset_id` could point
+/// back at an already completed asset.
 pub fn remaining_pool(session: &EndlessSession) -> Vec<String> {
-    if !session.pool_policy.exclude_completed {
-        return session.pool.clone();
-    }
     session
         .pool
         .iter()
@@ -182,29 +176,13 @@ pub fn remaining_pool(session: &EndlessSession) -> Vec<String> {
 }
 
 pub fn advance_endless(conn: &Connection, cmd: &AdvanceEndlessCommand) -> DbResult<EndlessSession> {
-    let mut session = load(conn, &cmd.session_id)?;
-    if session.status != EndlessStatus::Active {
-        return Err(DbError::Validation("endless session not active".into()));
-    }
-    let remaining = remaining_pool(&session);
-    let next = remaining.first().cloned();
-    match next {
-        Some(asset_id) => {
-            session.current_asset_id = Some(asset_id);
-            session.current_attempt_id = None;
-            session.updated_at = chrono::Utc::now().to_rfc3339();
-            persist(conn, &session)?;
-            Ok(session)
-        }
-        None => {
-            session.status = EndlessStatus::Completed;
-            session.current_asset_id = None;
-            session.current_attempt_id = None;
-            session.updated_at = chrono::Utc::now().to_rfc3339();
-            persist(conn, &session)?;
-            Ok(session)
-        }
-    }
+    let _ = (conn, cmd);
+    // Kept only because older packaged clients may still invoke the registered
+    // Tauri command. A session advances atomically inside `endless_submit`;
+    // an independent advance has no valid business meaning.
+    Err(DbError::Validation(
+        "endless_advance is retired; submit the current asset to advance".into(),
+    ))
 }
 
 pub fn cancel_endless(conn: &Connection, session_id: &str) -> DbResult<EndlessSession> {
@@ -296,11 +274,19 @@ fn submit_endless_passage_in_transaction(
     if session.status != EndlessStatus::Active {
         return Err(DbError::Validation("endless session not active".into()));
     }
+    if session
+        .completed_asset_ids
+        .iter()
+        .any(|asset_id| asset_id == &cmd.asset_id)
+    {
+        return Err(DbError::Validation(
+            "endless asset is already completed in this session".into(),
+        ));
+    }
     if session.current_asset_id.as_deref() != Some(cmd.asset_id.as_str()) {
-        // still allow if asset is in pool and not completed
-        if !session.pool.iter().any(|p| p == &cmd.asset_id) {
-            return Err(DbError::Validation("asset not in endless pool".into()));
-        }
+        return Err(DbError::Validation(
+            "endless submit must target the current asset".into(),
+        ));
     }
 
     // Stable across retries so a crash after the inner reading submit cannot
@@ -419,7 +405,6 @@ fn load(conn: &Connection, id: &str) -> DbResult<EndlessSession> {
                 pool_policy: serde_json::from_str(&policy_json).unwrap_or(EndlessPoolPolicy {
                     categories: vec![],
                     frequency_scope: None,
-                    exclude_completed: true,
                 }),
                 pool: serde_json::from_str(&pool_json).unwrap_or_default(),
                 current_asset_id: r.get(4)?,
@@ -492,21 +477,6 @@ fn load_submit_idempotent(conn: &Connection, key: &str) -> DbResult<Option<Submi
     } else {
         Ok(None)
     }
-}
-
-/// Helper for UI pool filtering without session.
-pub fn filter_pool_ids(
-    pool: &[String],
-    completed: &[String],
-    exclude_completed: bool,
-) -> Vec<String> {
-    if !exclude_completed {
-        return pool.to_vec();
-    }
-    pool.iter()
-        .filter(|id| !completed.iter().any(|c| c == *id))
-        .cloned()
-        .collect()
 }
 
 #[allow(dead_code)]

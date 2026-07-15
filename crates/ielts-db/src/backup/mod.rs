@@ -26,6 +26,7 @@ const LEGACY_BACKUP_SCHEMA_VERSION: u32 = 1;
 // transaction.
 const CANONICAL_TABLES: &[&str] = &[
     "practice_assets",
+    "writing_topics",
     "reading_suites",
     "attempts",
     "attempt_answers",
@@ -577,6 +578,7 @@ fn validate_logical_references(tables: &HashMap<&str, &BackupTable>) -> DbResult
     let threads = text_set(tables["coach_threads"], "id")?;
     let vocab = text_set(tables["vocabulary_items"], "id")?;
 
+    require_refs(tables["writing_topics"], "asset_id", &assets)?;
     require_optional_refs(tables["attempts"], "asset_id", &assets)?;
     require_optional_refs(tables["attempts"], "suite_id", &suites)?;
     require_refs(tables["attempt_answers"], "attempt_id", &attempts)?;

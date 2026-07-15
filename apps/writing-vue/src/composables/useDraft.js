@@ -4,23 +4,27 @@ import { getDraft, newIdempotencyKey, saveDraft as persistDraft } from '@/api/wr
 const VALID_TASK_TYPES = new Set(['task1', 'task2'])
 const VALID_TOPIC_MODES = new Set(['free', 'bank'])
 
-export function useDraft(draftId, getSnapshot = null) {
-    const attemptId = `compose-${draftId || 'writing'}`
+export function useDraft(draftId, getSnapshot = null, options = {}) {
+    const explicitAttemptId = String(options.attemptId || '').trim()
+    const attemptId = explicitAttemptId || `compose-${draftId || 'writing'}`
     let saveTimeout = null
     let lastSnapshot = null
     let lastPersistedSignature = ''
     let saveGeneration = 0
 
     function normalizeDraft(raw = {}) {
-        const topicId = raw.topic_id === null || raw.topic_id === undefined || raw.topic_id === ''
+        const rawTopicId = raw.topic_id ?? raw.topicId
+        const topicId = rawTopicId === null || rawTopicId === undefined
             ? null
-            : Number(raw.topic_id)
+            : String(rawTopicId).trim() || null
         const taskType = raw.task_type || raw.taskType
         const topicMode = raw.topic_mode || raw.topicMode
         return {
             task_type: VALID_TASK_TYPES.has(taskType) ? taskType : 'task2',
             topic_mode: VALID_TOPIC_MODES.has(topicMode) ? topicMode : 'free',
-            topic_id: Number.isFinite(topicId) ? topicId : null,
+            // Topic IDs are opaque strings (for example topic-UUID), not a
+            // frontend numeric primary key. Number() turns valid IDs into NaN.
+            topic_id: topicId,
             topic_text: typeof raw.topic_text === 'string' ? raw.topic_text : '',
             category: typeof raw.category === 'string' ? raw.category : '',
             content: typeof raw.content === 'string' ? raw.content : '',

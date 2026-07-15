@@ -40,6 +40,11 @@ fn migrations() -> &'static [Migration] {
                 name: "annotations_vocab_coach",
                 sql: include_str!("../../migrations/0005_annotations_vocab_coach.sql"),
             },
+            Migration {
+                version: 6,
+                name: "writing_topics",
+                sql: include_str!("../../migrations/0006_writing_topics.sql"),
+            },
         ]
     })
 }

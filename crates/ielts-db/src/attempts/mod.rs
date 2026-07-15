@@ -22,6 +22,10 @@ pub fn upsert_attempt(conn: &Connection, attempt: &AttemptRecord) -> DbResult<()
             ?16, ?17, ?18, ?19, ?20
         )
         ON CONFLICT(id) DO UPDATE SET
+            activity=excluded.activity,
+            asset_id=excluded.asset_id,
+            mode=excluded.mode,
+            suite_id=excluded.suite_id,
             status=excluded.status,
             submitted_at=excluded.submitted_at,
             completed_at=excluded.completed_at,

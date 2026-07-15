@@ -1,13 +1,14 @@
 //! Phase 5: writing draft, evaluation state machine, checkpoints, idempotency.
 
-use ielts_domain::domain::{Activity, AttemptMode, EvaluationStatus};
-use ielts_domain::dto::{SaveDraftCommand, SubmitAttemptCommand};
+use ielts_domain::domain::{Activity, AttemptMode, EvaluationStage, EvaluationStatus};
+use ielts_domain::dto::{SaveDraftCommand, SubmitAttemptCommand, WritingEvaluationV4};
 use tempfile::tempdir;
 
 use ielts_db::{
-    get_writing_draft, list_events, load_evaluation_for_attempt, migrate, open_connection,
-    prepare_evaluation, recover_interrupted_sessions, request_cancel, save_writing_draft,
-    start_evaluation, submit_writing_attempt, DbOpenOptions, DeterministicProvider, ProviderError,
+    finish_evaluation, get_history_detail, get_writing_draft, list_events,
+    load_evaluation_for_attempt, migrate, open_connection, prepare_evaluation,
+    recover_interrupted_sessions, request_cancel, save_writing_draft, start_evaluation,
+    submit_writing_attempt, DbOpenOptions, DeterministicProvider, ProviderError,
     StartEvaluationCommand, WritingProvider,
 };
 use ielts_domain::domain::WritingTaskType;
@@ -283,6 +284,217 @@ fn recover_marks_running_sessions_interrupted() {
     assert_eq!(status, "interrupted");
     // draft still there
     assert!(get_writing_draft(&conn, "a6").unwrap().is_some());
+}
+
+#[test]
+fn recovery_reconciles_result_event_and_attempt_projection() {
+    let (_dir, conn) = open_db();
+    let essay = "Recovery must leave one canonical writing state. ".repeat(30);
+    save_writing_draft(&conn, &draft_cmd("a-reconcile", &essay, "d-reconcile")).unwrap();
+    let prepared = prepare_evaluation(
+        &conn,
+        &StartEvaluationCommand {
+            attempt_id: "a-reconcile".into(),
+            idempotency_key: "eval-reconcile".into(),
+            task_type: Some("task2".into()),
+            retry_of: None,
+        },
+        "openai-compatible",
+        "test-model",
+    )
+    .unwrap();
+
+    // Simulate a process death after the durable session moved to scoring but
+    // before its JSON snapshot was updated for that stage.
+    conn.execute(
+        "UPDATE evaluation_sessions SET status = 'running', stage = 'scoring', revision = 4
+         WHERE id = ?1",
+        rusqlite::params![prepared.session_id],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE writing_evaluations SET status = 'running', stage = 'scoring'
+         WHERE id = ?1",
+        rusqlite::params![prepared.evaluation_id],
+    )
+    .unwrap();
+
+    assert_eq!(recover_interrupted_sessions(&conn).unwrap(), 1);
+    assert_eq!(recover_interrupted_sessions(&conn).unwrap(), 0);
+
+    let canonical = load_evaluation_for_attempt(&conn, "a-reconcile")
+        .unwrap()
+        .unwrap();
+    assert_eq!(canonical.id, prepared.evaluation_id);
+    assert_eq!(canonical.status, EvaluationStatus::Interrupted);
+    assert_eq!(canonical.stage, EvaluationStage::Scoring);
+
+    let result_json: String = conn
+        .query_row(
+            "SELECT result_json FROM writing_evaluations WHERE id = ?1",
+            rusqlite::params![prepared.evaluation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let persisted: WritingEvaluationV4 = serde_json::from_str(&result_json).unwrap();
+    assert_eq!(persisted.status, EvaluationStatus::Interrupted);
+    assert_eq!(persisted.stage, EvaluationStage::Scoring);
+
+    let events = list_events(&conn, &prepared.evaluation_id, 0).unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.event_type == "interrupted")
+            .count(),
+        1
+    );
+    assert!(events.iter().any(|event| {
+        event.event_type == "interrupted"
+            && event.payload["reason"] == "process_restarted"
+            && event.payload["keptInputs"] == true
+    }));
+
+    let (attempt_status, attempt_completed_at): (String, Option<String>) = conn
+        .query_row(
+            "SELECT status, completed_at FROM attempts WHERE id = 'a-reconcile'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(attempt_status, "interrupted");
+    assert!(attempt_completed_at.is_some());
+    assert_eq!(
+        get_writing_draft(&conn, "a-reconcile")
+            .unwrap()
+            .unwrap()
+            .content_text,
+        essay
+    );
+}
+
+#[test]
+fn retry_keeps_latest_result_when_an_older_provider_call_finishes_late() {
+    let (_dir, conn) = open_db();
+    let essay = "Latest retry must win over an old provider response. ".repeat(40);
+    save_writing_draft(
+        &conn,
+        &draft_cmd("a-latest-retry", &essay, "d-latest-retry"),
+    )
+    .unwrap();
+
+    let first = prepare_evaluation(
+        &conn,
+        &StartEvaluationCommand {
+            attempt_id: "a-latest-retry".into(),
+            idempotency_key: "eval-latest-first".into(),
+            task_type: Some("task2".into()),
+            retry_of: None,
+        },
+        "openai-compatible",
+        "test-model",
+    )
+    .unwrap();
+    let second = start_evaluation(
+        &conn,
+        &StartEvaluationCommand {
+            attempt_id: "a-latest-retry".into(),
+            idempotency_key: "eval-latest-second".into(),
+            task_type: Some("task2".into()),
+            retry_of: Some(first.evaluation_id.clone()),
+        },
+        &DeterministicProvider,
+    )
+    .unwrap();
+    let second_score = second.evaluation.score.as_ref().unwrap().overall;
+
+    // The stale request finishes after the retry. Its update timestamp is now
+    // newer, but it is not the newest evaluation in the retry lineage.
+    let late_score = WritingScoreV4 {
+        overall: 5.0,
+        task_response: 5.0,
+        coherence: 5.0,
+        lexical: 5.0,
+        grammar: 5.0,
+    };
+    let late_feedback = WritingFeedbackV4 {
+        overall: Some("stale response".into()),
+        plan: vec![],
+        paragraphs: vec![],
+        sentences: vec![],
+        rewrites: vec![],
+    };
+    finish_evaluation(&conn, &first, Ok(late_score), Some(late_feedback), None).unwrap();
+
+    let latest = load_evaluation_for_attempt(&conn, "a-latest-retry")
+        .unwrap()
+        .unwrap();
+    assert_eq!(latest.id, second.session.evaluation_id);
+    assert_eq!(latest.score.as_ref().unwrap().overall, second_score);
+
+    let history = get_history_detail(&conn, "a-latest-retry").unwrap();
+    assert_eq!(history.evaluation.unwrap().id, second.session.evaluation_id);
+    let (attempt_status, attempt_score): (String, Option<f64>) = conn
+        .query_row(
+            "SELECT status, score_value FROM attempts WHERE id = 'a-latest-retry'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(attempt_status, "completed");
+    assert_eq!(attempt_score, Some(second_score));
+}
+
+#[test]
+fn recovery_of_an_old_session_does_not_override_a_completed_retry() {
+    let (_dir, conn) = open_db();
+    let essay = "Recovering an old session must not hide the newer retry. ".repeat(35);
+    save_writing_draft(
+        &conn,
+        &draft_cmd("a-recovery-retry", &essay, "d-recovery-retry"),
+    )
+    .unwrap();
+
+    let first = prepare_evaluation(
+        &conn,
+        &StartEvaluationCommand {
+            attempt_id: "a-recovery-retry".into(),
+            idempotency_key: "eval-recovery-old".into(),
+            task_type: Some("task2".into()),
+            retry_of: None,
+        },
+        "openai-compatible",
+        "test-model",
+    )
+    .unwrap();
+    let second = start_evaluation(
+        &conn,
+        &StartEvaluationCommand {
+            attempt_id: "a-recovery-retry".into(),
+            idempotency_key: "eval-recovery-new".into(),
+            task_type: Some("task2".into()),
+            retry_of: Some(first.evaluation_id.clone()),
+        },
+        &DeterministicProvider,
+    )
+    .unwrap();
+
+    assert_eq!(recover_interrupted_sessions(&conn).unwrap(), 1);
+    let latest = load_evaluation_for_attempt(&conn, "a-recovery-retry")
+        .unwrap()
+        .unwrap();
+    assert_eq!(latest.id, second.session.evaluation_id);
+    assert!(matches!(
+        latest.status,
+        EvaluationStatus::Completed | EvaluationStatus::Degraded
+    ));
+    let attempt_status: String = conn
+        .query_row(
+            "SELECT status FROM attempts WHERE id = 'a-recovery-retry'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(attempt_status, "completed");
 }
 
 #[test]

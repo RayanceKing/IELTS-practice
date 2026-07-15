@@ -38,9 +38,14 @@ export function listAnnotations(
   assetId: string,
   attemptId?: string | null
 ): Promise<{ items: AnnotationRecord[] }>
-export function deleteAnnotation(id: string): Promise<unknown>
+export function deleteAnnotation(
+  id: string,
+  assetId: string,
+  attemptId?: string | null
+): Promise<unknown>
 export function revalidateAnnotations(
   assetId: string,
+  attemptId: string | null,
   scope: string,
   document: string
 ): Promise<{ items: AnnotationRecord[] }>
