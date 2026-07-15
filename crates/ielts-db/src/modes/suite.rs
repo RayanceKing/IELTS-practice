@@ -107,6 +107,25 @@ pub struct CreateSuiteCommand {
     pub idempotency_key: Option<String>,
 }
 
+/// Request a single answerable Reading asset without creating a mode session.
+/// Selection policy belongs to Rust even though the resulting single practice
+/// has no durable session of its own.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct PickReadingPracticeAssetCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PickedReadingPracticeAsset {
+    pub asset_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SuiteAssetSeed {
@@ -413,6 +432,66 @@ pub(crate) fn list_answerable_reading_assets(conn: &Connection) -> DbResult<Vec<
         answerable.push(asset);
     }
     Ok(answerable)
+}
+
+/// Pick from the indexed, answerable resource set. A caller may provide a seed
+/// for a repeatable selection (tests/replay); normal UI requests receive a
+/// server-generated seed and never make a frontend random choice.
+pub fn pick_reading_practice_asset(
+    conn: &Connection,
+    cmd: &PickReadingPracticeAssetCommand,
+) -> DbResult<PickedReadingPracticeAsset> {
+    let requested_category = cmd
+        .category
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("all"));
+    let category = requested_category.map(|value| normalize_category(Some(value)));
+    if let Some(value) = category.as_deref() {
+        if !matches!(value, "P1" | "P2" | "P3") {
+            return Err(DbError::Validation(format!(
+                "unsupported reading practice category: {value}"
+            )));
+        }
+    }
+
+    let mut candidates = list_answerable_reading_assets(conn)?;
+    if let Some(category) = category.as_deref() {
+        candidates.retain(|asset| normalize_category(asset.category.as_deref()) == category);
+    }
+    if candidates.is_empty() {
+        let scope = category.as_deref().unwrap_or("all categories");
+        return Err(DbError::Validation(format!(
+            "no answerable reading assets available for {scope}"
+        )));
+    }
+
+    candidates.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.title.cmp(&right.title))
+    });
+    let generated_seed;
+    let seed = match cmd
+        .seed
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => value,
+        None => {
+            generated_seed = Uuid::new_v4().to_string();
+            &generated_seed
+        }
+    };
+    let index = stable_pick_index(
+        Some(seed),
+        category.as_deref().unwrap_or("all"),
+        candidates.len(),
+    );
+    Ok(PickedReadingPracticeAsset {
+        asset_id: candidates[index].id.clone(),
+    })
 }
 
 fn validate_suite_sequence(

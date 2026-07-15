@@ -1,7 +1,7 @@
 <template>
   <div id="overview-view" :class="['view', 'hero-panel', 'hero-section', { active: activeView === 'overview' }]" data-reading-overview>
     <div class="hero-panel__header">
-      <h2 class="hero-panel__title heading-serif">📊 学习总览</h2>
+      <h2 class="hero-panel__title heading-serif">学习总览</h2>
     </div>
     <div class="category-grid" id="category-overview">
       <div class="overview-section-heading">
@@ -15,7 +15,7 @@
             data-overview-action="endless"
             @click="$emit('start-endless-mode', $event)"
           >
-            <span class="ui-emoji-icon" v-html="icons.endless"></span>
+            <span class="overview-action-glyph" aria-hidden="true">∞</span>
             <span>无尽模式</span>
           </button>
           <button
@@ -27,7 +27,7 @@
             :disabled="creatingSuite"
             @click="$emit('open-suite-mode-selector', $event)"
           >
-            <span class="ui-emoji-icon" v-html="icons.suite"></span>
+            <span class="overview-action-glyph" aria-hidden="true">▦</span>
             <span>{{ creatingSuite ? '创建中' : '套题模式' }}</span>
           </button>
         </div>
@@ -40,7 +40,7 @@
         :data-reading-category-card="entry.category"
       >
         <div class="category-header">
-          <div class="category-icon">📖</div>
+          <div class="category-icon" aria-hidden="true">阅读</div>
           <div>
             <div class="category-title">{{ entry.category }} 阅读</div>
             <div class="category-meta">{{ entry.total }} 篇</div>
@@ -55,7 +55,7 @@
             data-type="reading"
             @click="$emit('browse-category', entry.category, 'reading')"
           >
-            📚 浏览题库
+            浏览题库
           </button>
           <button
             class="btn btn-secondary"
@@ -65,7 +65,7 @@
             data-type="reading"
             @click="$emit('start-random-practice', entry.category, 'reading')"
           >
-            🎲 随机练习
+            随机练习
           </button>
         </div>
       </div>

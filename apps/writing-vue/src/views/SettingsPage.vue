@@ -1,7 +1,7 @@
 <template>
   <div id="settings-view" class="settings-page view hero-panel hero-section active" data-writing-settings>
     <div class="hero-panel__header">
-      <h2 class="hero-panel__title heading-serif">⚙️ 系统设置</h2>
+      <h2 class="hero-panel__title heading-serif">系统设置</h2>
     </div>
 
     <div class="hero-settings-group" aria-label="设置主面板">
@@ -1716,7 +1716,7 @@ onBeforeUnmount(() => {
 
 .page-header h1 {
   font-size: 28px;
-  color: var(--text-primary);
+  color: var(--atlas-ink);
 }
 
 /* 标签页 */
@@ -1728,7 +1728,7 @@ onBeforeUnmount(() => {
 .tabs {
   display: flex;
   border-bottom: 2px solid var(--border-color);
-  background: var(--bg-light);
+  background: var(--atlas-glass-elevated);
 }
 
 .tab {
@@ -1739,18 +1739,18 @@ onBeforeUnmount(() => {
   border-bottom: 3px solid transparent;
   font-size: 15px;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .tab:hover {
-  background: rgba(0, 0, 0, 0.02);
+  background: color-mix(in srgb, var(--atlas-ink) 2%, transparent);
 }
 
 .tab.active {
-  color: var(--primary-color);
-  border-bottom-color: var(--primary-color);
+  color: var(--atlas-accent);
+  border-bottom-color: var(--atlas-accent);
   background: white;
 }
 
@@ -1786,15 +1786,15 @@ onBeforeUnmount(() => {
 }
 
 .inline-message-error {
-  background: #ffebee;
-  color: #b71c1c;
-  border: 1px solid #ffcdd2;
+  background: var(--atlas-library-danger);
+  color: var(--atlas-danger);
+  border: 1px solid color-mix(in srgb, var(--atlas-danger) 24%, transparent);
 }
 
 .inline-message-success {
-  background: #e8f5e9;
-  color: #1b5e20;
-  border: 1px solid #c8e6c9;
+  background: var(--atlas-library-success);
+  color: var(--atlas-success);
+  border: 1px solid color-mix(in srgb, var(--atlas-success) 24%, transparent);
 }
 
 .btn-text:disabled {
@@ -1803,7 +1803,7 @@ onBeforeUnmount(() => {
 }
 
 .btn-text.danger {
-  color: #c62828;
+  color: var(--atlas-danger);
 }
 
 .form-grid {
@@ -1840,13 +1840,13 @@ onBeforeUnmount(() => {
 
 .section h3 {
   font-size: 18px;
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   margin-bottom: 12px;
 }
 
 .hint {
   font-size: 14px;
-  color: var(--text-muted);
+  color: var(--atlas-ink-faint);
   margin: 8px 0;
 }
 
@@ -1868,13 +1868,13 @@ onBeforeUnmount(() => {
 }
 
 .mode-card:hover {
-  border-color: var(--primary-color);
-  background: var(--bg-muted);
+  border-color: var(--atlas-accent);
+  background: var(--atlas-glass-pressed);
 }
 
 .mode-card.active {
-  border-color: var(--primary-color);
-  background: var(--primary-soft);
+  border-color: var(--atlas-accent);
+  background: var(--atlas-accent-soft);
 }
 
 .mode-header {
@@ -1892,31 +1892,31 @@ onBeforeUnmount(() => {
 .mode-name {
   font-size: 16px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--atlas-ink);
 }
 
 .mode-temp {
   font-size: 14px;
-  color: var(--primary-color);
+  color: var(--atlas-accent);
   font-weight: 600;
   margin-bottom: 8px;
 }
 
 .mode-desc {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
 }
 
 .custom-temperature-panel {
   margin: 0 0 20px;
   padding: 16px;
-  background: var(--bg-light);
+  background: var(--atlas-glass-elevated);
   border-radius: var(--border-radius);
 }
 
 .custom-temperature-panel h4 {
   font-size: 15px;
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   margin-bottom: 12px;
 }
 
@@ -1931,7 +1931,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 6px;
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
 }
 
 .custom-temperature-field input {
@@ -1952,20 +1952,20 @@ onBeforeUnmount(() => {
 
 .param-card {
   padding: 16px;
-  background: var(--bg-light);
+  background: var(--atlas-glass-elevated);
   border-radius: var(--border-radius);
 }
 
 .param-card h4 {
   font-size: 15px;
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   margin-bottom: 8px;
 }
 
 .param-card p {
   margin: 4px 0;
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
 }
 
 /* 数据管理 */
@@ -1976,7 +1976,7 @@ onBeforeUnmount(() => {
 .setting-item label {
   display: block;
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   margin-bottom: 8px;
 }
 
@@ -1997,19 +1997,19 @@ onBeforeUnmount(() => {
 
 .input-suffix {
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
 }
 
 /* 危险区域 */
 .danger-zone {
-  border: 2px solid #F44336;
+  border: 2px solid var(--atlas-danger);
   padding: 20px;
   border-radius: var(--border-radius);
-  background: rgba(244, 67, 54, 0.02);
+  background: color-mix(in srgb, var(--atlas-danger) 2%, transparent);
 }
 
 .danger-zone h3 {
-  color: #F44336;
+  color: var(--atlas-danger);
 }
 
 .danger-item {
@@ -2021,7 +2021,7 @@ onBeforeUnmount(() => {
 
 .danger-item h4 {
   font-size: 15px;
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   margin-bottom: 4px;
 }
 
@@ -2043,24 +2043,24 @@ onBeforeUnmount(() => {
   height: 64px;
   border-radius: 14px;
   object-fit: cover;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--atlas-ink) 18%, transparent);
 }
 
 .about-section h2 {
   font-size: 24px;
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   margin-bottom: 8px;
 }
 
 .version {
   font-size: 14px;
-  color: var(--text-muted);
+  color: var(--atlas-ink-faint);
   margin-bottom: 32px;
 }
 
 .about-info {
   text-align: left;
-  background: var(--bg-light);
+  background: var(--atlas-glass-elevated);
   padding: 20px;
   border-radius: var(--border-radius);
   margin-bottom: 24px;
@@ -2079,25 +2079,25 @@ onBeforeUnmount(() => {
 
 .info-row .label {
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
 }
 
 .info-row .value {
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   font-family: monospace;
   font-size: 13px;
 }
 
 .about-features {
   text-align: left;
-  background: var(--bg-light);
+  background: var(--atlas-glass-elevated);
   padding: 20px;
   border-radius: var(--border-radius);
 }
 
 .about-features h3 {
   font-size: 16px;
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   margin-bottom: 12px;
 }
 
@@ -2110,7 +2110,7 @@ onBeforeUnmount(() => {
 .about-features li {
   padding: 8px 0;
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
 }
 
 .settings-page {
@@ -2135,7 +2135,7 @@ onBeforeUnmount(() => {
 
 .settings-page .page-header__copy p {
   max-width: 760px;
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
   font-size: 15px;
 }
 
@@ -2176,13 +2176,13 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--atlas-ink);
 }
 
 .settings-page .tabs-head p {
   margin: 0;
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--atlas-ink-faint);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -2207,25 +2207,25 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   text-align: left;
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
   background: transparent;
 }
 
 .settings-page .tab-icon {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--atlas-ink-faint);
 }
 
 .settings-page .tab:hover {
-  background: rgba(255, 255, 255, 0.42);
+  background: color-mix(in srgb, var(--atlas-glass) 42%, transparent);
   border-color: var(--lg-border-color);
 }
 
 .settings-page .tab.active {
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   border-bottom-color: transparent;
   border-color: var(--lg-border-color);
-  background: rgba(255, 255, 255, 0.7);
+  background: color-mix(in srgb, var(--atlas-glass) 7%, transparent);
   box-shadow: var(--lg-shadow-subtle);
 }
 
@@ -2259,9 +2259,9 @@ onBeforeUnmount(() => {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--primary-color);
-  background: rgba(201, 100, 66, 0.1);
-  border: 1px solid rgba(201, 100, 66, 0.18);
+  color: var(--atlas-accent);
+  background: color-mix(in srgb, var(--atlas-accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--atlas-accent) 16%, transparent);
 }
 
 .settings-page .form-actions {
@@ -2280,7 +2280,7 @@ onBeforeUnmount(() => {
   padding: 14px 16px;
   border: 1px solid var(--lg-border-color);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.56);
+  background: color-mix(in srgb, var(--atlas-glass) 56%, transparent);
   cursor: pointer;
   box-shadow: var(--lg-shadow-subtle);
   backdrop-filter: blur(var(--lg-blur-sm)) saturate(var(--lg-saturate));
@@ -2293,12 +2293,12 @@ onBeforeUnmount(() => {
 
 .settings-page .mode-card:hover {
   transform: translateY(-1px);
-  border-color: rgba(201, 100, 66, 0.28);
+  border-color: color-mix(in srgb, var(--atlas-accent) 16%, transparent);
 }
 
 .settings-page .mode-card.active {
-  background: rgba(255, 255, 255, 0.74);
-  border-color: rgba(201, 100, 66, 0.36);
+  background: color-mix(in srgb, var(--atlas-glass) 74%, transparent);
+  border-color: color-mix(in srgb, var(--atlas-accent) 16%, transparent);
   box-shadow: var(--lg-shadow-elevated);
 }
 
@@ -2312,8 +2312,8 @@ onBeforeUnmount(() => {
 }
 
 .settings-page .danger-zone {
-  border-color: rgba(181, 51, 51, 0.22);
-  background: rgba(255, 240, 238, 0.6);
+  border-color: color-mix(in srgb, var(--atlas-danger) 16%, transparent);
+  background: var(--atlas-library-danger);
 }
 
 .settings-page .about-section {
@@ -2364,12 +2364,11 @@ onBeforeUnmount(() => {
   align-items: end;
   gap: 24px;
   padding: 22px 24px;
-  border: 1px solid rgba(255, 255, 255, 0.62);
+  border: 1px solid color-mix(in srgb, var(--atlas-glass) 62%, transparent);
   border-radius: 18px;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.42)),
-    linear-gradient(90deg, rgba(201, 100, 66, 0.08), rgba(83, 120, 93, 0.08));
-  box-shadow: 0 18px 42px -24px rgba(20, 20, 19, 0.26);
+    var(--atlas-sheen);
+  box-shadow: 0 18px 42px -24px color-mix(in srgb, var(--atlas-ink) 26%, transparent);
   backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
   -webkit-backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
 }
@@ -2380,7 +2379,7 @@ onBeforeUnmount(() => {
 }
 
 .settings-eyebrow {
-  color: var(--primary-color);
+  color: var(--atlas-accent);
   font-size: 0.74rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -2399,7 +2398,7 @@ onBeforeUnmount(() => {
 .field small,
 .settings-savebar span,
 .setting-control__copy span {
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
 }
 
 .settings-hero p {
@@ -2420,20 +2419,20 @@ onBeforeUnmount(() => {
   align-content: center;
   gap: 2px;
   padding: 12px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.64);
+  border: 1px solid color-mix(in srgb, var(--atlas-glass) 64%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.56);
+  background: color-mix(in srgb, var(--atlas-glass) 56%, transparent);
 }
 
 .settings-metric span {
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   font-size: 1.22rem;
   font-weight: 800;
   line-height: 1.1;
 }
 
 .settings-metric small {
-  color: var(--text-muted);
+  color: var(--atlas-ink-faint);
   font-size: 0.76rem;
 }
 
@@ -2450,10 +2449,10 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 6px;
   padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.62);
+  border: 1px solid color-mix(in srgb, var(--atlas-glass) 62%, transparent);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.58);
-  box-shadow: 0 14px 36px -28px rgba(20, 20, 19, 0.34);
+  background: color-mix(in srgb, var(--atlas-glass) 58%, transparent);
+  box-shadow: 0 14px 36px -28px color-mix(in srgb, var(--atlas-ink) 34%, transparent);
   backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
   -webkit-backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
 }
@@ -2462,19 +2461,19 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 2px;
   padding: 6px 8px 12px;
-  border-bottom: 1px solid rgba(77, 76, 72, 0.1);
+  border-bottom: 1px solid var(--atlas-line);
   margin-bottom: 4px;
 }
 
 .settings-nav__head span {
-  color: var(--text-muted);
+  color: var(--atlas-ink-faint);
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
 .settings-nav__head strong {
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   font-size: 1rem;
 }
 
@@ -2488,7 +2487,7 @@ onBeforeUnmount(() => {
   padding: 9px 10px;
   border: 1px solid transparent;
   border-radius: 12px;
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -2500,15 +2499,15 @@ onBeforeUnmount(() => {
 
 .settings-nav__item:hover {
   transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, 0.72);
-  background: rgba(255, 255, 255, 0.48);
+  border-color: color-mix(in srgb, var(--atlas-glass) 72%, transparent);
+  background: color-mix(in srgb, var(--atlas-glass) 48%, transparent);
 }
 
 .settings-nav__item.is-active {
-  color: var(--text-primary);
-  border-color: rgba(201, 100, 66, 0.24);
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 8px 18px -14px rgba(201, 100, 66, 0.54);
+  color: var(--atlas-ink);
+  border-color: color-mix(in srgb, var(--atlas-accent) 16%, transparent);
+  background: color-mix(in srgb, var(--atlas-glass) 78%, transparent);
+  box-shadow: 0 8px 18px -14px color-mix(in srgb, var(--atlas-accent) 16%, transparent);
 }
 
 .settings-nav__item strong,
@@ -2524,7 +2523,7 @@ onBeforeUnmount(() => {
 
 .settings-nav__item small {
   margin-top: 2px;
-  color: var(--text-muted);
+  color: var(--atlas-ink-faint);
   font-size: 0.75rem;
   line-height: 1.25;
 }
@@ -2538,9 +2537,9 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   border-radius: 10px;
   font-size: 18px;
-  color: var(--primary-color);
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(201, 100, 66, 0.12);
+  color: var(--atlas-accent);
+  background: color-mix(in srgb, var(--atlas-glass) 58%, transparent);
+  border: 1px solid color-mix(in srgb, var(--atlas-accent) 16%, transparent);
 }
 
 .settings-nav__icon :deep(svg),
@@ -2560,10 +2559,10 @@ onBeforeUnmount(() => {
 
 .settings-workspace__head,
 .settings-panel {
-  border: 1px solid rgba(255, 255, 255, 0.64);
+  border: 1px solid color-mix(in srgb, var(--atlas-glass) 64%, transparent);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.62);
-  box-shadow: 0 18px 42px -30px rgba(20, 20, 19, 0.3);
+  background: color-mix(in srgb, var(--atlas-glass) 62%, transparent);
+  box-shadow: 0 18px 42px -30px color-mix(in srgb, var(--atlas-ink) 30%, transparent);
   backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
   -webkit-backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
 }
@@ -2617,30 +2616,30 @@ onBeforeUnmount(() => {
   justify-content: center;
   min-height: 26px;
   padding: 4px 9px;
-  border: 1px solid rgba(77, 76, 72, 0.1);
+  border: 1px solid var(--atlas-line);
   border-radius: 999px;
-  color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.54);
+  color: var(--atlas-ink-soft);
+  background: color-mix(in srgb, var(--atlas-glass) 54%, transparent);
   font-size: 0.78rem;
   font-weight: 700;
   white-space: nowrap;
 }
 
 .settings-badge--accent {
-  color: var(--primary-color);
-  border-color: rgba(201, 100, 66, 0.22);
-  background: rgba(201, 100, 66, 0.1);
+  color: var(--atlas-accent);
+  border-color: color-mix(in srgb, var(--atlas-accent) 16%, transparent);
+  background: color-mix(in srgb, var(--atlas-accent) 16%, transparent);
 }
 
 .settings-badge--success {
-  color: var(--success-color);
-  border-color: rgba(83, 120, 93, 0.2);
-  background: rgba(83, 120, 93, 0.1);
+  color: var(--atlas-success);
+  border-color: color-mix(in srgb, var(--atlas-success) 12%, transparent);
+  background: color-mix(in srgb, var(--atlas-success) 12%, transparent);
 }
 
 .settings-badge--muted {
-  color: var(--text-muted);
-  background: rgba(232, 230, 220, 0.5);
+  color: var(--atlas-ink-faint);
+  background: var(--atlas-glass-pressed);
 }
 
 .settings-list {
@@ -2655,9 +2654,9 @@ onBeforeUnmount(() => {
   align-items: center;
   min-height: 72px;
   padding: 12px 14px;
-  border: 1px solid rgba(77, 76, 72, 0.08);
+  border: 1px solid var(--atlas-line);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.48);
+  background: color-mix(in srgb, var(--atlas-glass) 48%, transparent);
 }
 
 .settings-list__main {
@@ -2676,12 +2675,12 @@ onBeforeUnmount(() => {
 }
 
 .settings-list__title strong {
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   font-size: 0.98rem;
 }
 
 .settings-list__meta {
-  color: var(--text-muted);
+  color: var(--atlas-ink-faint);
   font-size: 0.84rem;
 }
 
@@ -2699,7 +2698,7 @@ onBeforeUnmount(() => {
 }
 
 .settings-page .btn-text:hover:not(:disabled) {
-  background: rgba(201, 100, 66, 0.09);
+  background: color-mix(in srgb, var(--atlas-accent) 16%, transparent);
 }
 
 .settings-page .btn-text:disabled {
@@ -2726,7 +2725,7 @@ onBeforeUnmount(() => {
 
 .field span,
 .custom-temperature-field span {
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
   font-size: 0.82rem;
   font-weight: 700;
 }
@@ -2735,9 +2734,9 @@ onBeforeUnmount(() => {
 .settings-page select,
 .settings-page textarea {
   min-height: 44px;
-  border-color: rgba(77, 76, 72, 0.12);
+  border-color: var(--atlas-line);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
+  background: color-mix(in srgb, var(--atlas-glass) 72%, transparent);
 }
 
 .settings-page .dialog .input {
@@ -2766,18 +2765,17 @@ onBeforeUnmount(() => {
   align-content: space-between;
   gap: 16px;
   padding: 18px;
-  border: 1px solid rgba(77, 76, 72, 0.1);
+  border: 1px solid var(--atlas-line);
   border-radius: 14px;
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.52);
+  color: var(--atlas-ink);
+  background: color-mix(in srgb, var(--atlas-glass) 52%, transparent);
   text-align: left;
 }
 
 .settings-page .mode-card.active {
-  border-color: rgba(201, 100, 66, 0.38);
+  border-color: color-mix(in srgb, var(--atlas-accent) 16%, transparent);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.58)),
-    rgba(201, 100, 66, 0.08);
+    var(--atlas-sheen);
 }
 
 .settings-page .mode-header {
@@ -2795,9 +2793,9 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   border-radius: 12px;
   font-size: 20px;
-  color: var(--primary-color);
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(201, 100, 66, 0.12);
+  color: var(--atlas-accent);
+  background: color-mix(in srgb, var(--atlas-glass) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--atlas-accent) 16%, transparent);
 }
 
 .mode-name,
@@ -2816,16 +2814,16 @@ onBeforeUnmount(() => {
 
 .settings-page .mode-temp {
   margin: 0;
-  color: var(--primary-color);
+  color: var(--atlas-accent);
   font-family: var(--font-family-mono);
   font-size: 0.86rem;
 }
 
 .custom-temperature-panel {
   padding: 16px;
-  border: 1px solid rgba(77, 76, 72, 0.08);
+  border: 1px solid var(--atlas-line);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.44);
+  background: color-mix(in srgb, var(--atlas-glass) 44%, transparent);
 }
 
 .custom-temperature-grid {
@@ -2840,9 +2838,9 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 16px;
   padding: 14px 16px;
-  border: 1px solid rgba(77, 76, 72, 0.08);
+  border: 1px solid var(--atlas-line);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.5);
+  background: color-mix(in srgb, var(--atlas-glass) 5%, transparent);
 }
 
 .settings-savebar > div {
@@ -2851,7 +2849,7 @@ onBeforeUnmount(() => {
 }
 
 .settings-savebar strong {
-  color: var(--text-primary);
+  color: var(--atlas-ink);
 }
 
 .setting-control {
@@ -2860,9 +2858,9 @@ onBeforeUnmount(() => {
   gap: 18px;
   align-items: center;
   padding: 16px;
-  border: 1px solid rgba(77, 76, 72, 0.08);
+  border: 1px solid var(--atlas-line);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.48);
+  background: color-mix(in srgb, var(--atlas-glass) 48%, transparent);
 }
 
 .setting-control__copy {
@@ -2871,7 +2869,7 @@ onBeforeUnmount(() => {
 }
 
 .setting-control__copy strong {
-  color: var(--text-primary);
+  color: var(--atlas-ink);
 }
 
 .setting-control__input {
@@ -2882,18 +2880,18 @@ onBeforeUnmount(() => {
 }
 
 .setting-control__input span {
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
   font-weight: 700;
 }
 
 .settings-page .danger-zone {
-  border-color: rgba(181, 51, 51, 0.22);
-  background: rgba(255, 247, 245, 0.72);
+  border-color: color-mix(in srgb, var(--atlas-danger) 16%, transparent);
+  background: var(--atlas-library-danger);
 }
 
 .danger-zone .settings-panel__head h3,
 .settings-page .btn-text.danger {
-  color: var(--danger-color);
+  color: var(--atlas-danger);
 }
 
 .settings-page .danger-item {
@@ -2902,9 +2900,9 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 18px;
   padding: 16px;
-  border: 1px solid rgba(181, 51, 51, 0.14);
+  border: 1px solid color-mix(in srgb, var(--atlas-danger) 16%, transparent);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.52);
+  background: color-mix(in srgb, var(--atlas-glass) 52%, transparent);
 }
 
 .settings-page .danger-item h4 {
@@ -2960,9 +2958,9 @@ onBeforeUnmount(() => {
 .about-features {
   margin: 0;
   padding: 14px 16px;
-  border: 1px solid rgba(77, 76, 72, 0.08);
+  border: 1px solid var(--atlas-line);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.46);
+  background: color-mix(in srgb, var(--atlas-glass) 46%, transparent);
 }
 
 .info-row {
@@ -2990,8 +2988,8 @@ onBeforeUnmount(() => {
   min-height: 24px;
   padding: 3px 7px;
   border-radius: 999px;
-  color: var(--success-color);
-  background: rgba(83, 120, 93, 0.1);
+  color: var(--atlas-success);
+  background: color-mix(in srgb, var(--atlas-success) 12%, transparent);
   font-size: 0.72rem;
   font-weight: 800;
 }
@@ -2999,10 +2997,10 @@ onBeforeUnmount(() => {
 .settings-loading,
 .settings-empty {
   padding: 22px;
-  border: 1px dashed rgba(77, 76, 72, 0.16);
+  border: 1px dashed var(--atlas-line);
   border-radius: 12px;
-  color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.34);
+  color: var(--atlas-ink-soft);
+  background: color-mix(in srgb, var(--atlas-glass) 34%, transparent);
 }
 
 @media (max-width: 1080px) {
@@ -3091,370 +3089,6 @@ onBeforeUnmount(() => {
   }
 }
 
-/* Open-source settings shell parity */
-.settings-page#settings-view {
-  /* Tokens come from styles/design-system (Atlas HeroUI/Shui). */
-  max-width: 1320px;
-  margin: 20px auto 0;
-  padding: clamp(28px, 4vw, 48px);
-  border: 1px solid var(--shui-panel-border);
-  border-radius: var(--shui-radius-xl);
-  background: var(--shui-panel-bg);
-  box-shadow: var(--shui-panel-shadow);
-  backdrop-filter: blur(var(--shui-blur));
-  -webkit-backdrop-filter: blur(var(--shui-blur));
-  color: var(--bauhaus-text-main);
-  animation: rise-in 0.45s var(--ease-smooth);
-}
-
-.settings-page#settings-view *,
-.settings-page#settings-view *::before,
-.settings-page#settings-view *::after {
-  letter-spacing: 0;
-}
-
-.settings-page#settings-view > .hero-panel__header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 18px;
-}
-
-.settings-page#settings-view > .hero-panel__header .hero-panel__title {
-  margin: 0;
-  color: var(--bauhaus-text-main);
-  font-size: 1.45rem;
-  font-weight: 600;
-}
-
-.settings-page#settings-view .hero-settings-group {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
-}
-
-.settings-page#settings-view .hero-settings-group > .hero-panel {
-  position: relative;
-  overflow: hidden;
-  min-height: 0;
-  padding: 32px;
-  border: 1px solid var(--shui-panel-border);
-  border-radius: var(--shui-radius-lg);
-  background: var(--shui-panel-bg);
-  box-shadow: var(--shui-panel-shadow);
-  backdrop-filter: blur(var(--shui-blur)) saturate(150%);
-  -webkit-backdrop-filter: blur(var(--shui-blur)) saturate(150%);
-  transition:
-    transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
-    box-shadow 0.3s ease,
-    border-color 0.3s ease;
-}
-
-.settings-page#settings-view .hero-settings-group > .hero-panel:hover {
-  transform: translateY(-4px);
-  border-color: rgba(255, 255, 255, 0.7);
-  box-shadow:
-    0 30px 60px rgba(0, 0, 0, 0.12),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.6);
-}
-
-.settings-page#settings-view .hero-settings-group > .hero-panel::before,
-.settings-page#settings-view .settings-detail-panel::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  padding: 1px;
-  border-radius: inherit;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0));
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-}
-
-.settings-page#settings-view .hero-settings-group > .hero-panel > *,
-.settings-page#settings-view .settings-detail-panel > * {
-  position: relative;
-  z-index: 1;
-}
-
-.settings-page#settings-view h3 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 0.5rem;
-  color: var(--bauhaus-text-main);
-  font-size: 1.25rem;
-  font-weight: 700;
-}
-
-.settings-page#settings-view .hero-panel__muted {
-  margin: 0 0 24px;
-  color: var(--bauhaus-text-muted);
-  font-size: 0.9rem;
-}
-
-.settings-page#settings-view .hero-settings-actions {
-  display: flex;
-  flex-flow: row wrap;
-  gap: 10px;
-  margin-top: 8px;
-}
-
-.settings-page#settings-view .hero-settings-actions .btn {
-  flex: 1 1 calc(50% - 5px);
-  min-width: 124px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 40px;
-}
-
-.settings-page#settings-view .btn {
-  position: relative;
-  z-index: 1;
-  overflow: hidden;
-  padding: 9px 14px;
-  border: none;
-  border-radius: 999px;
-  font-size: 0.86rem;
-  font-weight: 600;
-  white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.settings-page#settings-view .btn::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.2), transparent);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.settings-page#settings-view .btn:hover {
-  transform: translateY(-3px) scale(1.02);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
-}
-
-.settings-page#settings-view .btn:hover::after {
-  opacity: 1;
-}
-
-.settings-page#settings-view #load-library-btn,
-.settings-page#settings-view #library-config-btn,
-.settings-page#settings-view #show-onboarding-btn,
-.settings-page#settings-view #check-updates-btn {
-  color: var(--bauhaus-text-main);
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(15, 23, 42, 0.15);
-}
-
-.settings-page#settings-view #load-library-btn:hover,
-.settings-page#settings-view #library-config-btn:hover,
-.settings-page#settings-view #show-onboarding-btn:hover,
-.settings-page#settings-view #check-updates-btn:hover {
-  color: #fff;
-  background: var(--bauhaus-accent-blue);
-  border-color: transparent;
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.3);
-}
-
-.settings-page#settings-view .data-mgmt-btn {
-  color: var(--bauhaus-accent-dark);
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(15, 23, 42, 0.15);
-}
-
-.settings-page#settings-view .data-mgmt-btn:hover {
-  color: #fff;
-  background: var(--bauhaus-accent-dark);
-  border-color: transparent;
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.25);
-}
-
-.settings-page#settings-view .settings-system-info,
-.settings-page#settings-view .system-info-surface {
-  display: grid;
-  gap: 6px;
-  margin-top: 15px;
-  padding: 18px;
-  border: 1px solid var(--shui-surface-border);
-  border-radius: var(--shui-radius-md);
-  background: var(--shui-surface-bg);
-  color: var(--bauhaus-text-main);
-  font-weight: 700;
-  line-height: 1.8;
-  overflow-wrap: anywhere;
-}
-
-.settings-page#settings-view .settings-system-info__status,
-.settings-page#settings-view .system-info-status {
-  color: var(--atlas-accent-alt);
-}
-
-.settings-page#settings-view .settings-credit {
-  display: grid;
-  gap: 12px;
-  margin-top: 30px;
-  padding-top: 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
-  text-align: center;
-}
-
-.settings-page#settings-view .settings-credit a {
-  color: gray;
-  font-size: 0.9em;
-  font-weight: 700;
-  text-decoration: none;
-  transition: opacity 0.2s ease, color 0.2s ease;
-}
-
-.settings-page#settings-view .settings-credit .inline-hover-link {
-  color: #ff1c1c;
-}
-
-.settings-page#settings-view .settings-credit a:hover {
-  opacity: 0.72;
-}
-
-.settings-page#settings-view .settings-detail-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 1900;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(15, 23, 42, 0.52);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-
-.settings-page#settings-view .settings-detail-panel {
-  position: relative;
-  width: min(1120px, 94vw);
-  max-height: 88vh;
-  display: grid;
-  gap: 16px;
-  overflow-y: auto;
-  padding: 24px;
-  border: 1px solid var(--shui-panel-border);
-  border-radius: var(--shui-radius-lg);
-  background: var(--shui-panel-bg);
-  box-shadow: var(--shui-panel-shadow);
-  backdrop-filter: blur(var(--shui-blur)) saturate(150%);
-  -webkit-backdrop-filter: blur(var(--shui-blur)) saturate(150%);
-}
-
-.settings-page#settings-view .settings-detail-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.42);
-}
-
-.settings-page#settings-view .settings-detail-head h3 {
-  margin-bottom: 4px;
-}
-
-.settings-page#settings-view .settings-detail-head p {
-  margin: 0;
-  color: var(--bauhaus-text-muted);
-}
-
-.settings-page#settings-view .settings-detail-eyebrow {
-  margin: 0 0 4px;
-  color: var(--bauhaus-accent-blue);
-  font-size: 0.76rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.settings-page#settings-view .settings-detail-close {
-  width: 36px;
-  height: 36px;
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 50%;
-  color: #64748b;
-  background: rgba(15, 23, 42, 0.06);
-  cursor: pointer;
-  font-size: 20px;
-  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease;
-}
-
-.settings-page#settings-view .settings-detail-close:hover {
-  color: #0f172a;
-  background: rgba(15, 23, 42, 0.12);
-  transform: rotate(90deg);
-}
-
-.settings-page#settings-view .settings-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.42);
-}
-
-.settings-page#settings-view .settings-tab {
-  min-height: 40px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 999px;
-  color: var(--bauhaus-text-main);
-  background: rgba(255, 255, 255, 0.52);
-  cursor: pointer;
-}
-
-.settings-page#settings-view .settings-tab:hover,
-.settings-page#settings-view .settings-tab.active {
-  color: #fff;
-  border-color: transparent;
-  background: var(--bauhaus-accent-blue);
-}
-
-.settings-page#settings-view .settings-tab__icon {
-  display: inline-flex;
-  font-size: 15px;
-}
-
-@media (max-width: 1080px) {
-  .settings-page#settings-view .hero-settings-group {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 760px) {
-  .settings-page#settings-view {
-    padding: 20px;
-  }
-
-  .settings-page#settings-view > .hero-panel__header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .settings-page#settings-view .hero-settings-actions .btn,
-  .settings-page#settings-view .settings-tabs,
-  .settings-page#settings-view .settings-tab {
-    width: 100%;
-  }
-}
-
 .settings-stat-row {
   display: flex;
   flex-wrap: wrap;
@@ -3483,7 +3117,7 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: var(--text-secondary);
+  color: var(--atlas-ink-soft);
   margin-bottom: 6px;
 }
 
@@ -3492,7 +3126,7 @@ onBeforeUnmount(() => {
   font-family: ui-monospace, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   line-height: 1.45;
-  color: var(--text-primary);
+  color: var(--atlas-ink);
   opacity: 0.92;
 }
 
@@ -3513,5 +3147,112 @@ onBeforeUnmount(() => {
 
 .data-management-panel .btn-brand {
   box-shadow: 0 8px 24px color-mix(in srgb, var(--atlas-accent) 18%, transparent);
+}
+
+/* Settings overview density: the overview is a dashboard, not four empty hero cards. */
+.settings-page > .hero-panel__header {
+  padding: 8px 4px 2px;
+}
+
+.settings-page > .hero-panel__header .hero-panel__title {
+  margin: 0;
+  font-size: clamp(1.7rem, 3vw, 2.35rem);
+  line-height: 1.1;
+}
+
+.settings-page > .hero-settings-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.settings-page > .hero-settings-group > .hero-panel {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 18px 20px;
+}
+
+.settings-page > .hero-settings-group > .hero-panel h3 {
+  margin: 0;
+  font-size: 1.12rem;
+  line-height: 1.2;
+}
+
+.settings-page > .hero-settings-group > .hero-panel > .hero-panel__muted {
+  margin: 0;
+  max-width: 72ch;
+  line-height: 1.45;
+}
+
+.settings-page .hero-settings-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.settings-page .hero-settings-actions .hero-btn {
+  min-height: 36px;
+  padding: 7px 12px;
+}
+
+.settings-page .visual-system-note {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.74rem;
+}
+
+.settings-page .settings-stat-row {
+  margin-top: 1px;
+  gap: 6px;
+}
+
+.settings-page .settings-system-info {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 16px;
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.settings-page .settings-system-info > :first-child {
+  grid-column: 1 / -1;
+}
+
+.settings-page .settings-system-info > div {
+  min-width: 0;
+}
+
+.settings-page .settings-system-info .settings-path-clip {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+
+.settings-page .settings-credit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 0;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 760px) {
+  .settings-page > .hero-settings-group {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-page .settings-system-info {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-page .settings-system-info > :first-child {
+    grid-column: auto;
+  }
 }
 </style>

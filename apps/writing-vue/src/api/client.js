@@ -45,7 +45,6 @@ const ERROR_MESSAGES = {
   invalid_response_format: '评分数据解析失败，请点击"重试"按钮',
   start_failed: '启动评测失败，请重试',
   'ai.not_configured': '未配置 AI：请先在设置中添加并启用默认模型与 API Key。',
-  not_implemented: '该功能尚未迁移到 Tauri 原生路径',
   tauri_required: '需要 Tauri 运行时（Electron/Fastify 已移除）',
   unknown_error: '未知错误，请重试'
 }
@@ -86,8 +85,8 @@ function createAiNotConfiguredError() {
 }
 
 /**
- * Fail closed before draft/submit so unconfigured AI never leaves orphan submitted attempts.
- * Mirrors writing_start_evaluation: unconfigured → refuse; deterministic offline OK; else need default+key.
+ * Fail closed only at the evaluation-provider boundary. Durable writing input
+ * must survive a missing provider so users can configure AI and retry later.
  */
 async function assertAiConfiguredForWritingEvaluation() {
   const list = await configs.list()
@@ -112,12 +111,6 @@ async function assertAiConfiguredForWritingEvaluation() {
   if (String(provider || '').trim().toLowerCase() === 'deterministic') return
 
   throw createAiNotConfiguredError()
-}
-
-function notImplemented(feature) {
-  const error = new Error(`${feature}: ${ERROR_MESSAGES.not_implemented}`)
-  error.code = 'not_implemented'
-  throw error
 }
 
 function newId(prefix = 'id') {
@@ -487,6 +480,22 @@ async function pollEvaluationEvents(attemptId, evaluationId) {
   void tick()
 }
 
+async function startSubmittedEvaluation(payload) {
+  const attemptId = payload.sessionId || payload.attemptId
+  if (!attemptId) throw new Error('missing writing attempt id')
+  await assertAiConfiguredForWritingEvaluation()
+  const { handle } = await startEvaluation({
+    attemptId,
+    taskType: payload.taskType || payload.task_type || null,
+    idempotencyKey: newIdempotencyKey('eval'),
+    retryOf: payload.retryOf || null,
+    onEvent: (event) => emitEvaluationEvent(mapEventToUi({ ...event, sessionId: attemptId }))
+  })
+  const evaluationId = handle?.evaluationId || null
+  if (evaluationId) void pollEvaluationEvents(attemptId, evaluationId)
+  return { sessionId: attemptId, evaluationId, handle }
+}
+
 export const evaluate = {
   async start(payload) {
     const attemptId = payload.sessionId || payload.attemptId || newId('attempt')
@@ -495,9 +504,6 @@ export const evaluate = {
     const promptSnapshot =
       payload.topic_text || payload.topicText || payload.promptSnapshot || null
     const taskType = payload.task_type || payload.taskType || null
-
-    // Gate before any durable attempt mutation — avoids submitted orphans when AI is missing.
-    await assertAiConfiguredForWritingEvaluation()
 
     await saveDraft({
       attemptId,
@@ -512,23 +518,17 @@ export const evaluate = {
       idempotencyKey: newIdempotencyKey('draft')
     })
     await submitAttempt(attemptId, newIdempotencyKey('submit'))
-    const { handle } = await startEvaluation({
-      attemptId,
-      taskType,
-      idempotencyKey: newIdempotencyKey('eval'),
-      retryOf: payload.retryOf || null,
-      onEvent: (event) => emitEvaluationEvent(mapEventToUi({ ...event, sessionId: attemptId }))
-    })
-
-    const evaluationId = handle?.evaluationId || null
-    if (evaluationId) {
-      void pollEvaluationEvents(attemptId, evaluationId)
-    }
-
-    return {
-      sessionId: attemptId,
-      evaluationId,
-      handle
+    try {
+      return await startSubmittedEvaluation({
+        attemptId,
+        taskType,
+        retryOf: payload.retryOf || null
+      })
+    } catch (error) {
+      // Persistence is the source of truth: surface the failure with the
+      // submitted attempt id so the UI can offer a visible retry path.
+      error.attemptId = attemptId
+      throw error
     }
   },
 
@@ -542,6 +542,12 @@ export const evaluate = {
     if (stop) stop()
     const cancelled = await cancelEvaluation(evaluationId)
     return { cancelled: Boolean(cancelled), sessionId, evaluationId }
+  },
+
+  // Retry an already-submitted attempt. Never save/submit again: Rust owns
+  // the monotonic attempt state and rejects late draft mutations.
+  async retry(payload) {
+    return startSubmittedEvaluation(payload)
   },
 
   async getSessionState(sessionId) {
@@ -626,10 +632,6 @@ export const essays = {
       id: adapted.id || id,
       source: 'tauri'
     }
-  },
-
-  async create() {
-    notImplemented('essays.create (use evaluate.start / writing_save_draft)')
   },
 
   async delete(id) {
@@ -717,26 +719,6 @@ export const settings = {
   }
 }
 
-export const upload = {
-  async uploadImage() {
-    notImplemented('upload.uploadImage')
-  },
-  async deleteImage() {
-    notImplemented('upload.deleteImage')
-  },
-  async getImagePath() {
-    notImplemented('upload.getImagePath')
-  }
-}
-
-export async function request() {
-  notImplemented('request (Fastify HTTP removed)')
-}
-
-export async function requestEventStream() {
-  notImplemented('requestEventStream (Fastify SSE removed)')
-}
-
 export default {
   configs,
   prompts,
@@ -744,7 +726,6 @@ export default {
   topics,
   essays,
   settings,
-  upload,
   getErrorMessage,
   resolveApiErrorMessage,
   isAPIAvailable

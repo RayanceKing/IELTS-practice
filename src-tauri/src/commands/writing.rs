@@ -67,14 +67,12 @@ pub fn writing_get_draft(
 #[tauri::command]
 pub fn writing_submit_attempt(
     db: State<'_, AppDb>,
-    vault: State<'_, AppVault>,
     cmd: SubmitAttemptCommand,
 ) -> CommandResponse<ielts_domain::dto::AttemptRecord> {
-    // A restored secret reference is not enough. Refuse the durable submit
-    // before it can create an evaluation orphan on a different device.
-    if let Err(error) = load_provider_config(&db, &vault) {
-        return CommandResponse::failure(map_ai_not_configured(error));
-    }
+    // Durable submission is independent from provider availability. Provider
+    // configuration is resolved only when the evaluation command starts;
+    // otherwise users could lose a completed essay merely because AI is
+    // temporarily unconfigured.
     match db.with_conn(|conn| submit_writing_attempt(conn, &cmd)) {
         Ok(a) => CommandResponse::success(a),
         Err(e) => CommandResponse::failure(map_err(e)),

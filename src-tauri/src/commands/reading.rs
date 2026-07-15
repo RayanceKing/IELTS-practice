@@ -9,7 +9,8 @@ use crate::app::state::AppDb;
 use ielts_db::{
     export_reading_archive, get_open_reading_draft_for_scope, import_reading_archive_value,
     list_assets, load_pdf_data_url, load_practice_asset_payload, patch_reading_answer,
-    save_reading_draft, submit_reading_attempt, AssetIndexEntry, ReadingArchiveImportResult,
+    pick_reading_practice_asset, save_reading_draft, submit_reading_attempt, AssetIndexEntry,
+    PickReadingPracticeAssetCommand, PickedReadingPracticeAsset, ReadingArchiveImportResult,
     ReadingArchiveSnapshot, ReadingDraftCommand, ReadingSubmitCommand, ReadingSubmitResult,
 };
 
@@ -28,6 +29,18 @@ pub fn reading_list_assets(db: State<'_, AppDb>) -> CommandResponse<Vec<AssetInd
     match db.with_conn(|conn| list_assets(conn, Some(Activity::Reading))) {
         Ok(v) => CommandResponse::success(v),
         Err(e) => CommandResponse::failure(map_err(e)),
+    }
+}
+
+/// Rust owns random Reading practice selection; Vue receives only the chosen id.
+#[tauri::command]
+pub fn reading_pick_practice_asset(
+    db: State<'_, AppDb>,
+    cmd: PickReadingPracticeAssetCommand,
+) -> CommandResponse<PickedReadingPracticeAsset> {
+    match db.with_conn(|conn| pick_reading_practice_asset(conn, &cmd)) {
+        Ok(value) => CommandResponse::success(value),
+        Err(error) => CommandResponse::failure(map_err(error)),
     }
 }
 

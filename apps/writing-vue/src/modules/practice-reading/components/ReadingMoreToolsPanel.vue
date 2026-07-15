@@ -22,7 +22,7 @@
         <div class="tool-card-arrow">进入</div>
       </button>
       <button class="tool-card" type="button" data-action="open-reading-memorize" @click="$emit('open-reading-memorize', $event)">
-        <div class="tool-card-icon">🧩</div>
+        <div class="tool-card-icon ui-icon-text" aria-hidden="true">工具</div>
         <div class="tool-card-content">
           <h3>阅读背题</h3>
           <p>复用统一阅读页，查看答案、解析与定位高亮，并可切换测试。</p>

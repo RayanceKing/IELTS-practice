@@ -203,6 +203,7 @@ function testReadingLibraryUsesOnlyNativeArchiveAndIndexTruth() {
   const settings = read('apps/writing-vue/src/modules/practice-reading/components/ReadingSettingsPanel.vue')
   const moreTools = read('apps/writing-vue/src/modules/practice-reading/components/ReadingMoreToolsPanel.vue')
   const client = read('apps/writing-vue/src/api/practice-client.js')
+  const repository = read('apps/writing-vue/src/api/reading-repository.js')
   const api = read('apps/writing-vue/src/modules/practice-reading/api.ts')
 
   for (const required of [
@@ -211,9 +212,10 @@ function testReadingLibraryUsesOnlyNativeArchiveAndIndexTruth() {
     "{ value: 'settings', label: '数据工具'",
     "invokeCommand('reading_export_archive')",
     "invokeCommand('reading_import_archive'",
+    "invokeCommand('reading_pick_practice_asset'",
     'Rust/SQLite 本地索引'
   ]) {
-    assert.ok([page, settings, client].some((source) => source.includes(required)), `native Reading boundary missing: ${required}`)
+    assert.ok([page, settings, client, repository].some((source) => source.includes(required)), `native Reading boundary missing: ${required}`)
   }
   for (const retired of [
     'READING_BACKUP_STORAGE_KEY',
@@ -227,7 +229,8 @@ function testReadingLibraryUsesOnlyNativeArchiveAndIndexTruth() {
     'SM-2',
     'show-achievements-tool',
     'open-vocab-tool',
-    'refresh: Boolean(options.refresh)'
+    'refresh: Boolean(options.refresh)',
+    'Math.random() * pool.length'
   ]) {
     assert.ok(![page, settings, moreTools, api].some((source) => source.includes(retired)), `retired Reading UI truth remains: ${retired}`)
   }

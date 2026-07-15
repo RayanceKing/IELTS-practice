@@ -70,6 +70,32 @@ fn draft_and_idempotent_submit() {
 }
 
 #[test]
+fn durable_submit_does_not_require_ai_provider_configuration() {
+    let (_dir, conn) = open_db();
+    save_writing_draft(
+        &conn,
+        &draft_cmd(
+            "submit-without-ai",
+            &"A durable submission must survive missing provider setup. ".repeat(20),
+            "draft-no-ai",
+        ),
+    )
+    .unwrap();
+
+    // No provider_configs setting or vault secret is created here. Submission
+    // remains a durable state transition; evaluation is the fail-closed edge.
+    let attempt = submit_writing_attempt(
+        &conn,
+        &SubmitAttemptCommand {
+            attempt_id: "submit-without-ai".into(),
+            idempotency_key: "submit-no-ai".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(attempt.status, AttemptStatus::Submitted);
+}
+
+#[test]
 fn writing_draft_and_submit_never_reopen_a_closed_attempt() {
     let (_dir, conn) = open_db();
     let original = "A submitted essay is an immutable evaluation snapshot. ".repeat(25);

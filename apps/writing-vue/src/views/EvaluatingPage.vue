@@ -1,14 +1,14 @@
 <template>
   <div class="evaluating-page">
     <div class="evaluating-layout">
-      <!-- Left: Essay Display with Typewriter -->
+      <!-- 作文内容与渐进式分析 -->
       <section class="essay-panel card card-whisper">
         <div class="essay-head border-base">
           <div>
-            <h2 class="heading-serif display-heading">Essay Analysis</h2>
+            <h2 class="heading-serif display-heading">作文评测</h2>
             <p class="topic-meta">{{ displayTopicText }}</p>
           </div>
-          <span class="word-badge">{{ displayWordCount }} Words</span>
+          <span class="word-badge">{{ displayWordCount }} 词</span>
         </div>
         
         <div class="essay-body relative">
@@ -17,7 +17,7 @@
             <svg class="xl-icon pulse" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M6 3h8l4 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm7 1.5V8h3.5L13 4.5zM8 11h8v1.5H8V11zm0 3h8v1.5H8V14zm0 3h5v1.5H8V17z"/>
             </svg>
-            <p>Intelligence parsing layer...</p>
+            <p>正在解析作文内容</p>
           </div>
           
           <!-- Text Typewriter layer -->
@@ -27,7 +27,7 @@
         </div>
       </section>
 
-      <!-- Right: Analyzing Panel (glass style) -->
+      <!-- 评测状态 -->
       <aside class="status-rail right-panel">
         <div class="ai-hero glass-card">
           <div class="orb-zone">
@@ -37,8 +37,8 @@
               <span class="orb-percentage">{{ progress }}%</span>
             </div>
           </div>
-          <h2 class="heading-serif">Intelligence at Work</h2>
-          <p class="subtitle">Evaluating your essay against formal IELTS band descriptors.</p>
+          <h2 class="heading-serif">正在进行智能评测</h2>
+          <p class="subtitle">正在依据 IELTS 评分标准分析你的作文。</p>
         </div>
 
         <section class="glass-card rail-section">
@@ -46,7 +46,7 @@
             <h3>实时进度</h3>
             <span class="status-meta uppercase">{{ progress }}% / {{ currentStageLabel }}</span>
           </div>
-          <div class="progress-rail mt-3">
+          <div class="progress-rail mt-3" role="progressbar" :aria-valuenow="progress" aria-valuemin="0" aria-valuemax="100" :aria-label="`评测进度：${progress}%`">
             <div class="progress-bar">
               <div class="progress-bar-fill" :style="{ width: `${progress}%` }"></div>
             </div>
@@ -56,22 +56,22 @@
         <section v-if="error" class="glass-card rail-section evaluation-error" role="alert">
           <h3>评测未完成</h3>
           <p>{{ error.message }}</p>
-          <p class="status-meta">草稿仍保存在本机；可直接重试，或取消后返回写作页继续修改。</p>
+          <p class="status-meta">作文已保存在本机；可直接重试，或取消后返回写作页继续修改。</p>
         </section>
 
         <section class="glass-card rail-section flex-1 overflow-hidden flex-col">
           <div class="rail-head header-fixed">
             <h3>实时日志</h3>
-            <span class="status-meta">Streaming</span>
+            <span class="status-meta" aria-hidden="true">实时更新</span>
           </div>
-          <div v-if="recentLogs.length > 0" class="log-list custom-scroll">
+          <div v-if="recentLogs.length > 0" class="log-list custom-scroll" role="log" aria-live="polite" aria-relevant="additions text" aria-label="评测动态日志">
             <div v-for="item in recentLogs" :key="item.id" class="log-item fade-in-up">
               <span class="log-time">{{ item.time }}</span>
               <span class="log-message">{{ item.message }}</span>
             </div>
           </div>
-          <div v-else class="log-list empty-log">
-             <p class="rail-empty">准备进入智能评测链路...</p>
+          <div v-else class="log-list empty-log" role="status" aria-live="polite">
+             <p class="rail-empty">准备进入评测流程…</p>
           </div>
         </section>
         <div class="action-row mt-auto">
@@ -89,10 +89,9 @@
 
 <script setup>
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { evaluate, getErrorMessage, resolveApiErrorMessage } from '@/api/client.js'
 import { getDraft } from '@/api/writing-repository.js'
-import { requireWritingAttemptMode } from '@/api/writing-mode.js'
 
 const props = defineProps({
   sessionId: {
@@ -102,6 +101,7 @@ const props = defineProps({
 })
 
 const router = useRouter()
+const route = useRoute()
 
 const progress = ref(0)
 const statusMessage = ref('正在准备评测...')
@@ -129,6 +129,10 @@ const fullResult = ref({
 
 onMounted(() => {
   eventListenerId = evaluate.onEvent(handleEvent)
+  if (route.query.startError) {
+    error.value = { code: String(route.query.startError), message: getErrorMessage(String(route.query.startError)) }
+    appendLog('error', error.value.message)
+  }
   void hydrateSessionState()
 })
 
@@ -198,7 +202,7 @@ watch(progress, (newVal) => {
 })
 
 const displayTopicText = computed(() => {
-  return tempDraft.value?.topic_text || 'Preparing assessment context...'
+  return tempDraft.value?.topic_text || '正在读取题目内容…'
 })
 
 const displayWordCount = computed(() => {
@@ -306,17 +310,19 @@ async function hydrateSessionState() {
 
 async function handleCancel() {
   if (isRetrying.value) return
-  try {
-    const cancelled = await evaluate.cancel(props.sessionId)
-    if (!cancelled?.cancelled) {
-      throw new Error('评测未能取消，请稍后重试')
+  if (currentEvaluationId.value) {
+    try {
+      const cancelled = await evaluate.cancel(props.sessionId)
+      if (!cancelled?.cancelled) {
+        throw new Error('评测未能取消，请稍后重试')
+      }
+    } catch (err) {
+      console.error('取消失败:', err)
+      const message = resolveApiErrorMessage(err, String(err?.code || 'cancel_failed'))
+      error.value = { code: 'cancel_failed', message }
+      appendLog('error', `取消失败：${message}`)
+      return
     }
-  } catch (err) {
-    console.error('取消失败:', err)
-    const message = resolveApiErrorMessage(err, String(err?.code || 'cancel_failed'))
-    error.value = { code: 'cancel_failed', message }
-    appendLog('error', `取消失败：${message}`)
-    return
   }
   await router.push({
     name: 'Compose',
@@ -324,63 +330,20 @@ async function handleCancel() {
   })
 }
 
-function normalizeTopicId(value) {
-  const id = String(value ?? '').trim()
-  return id && id.length <= 160 ? id : null
-}
-
-function buildRetryPayload() {
-  const draft = tempDraft.value || {}
-  let mode = null
-  try {
-    mode = requireWritingAttemptMode(draft.mode)
-  } catch {
-    return null
-  }
-  const rawTaskType = String(draft.task_type || '').trim()
-  const taskType = rawTaskType === 'task1' ? 'task1' : (rawTaskType === 'task2' ? 'task2' : '')
-  const topicId = normalizeTopicId(draft.topic_id)
-  const topicText = String(
-    draft.topic_text
-    || ''
-  ).trim()
-  const content = String(
-    draft.content
-    || essayContentFull.value
-    || ''
-  ).trim()
-  const wordCountRaw = Number(draft.word_count)
-  const wordCount = Number.isInteger(wordCountRaw) && wordCountRaw > 0
-    ? wordCountRaw
-    : (content ? content.split(/\s+/).filter((word) => word.length > 0).length : 0)
-
-  if (!taskType || !content) {
-    return null
-  }
-
-  if (topicId === null && !topicText) {
-    return null
-  }
-
-  return {
-    mode,
-    task_type: taskType,
-    topic_id: topicId,
-    topic_text: topicText,
-    content,
-    word_count: wordCount
-  }
+function retryTaskType() {
+  const value = String(tempDraft.value?.task_type || '').trim()
+  return value === 'task1' || value === 'task2' ? value : null
 }
 
 async function handleRetry() {
   if (isRetrying.value || isComplete.value) return
 
   error.value = null
-  const retryPayload = buildRetryPayload()
-  if (!retryPayload) {
+  const taskType = retryTaskType()
+  if (!taskType) {
     error.value = {
       code: 'start_failed',
-      message: '缺少可重试的写作模式、题目或作文内容，请返回写作页重新提交'
+      message: '缺少可重试的写作任务类型，请返回写作页重新提交'
     }
     appendLog('error', error.value.message)
     return
@@ -396,14 +359,9 @@ async function handleRetry() {
       console.warn('重试前取消旧会话失败，继续创建新会话', cancelError)
     }
 
-    const result = await evaluate.start({
+    const result = await evaluate.retry({
       sessionId: props.sessionId,
-      mode: retryPayload.mode,
-      task_type: retryPayload.task_type,
-      topic_id: retryPayload.topic_id,
-      topic_text: retryPayload.topic_id ? null : retryPayload.topic_text,
-      content: retryPayload.content,
-      word_count: retryPayload.word_count,
+      task_type: taskType,
       retryOf: currentEvaluationId.value
     })
 
@@ -570,14 +528,10 @@ function appendLog(kind, message, event = null) {
   padding: 26px;
   border: 1px solid var(--evaluate-rim);
   border-radius: 26px;
-  background:
-    radial-gradient(circle at 92% 0%, rgba(102, 126, 234, 0.16), transparent 23rem),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(246, 247, 255, 0.5));
-  box-shadow:
-    0 20px 42px rgba(54, 63, 117, 0.1),
-    inset 0 1px 1px rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(28px) saturate(155%);
-  -webkit-backdrop-filter: blur(28px) saturate(155%);
+  background: var(--atlas-glass);
+  box-shadow: var(--atlas-shadow);
+  backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
   animation: evaluate-panel-enter-right 440ms var(--lg-easing-spring, cubic-bezier(0.22, 1, 0.36, 1)) both;
 }
 
@@ -594,10 +548,10 @@ function appendLog(kind, message, event = null) {
   display: flex;
   gap: 9px;
   padding: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--lg-border-subtle);
   border-radius: 18px;
-  background: rgba(248, 249, 255, 0.5);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  background: var(--lg-bg-toolbar);
+  box-shadow: var(--lg-shadow-subtle);
 }
 
 .border-base {
@@ -632,8 +586,8 @@ function appendLog(kind, message, event = null) {
   min-height: 34px;
   padding: 7px 12px;
   border-radius: 999px;
-  border: 1px solid rgba(102, 126, 234, 0.22);
-  background: rgba(102, 126, 234, 0.1);
+  border: 1px solid var(--atlas-accent-ring);
+  background: var(--atlas-accent-soft);
   color: var(--evaluate-accent);
   font-weight: 700;
   font-size: 0.78rem;
@@ -647,10 +601,10 @@ function appendLog(kind, message, event = null) {
   overflow-y: auto;
   position: relative;
   padding: 21px 22px;
-  border: 1px solid rgba(126, 135, 183, 0.15);
+  border: 1px solid var(--lg-border-subtle);
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.48);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.78);
+  background: var(--lg-bg-primary);
+  box-shadow: var(--lg-shadow-subtle);
   overscroll-behavior: contain;
 }
 
@@ -721,15 +675,11 @@ function appendLog(kind, message, event = null) {
   min-width: 0;
   border: 1px solid var(--evaluate-rim);
   border-radius: 22px;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.74), rgba(246, 247, 255, 0.44)),
-    rgba(255, 255, 255, 0.38);
-  box-shadow:
-    0 14px 30px rgba(54, 63, 117, 0.09),
-    inset 0 1px 1px rgba(255, 255, 255, 0.88);
+  background: var(--atlas-glass-elevated);
+  box-shadow: var(--lg-shadow-elevated);
   padding: 20px;
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-md)) saturate(var(--lg-saturate));
 }
 
 .ai-hero {
@@ -739,9 +689,7 @@ function appendLog(kind, message, event = null) {
   flex-direction: column;
   align-items: center;
   padding: 24px 22px 22px;
-  background:
-    radial-gradient(circle at 50% -18%, rgba(102, 126, 234, 0.34), transparent 55%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(241, 242, 255, 0.5));
+  background: var(--atlas-glass-elevated);
 }
 
 .orb-zone {
@@ -863,16 +811,16 @@ function appendLog(kind, message, event = null) {
 .progress-bar {
   height: 7px;
   border-radius: 999px;
-  background: rgba(102, 126, 234, 0.13);
+  background: var(--atlas-accent-soft);
   overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(54, 63, 117, 0.1);
+  box-shadow: var(--lg-shadow-subtle);
 }
 
 .progress-bar-fill {
   height: 100%;
   border-radius: inherit;
-  background: var(--color-brand-gradient, linear-gradient(135deg, #667eea, #764ba2));
-  box-shadow: 0 0 14px rgba(102, 126, 234, 0.46);
+  background: var(--atlas-accent);
+  box-shadow: var(--lg-shadow-subtle);
   transition: width 320ms var(--lg-easing-spring, ease);
 }
 
@@ -899,7 +847,7 @@ function appendLog(kind, message, event = null) {
   grid-template-columns: 62px minmax(0, 1fr);
   gap: 10px;
   padding: 11px 0;
-  border-bottom: 1px solid rgba(126, 135, 183, 0.14);
+  border-bottom: 1px solid var(--lg-border-subtle);
 }
 
 .log-item:last-child {
@@ -919,15 +867,15 @@ function appendLog(kind, message, event = null) {
 }
 
 .btn-warn {
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--lg-bg-interactive);
   color: var(--evaluate-ink);
 }
 
 .evaluating-page .btn {
   min-height: 40px;
-  border: 1px solid rgba(255, 255, 255, 0.74);
+  border: 1px solid var(--lg-border-color);
   border-radius: 13px;
-  background: rgba(255, 255, 255, 0.64);
+  background: var(--lg-bg-interactive);
   color: var(--evaluate-ink);
   font-weight: 700;
   box-shadow:
@@ -941,15 +889,15 @@ function appendLog(kind, message, event = null) {
 
 .evaluating-page .btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.84);
+  background: var(--lg-bg-elevated);
   box-shadow:
     0 11px 20px rgba(54, 63, 117, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 
 .evaluating-page .btn-warn {
-  border-color: rgba(102, 126, 234, 0.2);
-  background: rgba(102, 126, 234, 0.1);
+  border-color: var(--atlas-accent-ring);
+  background: var(--atlas-accent-soft);
   color: var(--evaluate-accent);
 }
 
@@ -964,7 +912,7 @@ function appendLog(kind, message, event = null) {
 }
 
 .evaluating-page .btn:focus-visible {
-  outline: 3px solid rgba(102, 126, 234, 0.52);
+  outline: 3px solid var(--atlas-accent-ring);
   outline-offset: 3px;
 }
 
@@ -1015,7 +963,7 @@ function appendLog(kind, message, event = null) {
 .custom-scroll::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 4px;
-  background: rgba(102, 126, 234, 0.36);
+  background: var(--atlas-accent-soft);
   background-clip: padding-box;
 }
 

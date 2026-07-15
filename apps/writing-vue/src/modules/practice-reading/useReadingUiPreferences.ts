@@ -43,6 +43,7 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
   const preferences = useTauriPreferences()
   const settingsPanelOpen = ref(false)
   const notesPanelOpen = ref(false)
+  const settingsPanel = ref<HTMLElement | null>(null)
   const notesPanel = ref<HTMLElement | null>(null)
   const notesTextarea = ref<HTMLTextAreaElement | null>(null)
   const notesText = ref('')
@@ -53,7 +54,7 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
   let notesLoadSequence = 0
   let notesPersistTimer: ReturnType<typeof setTimeout> | null = null
   let noteAnnotationId: string | null = null
-  let notesReturnFocus: HTMLElement | null = null
+  let floatingPanelReturnFocus: HTMLElement | null = null
 
   const readingPageClassList = computed(() => ({
     [`font-${readingFontSize.value}`]: true
@@ -91,47 +92,63 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
     }
   }
 
-  function closeFloatingPanels() {
-    const shouldRestoreNotesFocus = notesPanelOpen.value
+  function closeFloatingPanels(options: { restoreFocus?: boolean } = {}) {
+    const shouldRestoreFocus = options.restoreFocus !== false
+      && (settingsPanelOpen.value || notesPanelOpen.value)
     settingsPanelOpen.value = false
     notesPanelOpen.value = false
-    if (shouldRestoreNotesFocus) {
+    if (shouldRestoreFocus) {
       void nextTick(() => {
-        if (notesReturnFocus?.isConnected) notesReturnFocus.focus()
-        notesReturnFocus = null
+        if (floatingPanelReturnFocus?.isConnected) floatingPanelReturnFocus.focus()
+        floatingPanelReturnFocus = null
       })
     }
   }
 
-  function toggleSettingsPanel() {
-    const nextVisible = !settingsPanelOpen.value
-    if (notesPanelOpen.value && typeof document !== 'undefined') {
-      notesReturnFocus = document.activeElement as HTMLElement | null
+  function rememberFloatingPanelReturnFocus() {
+    if (typeof document !== 'undefined') {
+      floatingPanelReturnFocus = document.activeElement as HTMLElement | null
     }
-    closeFloatingPanels()
-    settingsPanelOpen.value = nextVisible
+  }
+
+  function focusFirstPanelControl(panel: HTMLElement | null) {
+    const control = panel?.querySelector<HTMLElement>(
+      'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+    control?.focus()
+  }
+
+  function toggleSettingsPanel() {
+    if (settingsPanelOpen.value) {
+      closeFloatingPanels()
+      return
+    }
+    rememberFloatingPanelReturnFocus()
+    closeFloatingPanels({ restoreFocus: false })
+    settingsPanelOpen.value = true
+    void nextTick(() => focusFirstPanelControl(settingsPanel.value))
   }
 
   function toggleNotesPanel() {
-    const nextVisible = !notesPanelOpen.value
-    if (nextVisible && typeof document !== 'undefined') {
-      notesReturnFocus = document.activeElement as HTMLElement | null
+    if (notesPanelOpen.value) {
+      closeFloatingPanels()
+      return
     }
-    closeFloatingPanels()
-    notesPanelOpen.value = nextVisible
-    if (nextVisible) void nextTick(() => notesTextarea.value?.focus?.())
+    rememberFloatingPanelReturnFocus()
+    closeFloatingPanels({ restoreFocus: false })
+    notesPanelOpen.value = true
+    void nextTick(() => notesTextarea.value?.focus?.())
   }
 
-  function handleNotesDialogKeydown(event: KeyboardEvent) {
-    if (!notesPanelOpen.value) return
+  function handleFloatingPanelKeydown(event: KeyboardEvent, panel: HTMLElement | null) {
     if (event.key === 'Escape') {
       event.preventDefault()
       event.stopPropagation()
       closeFloatingPanels()
       return
     }
-    if (event.key !== 'Tab' || !notesPanel.value) return
-    const focusable = Array.from(notesPanel.value.querySelectorAll<HTMLElement>(
+    if (event.key !== 'Tab' || !panel) return
+    const focusable = Array.from(panel.querySelectorAll<HTMLElement>(
       'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
     )).filter((element) => !element.hidden)
     if (focusable.length < 2) return
@@ -141,6 +158,16 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
       : (currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1)
     event.preventDefault()
     focusable[targetIndex].focus()
+  }
+
+  function handleSettingsDialogKeydown(event: KeyboardEvent) {
+    if (!settingsPanelOpen.value) return
+    handleFloatingPanelKeydown(event, settingsPanel.value)
+  }
+
+  function handleNotesDialogKeydown(event: KeyboardEvent) {
+    if (!notesPanelOpen.value) return
+    handleFloatingPanelKeydown(event, notesPanel.value)
   }
 
   function selectReadingFont(value: string) {
@@ -253,6 +280,7 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
   return {
     settingsPanelOpen,
     notesPanelOpen,
+    settingsPanel: settingsPanel as Ref<HTMLElement | null>,
     notesPanel: notesPanel as Ref<HTMLElement | null>,
     notesTextarea: notesTextarea as Ref<HTMLTextAreaElement | null>,
     notesText,
@@ -264,6 +292,7 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
     initializeReadingPreferences,
     toggleSettingsPanel,
     toggleNotesPanel,
+    handleSettingsDialogKeydown,
     handleNotesDialogKeydown,
     closeFloatingPanels,
     selectReadingFont,

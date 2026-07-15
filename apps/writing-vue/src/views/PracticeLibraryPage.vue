@@ -166,7 +166,6 @@
       :latest-asset-read-label="latestAssetReadLabel"
       v-model:library-config-open="libraryConfigOpen"
       :loading="loading"
-      @clear-practice-cache="clearPracticeCache"
       @load-reading-data="reloadReadingLibrary"
       @show-reading-library-config-list="showReadingLibraryConfigList"
       @open-global-settings="openGlobalSettings"
@@ -210,7 +209,7 @@ import { useReadingSuite } from '@/modules/practice-reading/useReadingSuite'
 import { historyPercentage, sortReadingHistory } from '@/modules/practice-reading/historyStats'
 import { useTauriPreferences } from '@/composables/useTauriPreferences.js'
 import { createEndless, createMemorize } from '@/api/modes-repository.js'
-import { getReadingPdfDataUrl } from '@/api/reading-repository.js'
+import { getReadingPdfDataUrl, pickReadingPracticeAsset } from '@/api/reading-repository.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -835,20 +834,19 @@ function handleBrowsePrimaryAction(asset) {
   startReading(asset)
 }
 
-function startRandomPractice(category = 'all') {
+async function startRandomPractice(category = 'all') {
   const normalizedCategory = category === 'all' ? 'all' : normalizeCategory(category)
-  const pool = readingAssets.value.filter((asset) => (
-    asset?.id
-    && asset.activity === 'reading'
-    && hasReadingPracticePayload(asset)
-    && (normalizedCategory === 'all' || normalizeCategory(asset.category) === normalizedCategory)
-  ))
-  const selected = pool[Math.floor(Math.random() * pool.length)]
-  if (!selected) {
+  try {
+    const picked = await pickReadingPracticeAsset(normalizedCategory)
+    const assetId = String(picked?.assetId || '').trim()
+    if (!assetId) throw new Error('阅读题库未返回可练习题目')
+    const selected = readingAssets.value.find((asset) => String(asset?.id || '') === assetId)
+    startReading(selected || { id: assetId })
+  } catch (error) {
+    console.error('随机阅读选题失败:', error)
     browseCategory(normalizedCategory, 'reading')
-    return
+    showLocalMessage(error?.message ? `随机练习启动失败：${error.message}` : '随机练习启动失败')
   }
-  startReading(selected)
 }
 
 async function startEndlessMode() {
@@ -1530,20 +1528,6 @@ function closePdfViewer() {
   pdfViewer.value = { open: false, title: '', dataUrl: '' }
 }
 
-function clearPracticeCache() {
-  const removablePrefixes = [
-    'practice_reading_answers_',
-    'practice_reading_submission_'
-  ]
-  for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
-    const key = sessionStorage.key(index) || ''
-    if (removablePrefixes.some((prefix) => key.startsWith(prefix))) {
-      sessionStorage.removeItem(key)
-    }
-  }
-  showLocalMessage('阅读练习临时缓存已清除。')
-}
-
 function showLocalMessage(message) {
   localMessage.value = message
   window.setTimeout(() => {
@@ -1724,7 +1708,29 @@ function updateSegmentedIndicators() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 20px;
+  padding: 2px 2px 4px;
+}
+
+.practice-library .overview-section-actions {
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.practice-library .overview-section-actions .shui-glass-btn {
+  min-width: 132px;
+  justify-content: center;
+  gap: 8px;
+}
+
+.practice-library .overview-action-glyph {
+  display: inline-grid;
+  width: 1.2em;
+  height: 1.2em;
+  place-items: center;
+  font-size: 1.05em;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .practice-library .category-card,
@@ -1743,6 +1749,7 @@ function updateSegmentedIndicators() {
 
 .practice-library .category-card {
   min-height: 220px;
+  gap: 18px;
 }
 
 .practice-library .category-header,

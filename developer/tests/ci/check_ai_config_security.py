@@ -90,14 +90,23 @@ def check_runtime_contract(failures: list[str]) -> None:
         fail("frontend provider test does not forward its selected configuration id", failures)
     writing = WRITING_RUST.read_text(encoding="utf-8", errors="replace")
     if "load_provider_config(&db, &vault)" not in writing:
-        fail("writing evaluation does not preflight the local vault before submission", failures)
+        fail("writing evaluation does not preflight the local vault before provider work", failures)
+    start_command = re.search(
+        r"pub async fn writing_start_evaluation\b.*?\n}\n",
+        writing,
+        re.DOTALL,
+    )
+    if not start_command or "load_provider_config(&db, &vault)" not in start_command.group(0):
+        fail("writing evaluation can start without a local-vault provider preflight", failures)
     submit_command = re.search(
         r"pub fn writing_submit_attempt\b.*?\n}\n",
         writing,
         re.DOTALL,
     )
-    if not submit_command or "load_provider_config(&db, &vault)" not in submit_command.group(0):
-        fail("writing submit can persist an attempt without a local-vault preflight", failures)
+    if not submit_command:
+        fail("writing durable submit command is missing", failures)
+    elif "load_provider_config(&db, &vault)" in submit_command.group(0) or "AppVault" in submit_command.group(0):
+        fail("writing submit is incorrectly coupled to the local AI provider", failures)
     for command in AI_COMMANDS:
         if f"commands::ai::{command}" not in registered:
             fail(f"Tauri invoke handler does not register {command}", failures)

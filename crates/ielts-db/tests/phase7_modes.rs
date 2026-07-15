@@ -7,12 +7,13 @@ use ielts_db::{
     advance_endless, cancel_endless, create_endless_session, create_memorize_session,
     create_suite_session, finish_memorize_session, get_endless_session, get_open_reading_draft,
     get_open_reading_draft_for_scope, get_suite_session, import_asset_payload_file, list_history,
-    migrate, open_connection, patch_reading_answer, remaining_pool, save_reading_draft,
-    save_suite_passage_draft, submit_endless_passage, submit_reading_attempt, submit_suite_passage,
-    AdvanceEndlessCommand, CreateEndlessCommand, CreateMemorizeCommand, CreateSuiteCommand,
-    DbOpenOptions, PassageStatus, ReadingDraftCommand, ReadingQuestionProgress,
-    ReadingSubmitCommand, SaveSuitePassageDraftCommand, SubmitEndlessCommand,
-    SubmitSuitePassageCommand, SuiteAssetSeed, TimerMode, TimerState,
+    migrate, open_connection, patch_reading_answer, pick_reading_practice_asset, remaining_pool,
+    save_reading_draft, save_suite_passage_draft, submit_endless_passage, submit_reading_attempt,
+    submit_suite_passage, AdvanceEndlessCommand, CreateEndlessCommand, CreateMemorizeCommand,
+    CreateSuiteCommand, DbOpenOptions, PassageStatus, PickReadingPracticeAssetCommand,
+    ReadingDraftCommand, ReadingQuestionProgress, ReadingSubmitCommand,
+    SaveSuitePassageDraftCommand, SubmitEndlessCommand, SubmitSuitePassageCommand, SuiteAssetSeed,
+    TimerMode, TimerState,
 };
 use ielts_domain::domain::{Activity, AttemptMode, SuiteFlowMode, SuiteStatus};
 use ielts_domain::dto::ListHistoryQuery;
@@ -57,6 +58,31 @@ fn seed_assets(conn: &rusqlite::Connection, dir: &tempfile::TempDir, ids: &[&str
     for id in ids {
         seed_asset(conn, dir, id, "high");
     }
+}
+
+#[test]
+fn native_single_practice_picker_is_seeded_and_category_scoped() {
+    let (dir, conn) = open_db();
+    seed_assets(&conn, &dir, &["p1-a", "p1-b", "p2-a"]);
+
+    let command = PickReadingPracticeAssetCommand {
+        category: Some("P1".into()),
+        seed: Some("picker-seed".into()),
+    };
+    let first = pick_reading_practice_asset(&conn, &command).unwrap();
+    let again = pick_reading_practice_asset(&conn, &command).unwrap();
+    assert_eq!(first, again);
+    assert!(matches!(first.asset_id.as_str(), "p1-a" | "p1-b"));
+
+    let missing = pick_reading_practice_asset(
+        &conn,
+        &PickReadingPracticeAssetCommand {
+            category: Some("P3".into()),
+            seed: Some("picker-seed".into()),
+        },
+    )
+    .unwrap_err();
+    assert!(missing.to_string().contains("no answerable reading assets"));
 }
 
 fn suite_sequence() -> Vec<SuiteAssetSeed> {

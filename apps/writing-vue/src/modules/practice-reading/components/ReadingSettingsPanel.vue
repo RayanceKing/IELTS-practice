@@ -18,9 +18,6 @@
         <h3 class="heading-serif">阅读题库</h3>
         <p class="hero-panel__muted">题库由桌面应用的 Rust/SQLite 本地索引提供；重新读取只会读取本机索引，不存在远程题库源切换。</p>
         <div class="hero-settings-actions">
-          <button class="btn btn-warning hero-btn hero-btn--warn" id="clear-cache-btn" type="button" @click="$emit('clear-practice-cache', $event)">
-            清除临时答题缓存
-          </button>
           <button class="btn hero-btn data-mgmt-btn" id="load-library-btn" type="button" :disabled="loading" @click="$emit('load-reading-data', $event)">
             重新读取本机题库
           </button>
@@ -108,7 +105,6 @@ defineProps({
 defineEmits([
   'update:libraryConfigOpen',
   'open-global-settings',
-  'clear-practice-cache',
   'load-reading-data',
   'show-reading-library-config-list',
   'export-reading-archive',

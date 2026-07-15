@@ -29,6 +29,13 @@ export async function getReadingAssetPayload(assetId) {
   )
 }
 
+export async function pickReadingPracticeAsset(category = null) {
+  const response = await invokeCommand('reading_pick_practice_asset', {
+    cmd: { category: category || null }
+  })
+  return unwrapCommandResponse(response, 'reading_pick_practice_asset')
+}
+
 export async function getReadingPdfDataUrl(assetId) {
   const normalizedAssetId = String(assetId || '').trim()
   if (!normalizedAssetId) {
@@ -115,6 +122,7 @@ export async function submitReadingAttempt(payload) {
 
 export const readingRepository = {
   listReadingAssets,
+  pickReadingPracticeAsset,
   getReadingAssetPayload,
   getReadingPdfDataUrl,
   normalizeReadingAssetEnvelope,

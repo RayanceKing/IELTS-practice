@@ -94,6 +94,7 @@ pub fn run() {
             commands::writing::writing_topic_import,
             commands::writing::writing_topic_statistics,
             commands::reading::reading_list_assets,
+            commands::reading::reading_pick_practice_asset,
             commands::reading::reading_get_asset_payload,
             commands::reading::reading_get_pdf_data_url,
             commands::reading::reading_export_archive,

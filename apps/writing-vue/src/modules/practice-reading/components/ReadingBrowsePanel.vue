@@ -133,7 +133,7 @@
         <p>正在加载题目列表...</p>
       </div>
       <div v-else-if="filteredReadingAssets.length === 0" class="exam-list-empty" role="status">
-        <div class="exam-list-empty-icon" aria-hidden="true">🔍</div>
+        <div class="exam-list-empty-icon" aria-hidden="true">搜索</div>
         <p class="exam-list-empty-text">未找到匹配的题目</p>
         <p class="exam-list-empty-hint">请调整筛选条件或搜索词后再试</p>
         <div v-if="keyword" class="exam-list-empty-actions">

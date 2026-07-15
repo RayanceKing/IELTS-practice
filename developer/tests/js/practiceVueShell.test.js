@@ -48,6 +48,8 @@ function testVueRoutesAndShell() {
 
 function testLibraryHasOneProductShell() {
   const library = read('apps/writing-vue/src/views/PracticeLibraryPage.vue')
+  const librarySettings = read('apps/writing-vue/src/modules/practice-reading/components/ReadingSettingsPanel.vue')
+  const client = read('apps/writing-vue/src/api/client.js')
   const skin = read('apps/writing-vue/src/styles/opensource-skin.css')
 
   has(library, 'data-practice-reading-home data-library-ready', 'stable Library ready marker')
@@ -60,12 +62,30 @@ function testLibraryHasOneProductShell() {
   assert.ok(!/^\.view\b/m.test(library), 'Library stylesheet leaks a naked .view selector')
   assert.ok(!/^\.btn\b/m.test(library), 'Library stylesheet leaks a naked .btn selector')
   has(skin, '.atlas-source-ui .practice-library', 'canonical Library visual owner')
+  for (const retired of [
+    'clearPracticeCache',
+    'clear-practice-cache',
+    'practice_reading_answers_',
+    'practice_reading_submission_'
+  ]) {
+    lacks(`${library}\n${librarySettings}`, retired, 'retired browser-owned Reading cache')
+  }
+  for (const retired of [
+    'notImplemented(',
+    'uploadImage()',
+    'deleteImage()',
+    'getImagePath()',
+    'requestEventStream()'
+  ]) {
+    lacks(client, retired, 'dead Tauri API facade')
+  }
 }
 
 function testReadingActionOwnership() {
   const page = read('apps/writing-vue/src/views/PracticeReadingPage.vue')
   const nav = read('apps/writing-vue/src/modules/practice-reading/components/ReadingAnswerNav.vue')
   const interactions = read('apps/writing-vue/src/modules/practice-reading/useReadingInteractions.ts')
+  const preferences = read('apps/writing-vue/src/modules/practice-reading/useReadingUiPreferences.ts')
 
   has(nav, 'id="exit-btn"', 'stable Reading exit identifier')
   has(nav, '@click="handleLeave"', 'guarded Reading exit')
@@ -76,6 +96,11 @@ function testReadingActionOwnership() {
   has(page, 'overscroll-behavior: contain;', 'pane-local Reading scroll')
   has(interactions, 'readOnlyModeSource', 'single read-only interaction source')
   lacks(interactions, 'reviewModeSource', 'split review-only interaction source')
+  has(page, 'ref="settingsPanel"', 'Reading settings dialog element ref')
+  has(page, '@keydown="handleSettingsDialogKeydown"', 'Reading settings Escape/focus handling')
+  has(page, 'aria-controls="settings-panel"', 'Reading settings trigger relationship')
+  has(preferences, 'function handleSettingsDialogKeydown', 'Reading settings keyboard controller')
+  has(preferences, 'function focusFirstPanelControl', 'Reading settings initial focus')
   for (const copy of ["return '提交作答'", "return '清空作答'", "<h3 id=\"notes-panel-title\">阅读笔记</h3>"]) {
     has(page, copy, 'Chinese Reading product copy')
   }

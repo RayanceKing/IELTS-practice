@@ -19,7 +19,7 @@
           :disabled="!canNavigateSuiteReviewPrev"
           @click="navigateSuiteReview('prev')"
         >
-          上一题
+          上一篇
         </button>
         <button
           type="button"
@@ -27,7 +27,7 @@
           :disabled="!canNavigateSuiteReviewNext"
           @click="navigateSuiteReview('next')"
         >
-          下一题
+          下一篇
         </button>
       </div>
       <div class="reading-header-actions header-controls">
@@ -50,6 +50,8 @@
           id="settings-btn"
           title="阅读设置"
           aria-label="阅读设置"
+          aria-controls="settings-panel"
+          :aria-expanded="settingsPanelOpen"
           type="button"
           @click="toggleSettingsPanel"
         >
@@ -60,6 +62,10 @@
           class="header-btn"
           id="note-btn"
           type="button"
+          title="阅读笔记"
+          aria-label="阅读笔记"
+          aria-controls="notes-panel"
+          :aria-expanded="notesPanelOpen"
           @click="toggleNotesPanel"
         >
           笔记
@@ -72,17 +78,26 @@
       <button class="btn-text" type="button" @click="loadAsset">重试</button>
     </div>
 
-    <div v-if="loading" class="surface loading">正在加载阅读内容…</div>
+    <div v-if="loading" class="surface loading" role="status" aria-live="polite" aria-busy="true">正在加载阅读内容…</div>
 
     <div v-if="submitError" class="inline-message inline-message-error">
       <span>{{ submitError }}</span>
     </div>
 
     <div
+      ref="settingsPanel"
       id="settings-panel"
       class="reading-floating-panel reading-settings-panel"
       v-show="settingsPanelOpen"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-panel-title"
+      @keydown="handleSettingsDialogKeydown"
     >
+      <header class="settings-panel-header">
+        <h2 id="settings-panel-title">阅读设置</h2>
+        <button class="settings-panel-close" type="button" aria-label="关闭阅读设置" @click="closeFloatingPanels">关闭</button>
+      </header>
       <div class="settings-section">
         <h3 class="settings-title">字号调整</h3>
         <div class="settings-options">
@@ -250,7 +265,7 @@
       </div>
     </div>
 
-    <div v-if="isEndlessMode" class="inline-message endless-message" data-reading-endless-mode>
+    <div v-if="isEndlessMode" class="inline-message endless-message" data-reading-endless-mode role="status" aria-live="polite">
       <span>{{ endlessStatusText }}</span>
       <div class="endless-actions">
         <button v-if="endlessNextAssetId" class="btn-text" type="button" :disabled="leaving" @click="goToNextEndlessAsset">下一篇</button>
@@ -512,6 +527,7 @@ let snapshotMessageTimer = null
 const {
   settingsPanelOpen,
   notesPanelOpen,
+  settingsPanel,
   notesPanel,
   notesTextarea,
   notesText,
@@ -523,6 +539,7 @@ const {
   initializeReadingPreferences,
   toggleSettingsPanel,
   toggleNotesPanel,
+  handleSettingsDialogKeydown,
   handleNotesDialogKeydown,
   closeFloatingPanels,
   selectReadingFont,
@@ -805,7 +822,7 @@ const readingPageClassList = computed(() => ({
   'reading-pane-resizing': dividerDragging.value
 }))
 const readingWorkspaceStyle = computed(() => ({
-  '--reading-left-pane-width': `${leftPanePercent.value}%`
+  '--atlas-reading-left-pane-width': `${leftPanePercent.value}%`
 }))
 const primaryButtonLabel = computed(() => {
   if (submitting.value) return '提交中…'
@@ -2258,7 +2275,7 @@ function getQuestionKindLabel(kind) {
   width: 100%;
   border-collapse: collapse;
   margin: 14px 0;
-  background: rgba(255, 255, 255, 0.46);
+  background: var(--atlas-glass);
 }
 
 .reading-html th,
@@ -2281,22 +2298,22 @@ function getQuestionKindLabel(kind) {
   min-height: 36px;
   margin: 8px 0;
   padding: 8px 10px;
-  border: 1px dashed rgba(201, 100, 66, 0.42);
+  border: 1px dashed var(--atlas-accent-ring);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.38);
+  background: var(--atlas-glass);
   transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
 }
 
 .reading-html .dropzone-filled {
   border-style: solid;
-  border-color: rgba(35, 143, 91, 0.46);
-  background: rgba(35, 143, 91, 0.12);
+  border-color: var(--atlas-success);
+  background: var(--atlas-accent-soft);
 }
 
 .reading-html .drag-over,
 .dragdrop-slot.drag-over {
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(201, 100, 66, 0.13);
+  box-shadow: 0 0 0 3px var(--atlas-accent-soft);
 }
 
 .reading-html .pool-items,
@@ -2308,8 +2325,8 @@ function getQuestionKindLabel(kind) {
 .reading-html .pool-items.drag-over,
 .reading-html .options-pool.drag-over,
 .reading-html .headings-pool.drag-over {
-  background: rgba(201, 100, 66, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(201, 100, 66, 0.26);
+  background: var(--atlas-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--atlas-accent-ring);
 }
 
 .question-group {
@@ -2359,7 +2376,7 @@ function getQuestionKindLabel(kind) {
   padding: 10px;
   border: 1px solid var(--lg-border-subtle);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.34);
+  background: var(--atlas-glass);
 }
 
 .answer-status span {
@@ -2413,7 +2430,7 @@ function getQuestionKindLabel(kind) {
   min-height: 22px;
   border: 1px solid rgba(41, 39, 56, 0.14);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.38);
+  background: var(--atlas-glass);
   color: var(--text-muted);
   cursor: pointer;
   font: inherit;
@@ -2422,8 +2439,8 @@ function getQuestionKindLabel(kind) {
 }
 
 .mark-question-button.active {
-  border-color: rgba(201, 100, 66, 0.42);
-  background: rgba(201, 100, 66, 0.14);
+  border-color: var(--atlas-accent-ring);
+  background: var(--atlas-accent-soft);
   color: var(--primary-color);
 }
 
@@ -2466,14 +2483,14 @@ function getQuestionKindLabel(kind) {
   border: 1px dashed rgba(41, 39, 56, 0.2);
   border-radius: var(--radius-md);
   color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.32);
+  background: var(--atlas-glass);
   font-size: 0.84rem;
 }
 
 .dragdrop-slot.filled {
   border-style: solid;
-  border-color: rgba(35, 143, 91, 0.36);
-  background: rgba(35, 143, 91, 0.1);
+  border-color: var(--atlas-success);
+  background: var(--atlas-accent-soft);
 }
 
 .dragdrop-options {
@@ -2489,7 +2506,7 @@ function getQuestionKindLabel(kind) {
   padding: 5px 9px;
   border: 1px solid rgba(41, 39, 56, 0.14);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--atlas-glass-elevated);
   color: var(--text-secondary);
   cursor: grab;
   font: inherit;
@@ -2507,13 +2524,13 @@ function getQuestionKindLabel(kind) {
 
 .dragdrop-chip-assigned,
 .reading-html .dragdrop-chip-assigned {
-  border-color: rgba(35, 143, 91, 0.36);
+  border-color: var(--atlas-success);
   background: rgba(35, 143, 91, 0.14);
   color: var(--text-primary);
 }
 
 .dragdrop-option.selected {
-  border-color: rgba(35, 143, 91, 0.42);
+  border-color: var(--atlas-success);
   background: rgba(35, 143, 91, 0.14);
 }
 
@@ -2542,7 +2559,7 @@ function getQuestionKindLabel(kind) {
   padding: 12px;
   border: 1px solid var(--lg-border-subtle);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.38);
+  background: var(--atlas-glass);
 }
 
 .score-grid span {
@@ -2773,23 +2790,7 @@ function getQuestionKindLabel(kind) {
 
 /* Legacy opensource reading exam shell: compact header, split panes, bottom question nav. */
 .reading-page {
-  --reading-line: var(--atlas-line);
-  --reading-panel: var(--atlas-glass-elevated);
-  --reading-panel-alt: var(--atlas-glass-pressed);
-  --reading-text: var(--atlas-ink);
-  --reading-muted: var(--atlas-ink-soft);
-  --reading-accent: var(--atlas-accent);
-  --reading-success: var(--atlas-success);
-  --reading-danger: var(--atlas-danger);
-  --reading-shadow: var(--atlas-shadow);
-  --reading-dropzone-bg: var(--atlas-accent-soft);
-  --reading-dropzone-border: var(--atlas-accent-ring);
-  --reading-dropzone-drag-bg: var(--color-brand-soft-strong);
-  --reading-dropzone-drag-border: var(--reading-accent);
-  --reading-pool-drag-bg: var(--atlas-accent-soft);
-  --reading-drag-item-bg: var(--atlas-glass-pressed);
-  --reading-drag-item-border: var(--atlas-accent-ring);
-  --reading-nav-height: 72px;
+  --atlas-reading-nav-height: 72px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -2797,9 +2798,9 @@ function getQuestionKindLabel(kind) {
   height: 100vh;
   min-height: 100vh;
   overflow: hidden;
-  padding-bottom: var(--reading-nav-height);
+  padding-bottom: var(--atlas-reading-nav-height);
   background: var(--atlas-glass-pressed);
-  color: var(--reading-text);
+  color: var(--atlas-ink);
   font-family: var(--font-family-base);
 }
 
@@ -2818,8 +2819,8 @@ function getQuestionKindLabel(kind) {
   gap: 16px;
   min-height: 67px;
   padding: 14px 22px;
-  border-bottom: 1px solid var(--reading-line);
-  background: rgba(255, 255, 255, 0.94);
+  border-bottom: 1px solid var(--atlas-line);
+  background: var(--atlas-glass-elevated);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
@@ -2832,7 +2833,7 @@ function getQuestionKindLabel(kind) {
 
 .reading-header h1 {
   margin: 0;
-  color: var(--reading-text);
+  color: var(--atlas-ink);
   font-family: inherit;
   font-size: 1.1rem;
   font-weight: 700;
@@ -2842,7 +2843,7 @@ function getQuestionKindLabel(kind) {
 .reading-header p {
   max-width: none;
   margin: 0;
-  color: var(--reading-muted);
+  color: var(--atlas-ink-soft);
   font-size: 0.92rem;
 }
 
@@ -2861,8 +2862,8 @@ function getQuestionKindLabel(kind) {
   border: 1px solid rgba(148, 163, 184, 0.6);
   border-radius: 6px;
   padding: 4px 10px;
-  background: #fff;
-  color: #0f172a;
+  background: var(--atlas-rim);
+  color: var(--atlas-ink);
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
@@ -2887,10 +2888,10 @@ function getQuestionKindLabel(kind) {
 .practice-nav .controls button,
 .submit-btn {
   min-height: 36px;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   border-radius: 4px;
-  background: var(--reading-panel);
-  color: var(--reading-text);
+  background: var(--atlas-glass-elevated);
+  color: var(--atlas-ink);
   cursor: pointer;
   font: inherit;
   font-size: 0.92rem;
@@ -2923,7 +2924,7 @@ function getQuestionKindLabel(kind) {
 
 .header-btn:hover:not(:disabled),
 .practice-nav .controls button:hover:not(:disabled) {
-  background: #f1f5f9;
+  background: var(--atlas-glass-pressed);
 }
 
 .header-btn:disabled,
@@ -2934,9 +2935,9 @@ function getQuestionKindLabel(kind) {
 }
 
 .submit-btn {
-  border-color: var(--reading-accent) !important;
-  background: var(--reading-accent) !important;
-  color: #ffffff !important;
+  border-color: var(--atlas-accent);
+  background: var(--atlas-accent);
+  color: var(--atlas-rim);
   font-weight: 600;
 }
 
@@ -2950,10 +2951,10 @@ function getQuestionKindLabel(kind) {
 .reading-floating-panel {
   position: fixed;
   z-index: 2600;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   border-radius: 8px;
-  background: #ffffff;
-  color: var(--reading-text);
+  background: var(--atlas-rim);
+  color: var(--atlas-ink);
   box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
 }
 
@@ -2975,7 +2976,7 @@ function getQuestionKindLabel(kind) {
 }
 
 .settings-title {
-  color: var(--reading-muted);
+  color: var(--atlas-ink-soft);
   font-size: 0.9rem;
   font-weight: 600;
   margin: 0 0 8px;
@@ -2988,10 +2989,10 @@ function getQuestionKindLabel(kind) {
 
 .settings-option {
   flex: 1;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   border-radius: 4px;
-  background: var(--reading-panel-alt);
-  color: var(--reading-text);
+  background: var(--atlas-glass-elevated-alt);
+  color: var(--atlas-ink);
   cursor: pointer;
   font: inherit;
   font-size: 0.86rem;
@@ -3000,9 +3001,9 @@ function getQuestionKindLabel(kind) {
 }
 
 .settings-option.active {
-  border-color: var(--reading-accent);
-  background: var(--reading-accent);
-  color: #ffffff;
+  border-color: var(--atlas-accent);
+  background: var(--atlas-accent);
+  color: var(--atlas-rim);
 }
 
 .reading-notes-panel {
@@ -3023,7 +3024,7 @@ function getQuestionKindLabel(kind) {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--reading-line);
+  border-bottom: 1px solid var(--atlas-line);
   font-weight: 600;
 }
 
@@ -3038,7 +3039,7 @@ function getQuestionKindLabel(kind) {
   padding: 16px;
   border: none;
   background: transparent;
-  color: var(--reading-text);
+  color: var(--atlas-ink);
   font-family: inherit;
   resize: none;
 }
@@ -3054,7 +3055,7 @@ function getQuestionKindLabel(kind) {
   gap: 4px;
   padding: 4px;
   border-radius: 6px;
-  background: #1e293b;
+  background: var(--atlas-ink);
   color: white;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
@@ -3071,25 +3072,25 @@ function getQuestionKindLabel(kind) {
 }
 
 .reading-selection-toolbar button:hover {
-  background: #334155;
+  background: var(--atlas-ink-soft);
 }
 
 .reading-html .hl,
 .review-dictionary-highlight {
-  background-color: #72361c;
-  color: #fff;
+  background-color: var(--atlas-accent-strong);
+  color: var(--atlas-rim);
   cursor: pointer;
 }
 
 .reading-html .hl[data-hl-type="note"] {
-  background-color: #0369d9;
-  color: #fff;
+  background-color: var(--atlas-accent-alt);
+  color: var(--atlas-rim);
 }
 
 .reading-html .memorize-locator-highlight {
   border-radius: 3px;
-  background: rgba(187, 247, 208, 0.85);
-  box-shadow: inset 0 -2px 0 rgba(22, 163, 74, 0.36);
+  background: var(--atlas-accent-soft);
+  box-shadow: inset 0 -2px 0 var(--atlas-success);
 }
 
 .review-highlight-dictionary-bubble {
@@ -3101,7 +3102,7 @@ function getQuestionKindLabel(kind) {
   padding: 12px;
   border: 1px solid rgba(148, 163, 184, 0.45);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--atlas-rim);
   box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
 }
 
@@ -3137,7 +3138,7 @@ function getQuestionKindLabel(kind) {
 
 .vocab-meta,
 .vocab-label {
-  color: var(--reading-muted);
+  color: var(--atlas-ink-soft);
   font-size: 0.78rem;
 }
 
@@ -3155,7 +3156,7 @@ function getQuestionKindLabel(kind) {
 }
 
 .vocab-text {
-  color: #334155;
+  color: var(--atlas-ink-soft);
   font-size: 0.88rem;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -3169,19 +3170,19 @@ function getQuestionKindLabel(kind) {
 
 .vocab-close,
 .vocab-add {
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   border-radius: 6px;
-  background: #ffffff;
-  color: var(--reading-text);
+  background: var(--atlas-rim);
+  color: var(--atlas-ink);
   cursor: pointer;
   font: inherit;
   padding: 6px 10px;
 }
 
 .vocab-add {
-  border-color: var(--reading-accent);
-  background: var(--reading-accent);
-  color: #ffffff;
+  border-color: var(--atlas-accent);
+  background: var(--atlas-accent);
+  color: var(--atlas-rim);
   font-weight: 700;
 }
 
@@ -3191,13 +3192,13 @@ function getQuestionKindLabel(kind) {
 }
 
 .reading-workspace.shell {
-  --reading-left-pane-width: clamp(360px, 50%, calc(100% - 360px));
-  --reading-divider-width: 10px;
+  --atlas-reading-left-pane-width: clamp(360px, 50%, calc(100% - 360px));
+  --atlas-reading-divider-width: 10px;
   flex: 1 1 auto;
   display: grid;
   grid-template-columns:
-    minmax(280px, var(--reading-left-pane-width))
-    var(--reading-divider-width)
+    minmax(280px, var(--atlas-reading-left-pane-width))
+    var(--atlas-reading-divider-width)
     minmax(320px, 1fr);
   grid-template-rows: minmax(0, 1fr);
   align-items: stretch;
@@ -3208,12 +3209,30 @@ function getQuestionKindLabel(kind) {
   overflow: hidden;
 }
 
+.reading-settings-panel .settings-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.reading-settings-panel .settings-panel-header h2 {
+  margin: 0;
+  font: inherit;
+  font-weight: 700;
+}
+
+.reading-settings-panel .settings-panel-close {
+  flex: 0 0 auto;
+}
+
 .pane {
   min-height: 0;
   height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
-  background: var(--reading-panel);
+  background: var(--atlas-glass-elevated);
   padding: 22px;
   min-width: 0;
 }
@@ -3226,9 +3245,9 @@ function getQuestionKindLabel(kind) {
   align-self: stretch;
   height: 100%;
   min-height: 100%;
-  border-right: 1px solid var(--reading-line);
-  border-left: 1px solid var(--reading-line);
-  background: linear-gradient(180deg, #e2e8f0 0%, #cbd5e1 100%);
+  border-right: 1px solid var(--atlas-line);
+  border-left: 1px solid var(--atlas-line);
+  background: var(--atlas-glass-pressed);
   cursor: ew-resize;
   outline: none;
   position: relative;
@@ -3253,17 +3272,17 @@ function getQuestionKindLabel(kind) {
 #reading-divider:focus-visible,
 #reading-divider.is-dragging {
   border-color: var(--atlas-accent-alt);
-  background: var(--color-brand-gradient);
+  background: var(--atlas-accent);
 }
 
 #right {
   min-width: 0;
-  background: var(--reading-panel-alt);
+  background: var(--atlas-glass-elevated-alt);
   padding: 12px 14px;
 }
 
 .reading-html {
-  color: var(--reading-text);
+  color: var(--atlas-ink);
 }
 
 .reading-html h2,
@@ -3271,7 +3290,7 @@ function getQuestionKindLabel(kind) {
 .reading-html h4,
 .reading-html h5 {
   margin: 18px 0 10px;
-  color: var(--reading-text);
+  color: var(--atlas-ink);
   font-family: inherit;
 }
 
@@ -3327,10 +3346,10 @@ function getQuestionKindLabel(kind) {
 .reading-html select,
 .practice-nav select,
 .practice-nav input[type="text"] {
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   border-radius: 8px;
-  background: #ffffff;
-  color: var(--reading-text);
+  background: var(--atlas-rim);
+  color: var(--atlas-ink);
   font: inherit;
   min-height: 32px;
   padding: 6px 8px;
@@ -3341,7 +3360,7 @@ function getQuestionKindLabel(kind) {
 .practice-nav input[type="checkbox"] {
   width: 18px;
   height: 18px;
-  accent-color: var(--reading-accent);
+  accent-color: var(--atlas-accent);
   vertical-align: middle;
 }
 
@@ -3349,13 +3368,13 @@ function getQuestionKindLabel(kind) {
   width: 100%;
   margin: 14px 0;
   border-collapse: collapse;
-  background: #ffffff;
+  background: var(--atlas-rim);
 }
 
 .reading-html th,
 .reading-html td {
   padding: 8px 10px;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   vertical-align: top;
 }
 
@@ -3363,9 +3382,9 @@ function getQuestionKindLabel(kind) {
   margin-top: 12px;
   overflow-x: auto;
   padding: 10px 12px;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   border-radius: 8px;
-  background: var(--reading-panel);
+  background: var(--atlas-glass-elevated);
 }
 
 .reading-html .table-section table {
@@ -3377,15 +3396,15 @@ function getQuestionKindLabel(kind) {
 
 .reading-html .table-section thead th {
   padding: 10px 8px;
-  border: 1px solid var(--reading-line);
-  background: var(--reading-panel-alt);
+  border: 1px solid var(--atlas-line);
+  background: var(--atlas-glass-elevated-alt);
   text-align: center;
   font-weight: 700;
 }
 
 .reading-html .table-section tbody td {
   padding: 10px 10px;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   vertical-align: top;
   line-height: 1.45;
 }
@@ -3420,10 +3439,10 @@ function getQuestionKindLabel(kind) {
   max-width: 180px;
   width: 40%;
   padding: 2px 6px;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   border-radius: 4px;
-  background: var(--reading-panel);
-  color: var(--reading-text);
+  background: var(--atlas-glass-elevated);
+  color: var(--atlas-ink);
   vertical-align: middle;
 }
 
@@ -3441,19 +3460,19 @@ function getQuestionKindLabel(kind) {
 .reading-html .group {
   margin-bottom: 0;
   padding: 18px 22px;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   border-radius: 4px;
-  background: var(--reading-panel);
-  box-shadow: var(--reading-shadow);
+  background: var(--atlas-glass-elevated);
+  box-shadow: var(--atlas-shadow);
 }
 
 #results.review-panel {
   margin: 18px 0 0;
   padding: 18px;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   border-radius: 4px;
-  background: var(--reading-panel);
-  box-shadow: var(--reading-shadow);
+  background: var(--atlas-glass-elevated);
+  box-shadow: var(--atlas-shadow);
 }
 
 .reading-explanation-panel {
@@ -3473,14 +3492,14 @@ function getQuestionKindLabel(kind) {
 
 .reading-explanation-card__label {
   margin-bottom: 6px;
-  color: #1d4ed8;
+  color: var(--atlas-accent-strong);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.3;
 }
 
 .reading-explanation-card__text {
-  color: #1f2937;
+  color: var(--atlas-ink);
   font-size: 14px;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -3496,12 +3515,12 @@ function getQuestionKindLabel(kind) {
   padding: 10px 12px;
   border: 1px solid rgba(37, 99, 235, 0.16);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--atlas-glass);
 }
 
 .reading-question-explanation-list h5 {
   margin: 0 0 8px;
-  color: #1d4ed8;
+  color: var(--atlas-accent-strong);
   font-size: 13px;
   font-weight: 700;
 }
@@ -3526,10 +3545,10 @@ function getQuestionKindLabel(kind) {
   gap: 8px;
   margin: 0 0 8px;
   padding: 8px 10px;
-  border: 2px dashed var(--reading-dropzone-border);
+  border: 2px dashed var(--atlas-accent-ring);
   border-radius: 4px;
-  background: var(--reading-dropzone-bg);
-  color: var(--reading-muted);
+  background: var(--atlas-accent-soft);
+  color: var(--atlas-ink-soft);
   transition: border-color 0.16s ease, background 0.16s ease;
 }
 
@@ -3537,8 +3556,8 @@ function getQuestionKindLabel(kind) {
 .reading-html .match-dropzone.drag-over,
 .reading-html .drag-over,
 .dragdrop-slot.drag-over {
-  border-color: var(--reading-dropzone-drag-border);
-  background: var(--reading-dropzone-drag-bg);
+  border-color: var(--atlas-accent);
+  background: var(--atlas-accent-soft);
   box-shadow: none;
 }
 
@@ -3558,7 +3577,7 @@ function getQuestionKindLabel(kind) {
   margin: 0 4px;
   padding: 0 8px;
   border: 0;
-  border-bottom: 2px solid var(--reading-muted);
+  border-bottom: 2px solid var(--atlas-ink-soft);
   border-radius: 4px 4px 0 0;
   background: rgba(0, 0, 0, 0.02);
   box-shadow: none;
@@ -3567,14 +3586,14 @@ function getQuestionKindLabel(kind) {
 }
 
 .reading-html .drop-target-summary.drag-over {
-  border-bottom-color: var(--reading-accent);
+  border-bottom-color: var(--atlas-accent);
   background: var(--atlas-accent-soft);
 }
 
 .reading-html .drop-target-summary.dropzone-filled {
-  border-bottom-color: var(--reading-success);
+  border-bottom-color: var(--atlas-success);
   background: var(--atlas-accent-soft);
-  color: var(--reading-success);
+  color: var(--atlas-success);
   font-weight: 600;
 }
 
@@ -3590,7 +3609,7 @@ function getQuestionKindLabel(kind) {
 }
 
 .reading-html .paragraph-label {
-  color: var(--reading-muted);
+  color: var(--atlas-ink-soft);
   font-size: 0.9rem;
   font-weight: 700;
   white-space: nowrap;
@@ -3611,14 +3630,14 @@ function getQuestionKindLabel(kind) {
 .reading-html .pool-items.drag-over,
 .reading-html .options-pool.drag-over,
 .reading-html .headings-pool.drag-over {
-  border-color: var(--reading-accent);
-  background: var(--reading-pool-drag-bg);
+  border-color: var(--atlas-accent);
+  background: var(--atlas-accent-soft);
   box-shadow: none;
 }
 
 .reading-html .dropped-items:empty::after {
   content: "拖到这里";
-  color: #7b8a98;
+  color: var(--atlas-ink-faint);
   font-size: 0.82rem;
 }
 
@@ -3628,10 +3647,10 @@ function getQuestionKindLabel(kind) {
   min-height: 32px;
   max-width: 100%;
   padding: 6px 10px;
-  border: 1px solid var(--reading-drag-item-border);
+  border: 1px solid var(--atlas-accent-ring);
   border-radius: 4px;
-  background: var(--reading-drag-item-bg);
-  color: var(--reading-text);
+  background: var(--atlas-glass-pressed);
+  color: var(--atlas-ink);
   cursor: grab;
   font: inherit;
   font-size: 0.9rem;
@@ -3651,8 +3670,8 @@ function getQuestionKindLabel(kind) {
 .dragdrop-chip-assigned,
 .reading-html .dragdrop-chip-assigned {
   border-style: solid;
-  border-color: var(--reading-drag-item-border);
-  background: var(--reading-drag-item-bg);
+  border-color: var(--atlas-accent-ring);
+  background: var(--atlas-glass-pressed);
 }
 
 .dragdrop-option.selected {
@@ -3675,18 +3694,18 @@ function getQuestionKindLabel(kind) {
   display: flex;
   align-items: center;
   gap: 16px;
-  height: var(--reading-nav-height);
-  min-height: var(--reading-nav-height);
+  height: var(--atlas-reading-nav-height);
+  min-height: var(--atlas-reading-nav-height);
   padding: 12px 18px;
-  border-top: 1px solid var(--reading-line);
-  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid var(--atlas-line);
+  background: var(--atlas-glass-elevated);
   box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.06);
   overflow: visible;
 }
 
 .practice-nav .title {
   flex: 0 0 auto;
-  color: var(--reading-muted);
+  color: var(--atlas-ink-soft);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -3716,10 +3735,10 @@ function getQuestionKindLabel(kind) {
   align-items: center;
   justify-content: center;
   padding: 6px 12px;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   border-radius: 4px;
-  background: var(--reading-panel);
-  color: var(--reading-text);
+  background: var(--atlas-glass-elevated);
+  color: var(--atlas-ink);
   cursor: pointer;
   font-size: 0.9rem;
 }
@@ -3734,7 +3753,7 @@ function getQuestionKindLabel(kind) {
 }
 
 .practice-nav .q-item:hover {
-  background: #f1f5f9;
+  background: var(--atlas-glass-pressed);
 }
 
 .practice-nav .q-item.answered {
@@ -3744,24 +3763,24 @@ function getQuestionKindLabel(kind) {
 
 .practice-nav .q-item.active,
 .practice-nav .q-item.answered.active {
-  border-color: var(--reading-accent);
+  border-color: var(--atlas-accent);
   background: var(--atlas-accent-soft);
-  color: var(--reading-accent);
+  color: var(--atlas-accent);
   font-weight: 600;
 }
 
 .practice-nav .q-item.correct,
 .practice-nav .q-item.review-correct {
-  border-color: var(--reading-success);
+  border-color: var(--atlas-success);
   background: var(--atlas-accent-soft);
-  color: var(--reading-success);
+  color: var(--atlas-success);
 }
 
 .practice-nav .q-item.incorrect,
 .practice-nav .q-item.review-incorrect {
-  border-color: var(--reading-danger);
-  background: #fee2e2;
-  color: var(--reading-danger);
+  border-color: var(--atlas-danger);
+  background: var(--atlas-library-danger);
+  color: var(--atlas-danger);
 }
 
 .practice-nav .q-item.marked::after {
@@ -3770,7 +3789,7 @@ function getQuestionKindLabel(kind) {
   right: -5px;
   width: 10px;
   height: 10px;
-  border: 2px solid #ffffff;
+  border: 2px solid var(--atlas-rim);
   border-radius: 999px;
   background: var(--atlas-warning);
   content: "";
@@ -3783,8 +3802,8 @@ function getQuestionKindLabel(kind) {
   padding: 0 4px;
   border: 1px solid rgba(100, 116, 139, 0.45);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.7);
-  color: var(--reading-muted);
+  background: var(--atlas-glass);
+  color: var(--atlas-ink-soft);
   cursor: pointer;
   font: inherit;
   font-size: 0.72rem;
@@ -3819,13 +3838,13 @@ function getQuestionKindLabel(kind) {
 
 .suite-progress-mini span {
   display: block;
-  color: var(--reading-muted);
+  color: var(--atlas-ink-soft);
   font-size: 0.72rem;
 }
 
 .suite-progress-mini strong {
   display: block;
-  color: var(--reading-text);
+  color: var(--atlas-ink);
   font-size: 0.86rem;
 }
 
@@ -3841,11 +3860,11 @@ function getQuestionKindLabel(kind) {
   background: var(--atlas-accent-soft);
   color: var(--atlas-accent-strong);
   font-size: 0.86rem;
-  box-shadow: var(--reading-shadow);
+  box-shadow: var(--atlas-shadow);
 }
 
 .panel-kicker {
-  color: var(--reading-accent);
+  color: var(--atlas-accent);
   font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -3871,15 +3890,15 @@ function getQuestionKindLabel(kind) {
 .score-grid > div,
 .analysis-strip > div {
   padding: 10px 12px;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   border-radius: 8px;
-  background: #f8fafc;
+  background: var(--atlas-glass-pressed);
 }
 
 .score-grid span,
 .analysis-strip span {
   display: block;
-  color: var(--reading-muted);
+  color: var(--atlas-ink-soft);
   font-size: 0.75rem;
 }
 
@@ -3887,7 +3906,7 @@ function getQuestionKindLabel(kind) {
 .analysis-strip strong {
   display: block;
   margin-top: 3px;
-  color: var(--reading-text);
+  color: var(--atlas-ink);
 }
 
 .review-analysis {
@@ -3895,8 +3914,8 @@ function getQuestionKindLabel(kind) {
   gap: 16px;
   margin: 4px 0 20px;
   padding: 16px 0 2px;
-  border-top: 1px solid var(--reading-line);
-  border-bottom: 1px solid var(--reading-line);
+  border-top: 1px solid var(--atlas-line);
+  border-bottom: 1px solid var(--atlas-line);
 }
 
 .llm-review-status {
@@ -3929,13 +3948,13 @@ function getQuestionKindLabel(kind) {
   grid-template-columns: 52px minmax(0, 1fr);
   gap: 10px;
   padding: 10px 0;
-  border-top: 1px solid var(--reading-line);
-  color: #475569;
+  border-top: 1px solid var(--atlas-line);
+  color: var(--atlas-ink-soft);
   font-size: 0.86rem;
 }
 
 .llm-question-analysis > strong {
-  color: var(--reading-text);
+  color: var(--atlas-ink);
 }
 
 .llm-question-analysis dl {
@@ -3946,7 +3965,7 @@ function getQuestionKindLabel(kind) {
 }
 
 .llm-question-analysis dt {
-  color: var(--reading-muted);
+  color: var(--atlas-ink-soft);
 }
 
 .llm-question-analysis dd {
@@ -3967,7 +3986,7 @@ function getQuestionKindLabel(kind) {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 8px;
-  color: #475569;
+  color: var(--atlas-ink-soft);
   font-size: 0.88rem;
 }
 
@@ -3976,7 +3995,7 @@ function getQuestionKindLabel(kind) {
   grid-template-columns: minmax(92px, 0.24fr) minmax(0, 1fr) 54px;
   gap: 10px;
   align-items: center;
-  color: #475569;
+  color: var(--atlas-ink-soft);
   font-size: 0.86rem;
 }
 
@@ -3984,14 +4003,14 @@ function getQuestionKindLabel(kind) {
   height: 8px;
   overflow: hidden;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: var(--atlas-glass-pressed);
 }
 
 .kind-bar-track i {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--reading-success);
+  background: var(--atlas-success);
 }
 
 .review-table,
@@ -4008,20 +4027,20 @@ function getQuestionKindLabel(kind) {
 .results-table th,
 .results-table td {
   padding: 8px 10px;
-  border: 1px solid var(--reading-line);
+  border: 1px solid var(--atlas-line);
   text-align: center;
   vertical-align: top;
 }
 
 .review-correct td:last-child,
 .result-correct {
-  color: var(--reading-success);
+  color: var(--atlas-success);
   font-weight: 700;
 }
 
 .review-incorrect td:last-child,
 .result-incorrect {
-  color: var(--reading-danger);
+  color: var(--atlas-danger);
   font-weight: 700;
 }
 
@@ -4036,8 +4055,8 @@ function getQuestionKindLabel(kind) {
   padding: 10px 14px;
   border: 0;
   border-radius: 999px;
-  background: var(--color-brand-gradient);
-  color: var(--color-white);
+  background: var(--atlas-accent);
+  color: var(--atlas-rim);
   box-shadow: var(--atlas-shadow-high);
   cursor: pointer;
   font: inherit;
@@ -4210,8 +4229,8 @@ function getQuestionKindLabel(kind) {
   padding: 0 12px;
   border: 0;
   border-radius: var(--atlas-radius-sm);
-  background: var(--color-brand-gradient);
-  color: var(--color-white);
+  background: var(--atlas-accent);
+  color: var(--atlas-rim);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
@@ -4238,11 +4257,11 @@ function getQuestionKindLabel(kind) {
   }
 
   .reading-page {
-    --reading-nav-height: 112px;
+    --atlas-reading-nav-height: 112px;
     min-height: 100vh;
     height: auto;
     overflow: auto;
-    padding-bottom: var(--reading-nav-height);
+    padding-bottom: var(--atlas-reading-nav-height);
   }
 
   .reading-header.header {
@@ -4279,7 +4298,7 @@ function getQuestionKindLabel(kind) {
     align-items: flex-start;
     flex-wrap: wrap;
     gap: 10px;
-    height: var(--reading-nav-height);
+    height: var(--atlas-reading-nav-height);
     overflow-y: auto;
   }
 
@@ -4310,7 +4329,7 @@ function getQuestionKindLabel(kind) {
 }
 
 .drag-option-selected {
-  outline: 3px solid var(--color-primary, #2563eb) !important;
+  outline: 3px solid var(--atlas-accent);
   outline-offset: 2px;
   box-shadow: 0 0 0 4px rgb(37 99 235 / 18%);
 }

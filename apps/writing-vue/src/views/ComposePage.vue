@@ -697,6 +697,11 @@ async function submitEssay() {
     })
   } catch (err) {
     console.error('提交失败:', err)
+    if (err?.attemptId) {
+      stopAutoSave()
+      await router.push({ name: 'Evaluating', params: { sessionId: err.attemptId }, query: { startError: err.code || 'start_failed' } })
+      return
+    }
     // Prefer startEvaluation Chinese message over bare code mapping
     error.value = resolveApiErrorMessage(err, 'start_failed')
   } finally {

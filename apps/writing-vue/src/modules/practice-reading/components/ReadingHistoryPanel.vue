@@ -2,7 +2,7 @@
   <div id="practice-view" :class="['view', 'hero-panel', 'hero-section', { active: activeView === 'practice' }]" data-reading-records>
     <div class="hero-panel__header practice-view__header">
       <div class="practice-view__title-row">
-        <h2 class="hero-panel__title heading-serif">📝 练习记录</h2>
+        <h2 class="hero-panel__title heading-serif"><span class="ui-icon-text" aria-hidden="true">记录</span> 练习记录</h2>
         <button
           id="practice-summary-toggle"
           class="practice-summary-toggle"
@@ -324,7 +324,7 @@
 
     <div class="practice-history hero-panel hero-section" data-reading-history-panel>
       <div class="hero-panel__header practice-history-header">
-        <h3 class="hero-panel__title heading-serif">📈 练习历史</h3>
+        <h3 class="hero-panel__title heading-serif"><span class="ui-icon-text" aria-hidden="true">趋势</span> 练习历史</h3>
         <div id="record-type-filter-buttons" class="hero-panel__actions shui-filter-group shui-segmented-control">
           <span class="shui-segmented-indicator" aria-hidden="true"></span>
           <button
@@ -356,7 +356,7 @@
         </div>
         <div class="hero-panel__actions">
           <button class="btn btn-secondary hero-btn hero-btn--ghost" type="button" data-index-action="export-practice-markdown" data-action="export-practice-markdown" :disabled="historyBusy" @click="$emit('export-practice-markdown', $event)">
-            📄 导出Markdown
+            导出 Markdown
           </button>
           <button class="btn btn-info hero-btn" id="bulk-delete-btn" type="button" data-index-action="toggle-bulk-delete" data-action="toggle-bulk-delete" :disabled="historyBusy" @click="$emit('toggle-bulk-delete-mode', $event)">
             <svg
@@ -377,7 +377,7 @@
             {{ bulkDeleteButtonLabel }}
           </button>
           <button class="btn btn-warning hero-btn hero-btn--warn" type="button" data-index-action="clear-practice-data" data-action="clear-practice-data" :disabled="historyBusy" @click="$emit('clear-practice-data', $event)">
-            🗑️ 清除记录
+            清除记录
           </button>
         </div>
       </div>
@@ -418,7 +418,7 @@
           <p>正在加载练习记录...</p>
         </div>
         <div v-else-if="filteredHistory.length === 0" class="history-empty-placeholder">
-          <div class="history-empty-placeholder__icon" aria-hidden="true">📋</div>
+          <div class="history-empty-placeholder__icon ui-icon-text" aria-hidden="true">记录</div>
           <p>暂无练习记录</p>
           <p class="history-empty-placeholder__note">开始练习后，记录将自动保存在这里</p>
         </div>
@@ -475,7 +475,7 @@
               :disabled="historyBusy"
               @click.stop="$emit('delete-history-record', record)"
             >
-              🗑️
+              <span aria-hidden="true">删除</span>
             </button>
           </div>
         </div>

@@ -238,7 +238,7 @@
     <div v-if="loading" class="loading">加载中...</div>
     
     <div v-else-if="error" class="error-state card">
-      <p>⚠️ {{ error }}</p>
+      <p class="state-message"><span class="state-icon" aria-hidden="true">!</span>{{ error }}</p>
       <button class="btn btn-brand" @click="loadEssays">重试</button>
     </div>
 
@@ -283,7 +283,7 @@
               <span class="stat-item">{{ getRecordDurationLabel(essay) }}</span>
               <span class="stat-item">{{ getRecordSizeLabel(essay) }}</span>
               <span :class="['stat-item', 'score', getScoreClass(essay.scoreValue)]">
-                {{ formatDate(essay.submittedAt).split(' ')[0] }}
+                {{ formatRecordScore(essay) }}
               </span>
             </div>
           </div>
@@ -340,7 +340,7 @@
         <div v-if="loadingDetail" class="loading">加载中...</div>
 
         <div v-else-if="detailError" class="error-state detail-error-state card">
-          <p>⚠️ {{ detailError }}</p>
+          <p class="state-message"><span class="state-icon" aria-hidden="true">!</span>{{ detailError }}</p>
           <div class="detail-error-actions">
             <button class="btn btn-brand" @click="retryDetail">重试</button>
             <button class="btn btn-warm-sand" @click="closeDetail">关闭</button>
@@ -1404,9 +1404,9 @@ onBeforeUnmount(() => {
 }
 
 .page-notice.notice-error {
-  background: #fff4f4;
-  border-color: #f1b7b7;
-  color: #a73434;
+  background: var(--color-error-bg);
+  border-color: var(--atlas-danger);
+  color: var(--atlas-danger);
 }
 
 /* 筛选面板 */
@@ -1500,12 +1500,12 @@ onBeforeUnmount(() => {
 }
 
 .comparison-table td.positive {
-  color: #4CAF50;
+  color: var(--atlas-success);
   font-weight: 600;
 }
 
 .comparison-table td.negative {
-  color: #F44336;
+  color: var(--atlas-danger);
   font-weight: 600;
 }
 
@@ -1597,8 +1597,8 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 12px 16px;
   margin-bottom: 20px;
-  background: #FFF3CD;
-  border-color: #FFECB5;
+  background: var(--atlas-accent-soft);
+  border-color: var(--atlas-line);
 }
 
 .selection-count {
@@ -1662,13 +1662,13 @@ onBeforeUnmount(() => {
 }
 
 .task-badge.task1 {
-  background: #E3F2FD;
-  color: #1976D2;
+  background: var(--atlas-library-success);
+  color: var(--atlas-accent-strong);
 }
 
 .task-badge.task2 {
-  background: #F3E5F5;
-  color: #7B1FA2;
+  background: var(--atlas-accent-soft);
+  color: var(--atlas-accent-strong);
 }
 
 .essay-date {
@@ -1698,15 +1698,15 @@ onBeforeUnmount(() => {
 }
 
 .stat-item.score.high {
-  color: #4CAF50;
+  color: var(--atlas-success);
 }
 
 .stat-item.score.medium {
-  color: #FF9800;
+  color: var(--atlas-warning);
 }
 
 .stat-item.score.low {
-  color: #F44336;
+  color: var(--atlas-danger);
 }
 
 .essay-actions {
@@ -1732,6 +1732,24 @@ onBeforeUnmount(() => {
   text-align: center;
   padding: 60px 20px;
   color: var(--text-muted);
+}
+
+.state-message {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.state-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 0.8rem;
 }
 
 /* 分页 */
@@ -1997,6 +2015,64 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
+/* Keep the filter controls on a shared baseline while allowing the score
+   explanation to occupy its own row instead of pushing the reset action. */
+.history-page .filter-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.35fr) minmax(260px, 1.35fr) auto;
+  align-items: start;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.history-page .filter-item {
+  min-width: 0;
+  gap: 7px;
+}
+
+.history-page .filter-item > label {
+  min-height: 1.25rem;
+  line-height: 1.25rem;
+}
+
+.history-page .filter-item select,
+.history-page .filter-item input[type='date'],
+.history-page .filter-item input[type='number'] {
+  width: 100%;
+  min-height: 40px;
+  box-sizing: border-box;
+}
+
+.history-page .date-range,
+.history-page .score-range {
+  min-height: 40px;
+}
+
+.history-page .date-range > span,
+.history-page .score-range > span {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.history-page .score-range-hint {
+  min-height: 2.4em;
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.history-page .filter-row > .btn {
+  align-self: end;
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.history-page .search-row {
+  margin-top: 0;
+}
+
 .history-page .section-header h2 {
   font-family: var(--font-family-display);
   font-size: 30px;
@@ -2068,6 +2144,25 @@ onBeforeUnmount(() => {
   padding-top: 8px;
 }
 
+.history-page .empty-state {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  min-height: 132px;
+  box-sizing: border-box;
+  padding: 34px 22px;
+}
+
+.history-page .empty-state p {
+  max-width: 34rem;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.history-page .empty-state button {
+  margin-top: 0;
+}
+
 .history-page .detail-modal {
   width: min(1180px, calc(100vw - 32px));
   padding: 22px 24px;
@@ -2089,7 +2184,7 @@ onBeforeUnmount(() => {
 .history-page .score-item,
 .history-page .info-item {
   border-radius: var(--radius-md);
-  background: rgba(255, 251, 246, 0.62);
+  background: var(--atlas-glass);
   border: 1px solid var(--line-1);
   box-shadow: none;
 }
@@ -2113,7 +2208,7 @@ onBeforeUnmount(() => {
   gap: 10px;
   align-content: start;
   padding: 22px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.64), rgba(255, 255, 255, 0.34));
+  background: var(--atlas-library-surface-soft);
 }
 
 .history-page .analytics-radar-card .section-header {
@@ -2151,13 +2246,13 @@ onBeforeUnmount(() => {
   font-family: var(--font-family-display);
   font-size: 2rem;
   line-height: 1;
-  color: #334a47;
+  color: var(--atlas-ink);
 }
 
 .history-page .radar-divider {
   width: 1px;
   height: 42px;
-  background: rgba(255, 255, 255, 0.68);
+  background: var(--atlas-line);
 }
 
 .history-page .analytics-side {
@@ -2170,8 +2265,8 @@ onBeforeUnmount(() => {
 .history-page .analytics-trend-card {
   padding: 18px;
   border-radius: var(--radius-lg);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.32));
-  border: 1px solid rgba(255, 255, 255, 0.74);
+  background: var(--atlas-library-surface-soft);
+  border: 1px solid var(--atlas-rim);
 }
 
 .history-page .analytics-compare-card .section-header {
@@ -2206,7 +2301,7 @@ onBeforeUnmount(() => {
 }
 
 .history-page .stat-summary {
-  background: rgba(255, 255, 255, 0.48);
+  background: var(--atlas-glass);
 }
 
 .history-page .analytics-trend-card h3 {
@@ -2241,9 +2336,9 @@ onBeforeUnmount(() => {
 .history-page .essay-item {
   grid-template-columns: auto minmax(0, 1fr) auto;
   padding: 14px 18px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--atlas-rim);
   border-radius: 18px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.38));
+  background: var(--atlas-library-surface-soft);
 }
 
 .history-page .essay-title {
@@ -2270,8 +2365,8 @@ onBeforeUnmount(() => {
   gap: 2px;
   padding: 8px 10px;
   border-radius: 14px;
-  background: rgba(51, 74, 71, 0.08);
-  border: 1px solid rgba(51, 74, 71, 0.18);
+  background: var(--atlas-accent-soft);
+  border: 1px solid var(--atlas-line);
 }
 
 .history-page .essay-score-pod span {
@@ -2285,7 +2380,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-family-display);
   font-size: 1.5rem;
   line-height: 1;
-  color: #334a47;
+  color: var(--atlas-ink);
 }
 
 .history-page .pagination {
@@ -2294,6 +2389,16 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 960px) {
+  .history-page .filter-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .history-page .filter-row > .btn {
+    align-self: end;
+    justify-self: start;
+  }
+
   .history-page .analytics-layout {
     grid-template-columns: 1fr;
   }
@@ -2314,6 +2419,27 @@ onBeforeUnmount(() => {
   .history-page .essay-item {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+}
+
+@media (max-width: 640px) {
+  .history-page .filter-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .history-page .filter-row > .btn {
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .history-page .date-range,
+  .history-page .score-range {
+    gap: 6px;
+  }
+
+  .history-page .score-range-hint {
+    min-height: 0;
   }
 }
 </style>
