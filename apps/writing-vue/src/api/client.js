@@ -5,14 +5,17 @@
 
 import {
   listHistory,
-  listHistoryAll,
   getHistoryDetail,
+  getWritingHistoryStatistics,
   exportHistory,
-  deleteHistoryAttempt
+  deleteHistoryAttempt,
+  deleteHistoryAttempts,
+  clearHistory
 } from '@/api/history-repository.js'
 import {
   saveDraft,
   submitAttempt,
+  cloneWritingDraft,
   startEvaluation,
   listEvaluationEvents,
   cancelEvaluation,
@@ -29,6 +32,7 @@ import {
   testAiProvider
 } from '@/api/settings-repository.js'
 import { writingTopicsRepository } from '@/api/topics-repository.js'
+import { writingPromptsRepository } from '@/api/writing-prompts-repository.js'
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 import { adaptWritingHistoryDetail } from '@/utils/evaluation-result.js'
 import { requireWritingAttemptMode } from '@/api/writing-mode.js'
@@ -117,118 +121,6 @@ function newId(prefix = 'id') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-async function readKvList(namespace) {
-  const { items } = await listSettings(namespace)
-  return (items || []).map((item) => {
-    const raw = item.value ?? item
-    if (typeof raw === 'string') {
-      try {
-        return JSON.parse(raw)
-      } catch {
-        return { key: item.key, value: raw }
-      }
-    }
-    return raw && typeof raw === 'object' ? raw : { key: item.key, value: raw }
-  })
-}
-
-async function writeKv(namespace, key, value) {
-  await upsertSetting(namespace, key, value)
-  return value
-}
-
-function parseStoredSettingValue(item) {
-  const raw = item?.value ?? item
-  if (typeof raw !== 'string') return raw
-  try {
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
-}
-
-function normalizePromptTaskType(value) {
-  const normalized = String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_-]+/g, '')
-  if (normalized === 'task1' || normalized === 't1') return 'task1'
-  if (normalized === 'task2' || normalized === 't2') return 'task2'
-  return null
-}
-
-function readPromptActive(item) {
-  if (typeof item?.is_active === 'boolean') return item.is_active
-  return item?.active === true
-}
-
-function normalizePromptEntry(item, fallbackId = null) {
-  if (!item || typeof item !== 'object' || Array.isArray(item)) return null
-  const id = String(item.id ?? fallbackId ?? '').trim()
-  const taskType = normalizePromptTaskType(item.task_type ?? item.taskType)
-  if (!id || !taskType) return null
-
-  // Store one canonical wire shape. The Rust resolver still reads the legacy
-  // aliases for old backups, but new UI writes must not recreate two truths.
-  const { active: _legacyActive, taskType: _legacyTaskType, ...canonical } = item
-  return {
-    ...canonical,
-    id,
-    task_type: taskType,
-    is_active: readPromptActive(item)
-  }
-}
-
-async function listPromptEntries() {
-  const { items } = await listSettings('prompts')
-  return (items || [])
-    .map((item) => normalizePromptEntry(parseStoredSettingValue(item), item?.key))
-    .filter(Boolean)
-}
-
-function promptImportItems(jsonData) {
-  if (Array.isArray(jsonData)) return jsonData
-  if (Array.isArray(jsonData?.prompts)) return jsonData.prompts
-  if (!jsonData || typeof jsonData !== 'object') return [jsonData]
-
-  const taskEntries = ['task1', 'task2']
-    .filter((taskType) => Object.prototype.hasOwnProperty.call(jsonData, taskType))
-    .map((taskType) => {
-      const source = jsonData[taskType]
-      if (typeof source === 'string') {
-        return {
-          id: newId('prompt'),
-          version: jsonData.version,
-          task_type: taskType,
-          is_active: true,
-          body: source
-        }
-      }
-      if (!source || typeof source !== 'object' || Array.isArray(source)) {
-        throw new Error(`${taskType} 提示词必须是字符串或对象`)
-      }
-      return {
-        ...source,
-        id: source.id || newId('prompt'),
-        version: source.version ?? jsonData.version,
-        task_type: source.task_type ?? source.taskType ?? taskType,
-        is_active: source.is_active ?? source.active ?? true
-      }
-    })
-  return taskEntries.length ? taskEntries : [jsonData]
-}
-
-function normalizeImportedPrompt(item) {
-  const candidate = item && typeof item === 'object' && !Array.isArray(item)
-    ? { ...item, id: item.id || newId('prompt') }
-    : null
-  const normalized = normalizePromptEntry(candidate)
-  if (!normalized) {
-    throw new Error('提示词必须包含 id 和 task_type（task1 或 task2）')
-  }
-  return normalized
-}
-
 function normalizeAiConfig(item) {
   return {
     id: item.id,
@@ -313,85 +205,7 @@ export const configs = {
   }
 }
 
-export const prompts = {
-  async getActive(taskType) {
-    const canonicalTaskType = normalizePromptTaskType(taskType)
-    if (!canonicalTaskType) return null
-    const all = await this.listAll(canonicalTaskType)
-    return all.find((prompt) => prompt.is_active) || null
-  },
-
-  async import(jsonData) {
-    const entries = promptImportItems(jsonData).map(normalizeImportedPrompt)
-    const ids = new Set()
-    const activeByTask = new Map()
-    for (const entry of entries) {
-      if (ids.has(entry.id)) {
-        throw new Error(`提示词 ID 重复: ${entry.id}`)
-      }
-      ids.add(entry.id)
-      if (!entry.is_active) continue
-      if (activeByTask.has(entry.task_type)) {
-        throw new Error(`${entry.task_type} 只能导入一个激活提示词`)
-      }
-      activeByTask.set(entry.task_type, entry.id)
-    }
-
-    for (const entry of entries) {
-      await writeKv('prompts', entry.id, entry)
-    }
-
-    // An import may replace an active version, but only within the same task.
-    // Task 1 and Task 2 selections are deliberately independent.
-    for (const [taskType, activeId] of activeByTask) {
-      const taskEntries = await this.listAll(taskType)
-      for (const entry of taskEntries) {
-        const isActive = entry.id === activeId
-        if (entry.is_active !== isActive) {
-          await writeKv('prompts', entry.id, { ...entry, is_active: isActive })
-        }
-      }
-    }
-    return { imported: entries.length, items: entries }
-  },
-
-  async exportActive() {
-    const all = await this.listAll()
-    return { prompts: all.filter((prompt) => prompt.is_active) }
-  },
-
-  async listAll(taskType = null) {
-    const items = await listPromptEntries()
-    if (!taskType) return items
-    const canonicalTaskType = normalizePromptTaskType(taskType)
-    return canonicalTaskType
-      ? items.filter((item) => item.task_type === canonicalTaskType)
-      : []
-  },
-
-  async activate(id) {
-    const all = await this.listAll()
-    const target = all.find((item) => item.id === id)
-    if (!target) {
-      const err = new Error(`prompt not found: ${id}`)
-      err.code = 'not_found'
-      throw err
-    }
-    for (const item of all) {
-      if (item.task_type !== target.task_type) continue
-      const isActive = item.id === id
-      if (item.is_active !== isActive) {
-        await writeKv('prompts', item.id, { ...item, is_active: isActive })
-      }
-    }
-    return true
-  },
-
-  async delete(id) {
-    await deleteKv('prompts', id)
-    return true
-  }
-}
+export const prompts = writingPromptsRepository
 
 function emitEvaluationEvent(event) {
   evaluationListeners.forEach((listener) => {
@@ -544,6 +358,14 @@ export const evaluate = {
     return { cancelled: Boolean(cancelled), sessionId, evaluationId }
   },
 
+  async cloneDraft(sessionId) {
+    const { draft } = await cloneWritingDraft(sessionId, newIdempotencyKey('clone'))
+    if (!draft?.attemptId && !draft?.attempt_id) {
+      throw new Error('未能创建可编辑的写作副本')
+    }
+    return draft
+  },
+
   // Retry an already-submitted attempt. Never save/submit again: Rust owns
   // the monotonic attempt state and rejects late draft mutations.
   async retry(payload) {
@@ -640,33 +462,16 @@ export const essays = {
   },
 
   async batchDelete(ids) {
-    const list = Array.isArray(ids) ? ids : []
-    for (const id of list) {
-      await deleteHistoryAttempt(id)
-    }
-    return { deleted: list.length }
+    return { deleted: await deleteHistoryAttempts(ids) }
   },
 
-  async deleteAll() {
-    const result = await listHistoryAll({ activity: 'writing' })
-    for (const item of result.items || []) {
-      await deleteHistoryAttempt(item.id)
-    }
-    return { deleted: (result.items || []).length }
+  async deleteAll(activity = null) {
+    return { deleted: await clearHistory(activity) }
   },
 
-  async getStatistics() {
-    const result = await listHistoryAll({ activity: 'writing' })
-    const items = result.items || []
-    const scores = items
-      .map((i) => Number(i.scoreValue ?? 0))
-      .filter((n) => n > 0)
-    const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0
-    return {
-      total: items.length,
-      averageScore: Math.round(avg * 10) / 10,
-      scored: scores.length
-    }
+  async getStatistics(range = 'all') {
+    const { statistics } = await getWritingHistoryStatistics(range)
+    return statistics || { count: 0, latest: null, average: null }
   },
 
   async exportCSV(filters = {}) {

@@ -3,11 +3,13 @@
 use ielts_domain::domain::{
     Activity, AttemptMode, AttemptStatus, EvaluationStage, EvaluationStatus,
 };
-use ielts_domain::dto::{SaveDraftCommand, SubmitAttemptCommand, WritingEvaluationV4};
+use ielts_domain::dto::{
+    CloneWritingDraftCommand, SaveDraftCommand, SubmitAttemptCommand, WritingEvaluationV4,
+};
 use tempfile::tempdir;
 
 use ielts_db::{
-    finish_evaluation, get_history_detail, get_writing_draft, list_events,
+    clone_writing_draft, finish_evaluation, get_history_detail, get_writing_draft, list_events,
     load_evaluation_for_attempt, migrate, open_connection, prepare_evaluation,
     recover_interrupted_sessions, request_cancel, save_writing_draft, start_evaluation,
     submit_writing_attempt, DbOpenOptions, DeterministicProvider, ProviderError,
@@ -167,6 +169,95 @@ fn writing_draft_and_submit_never_reopen_a_closed_attempt() {
             .content_text
             .as_deref(),
         Some(original.as_str())
+    );
+}
+
+#[test]
+fn cloning_a_frozen_writing_attempt_creates_an_independent_open_draft() {
+    let (_dir, conn) = open_db();
+    let source_id = "writing-clone-source";
+    let source_essay = "The frozen evaluation input must remain untouched. ".repeat(24);
+    save_writing_draft(
+        &conn,
+        &draft_cmd(source_id, &source_essay, "clone-source-draft"),
+    )
+    .unwrap();
+    submit_writing_attempt(
+        &conn,
+        &SubmitAttemptCommand {
+            attempt_id: source_id.into(),
+            idempotency_key: "clone-source-submit".into(),
+        },
+    )
+    .unwrap();
+    prepare_evaluation(
+        &conn,
+        &StartEvaluationCommand {
+            attempt_id: source_id.into(),
+            idempotency_key: "clone-source-evaluation".into(),
+            task_type: Some("task2".into()),
+            retry_of: None,
+        },
+        "deterministic",
+        "test-model",
+    )
+    .unwrap();
+    assert_eq!(
+        get_history_detail(&conn, source_id).unwrap().attempt.status,
+        AttemptStatus::Reviewing
+    );
+
+    let cloned = clone_writing_draft(
+        &conn,
+        &CloneWritingDraftCommand {
+            source_attempt_id: source_id.into(),
+            idempotency_key: "clone-once".into(),
+        },
+    )
+    .unwrap();
+    assert_ne!(cloned.attempt_id, source_id);
+    assert_eq!(cloned.content_text, source_essay);
+    assert_eq!(cloned.mode, Some(AttemptMode::Bank));
+
+    let replay = clone_writing_draft(
+        &conn,
+        &CloneWritingDraftCommand {
+            source_attempt_id: source_id.into(),
+            idempotency_key: "clone-once".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(replay.attempt_id, cloned.attempt_id);
+
+    let edited = "The new draft may change without rewriting its source.".to_string();
+    save_writing_draft(
+        &conn,
+        &draft_cmd(&cloned.attempt_id, &edited, "clone-edited-draft"),
+    )
+    .unwrap();
+    submit_writing_attempt(
+        &conn,
+        &SubmitAttemptCommand {
+            attempt_id: cloned.attempt_id.clone(),
+            idempotency_key: "clone-edited-submit".into(),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        get_history_detail(&conn, source_id)
+            .unwrap()
+            .attempt
+            .content_text
+            .as_deref(),
+        Some(source_essay.as_str())
+    );
+    assert_eq!(
+        get_history_detail(&conn, &cloned.attempt_id)
+            .unwrap()
+            .attempt
+            .status,
+        AttemptStatus::Submitted
     );
 }
 

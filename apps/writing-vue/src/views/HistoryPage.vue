@@ -504,7 +504,6 @@ function announceA11yStatus(message) {
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { essays as essaysApi } from '@/api/client.js'
-import { practiceHistory } from '@/api/practice-client.js'
 import { historyRepository } from '@/api/history-repository.js'
 import RadarChart from '@/components/RadarChart.vue'
 import LineChart from '@/components/LineChart.vue'
@@ -1069,30 +1068,15 @@ function confirmDeleteAll() {
 async function executeDelete() {
   try {
     if (deleteMode.value === 'single') {
-      const targetRecord = essaysList.value.find((record) => record.id === deleteTarget.value)
-      if (targetRecord?.activity === 'reading') {
-        await practiceHistory.delete('reading', deleteTarget.value)
-      } else {
-        await essaysApi.delete(deleteTarget.value)
-      }
+      await essaysApi.delete(deleteTarget.value)
     } else if (deleteMode.value === 'batch') {
-      const selectedRecords = essaysList.value.filter((record) => selectedIds.value.includes(record.id))
-      const readingIds = selectedRecords
-        .filter((record) => record.activity === 'reading')
-        .map((record) => record.id)
-      const writingIds = selectedRecords
-        .filter((record) => record.activity !== 'reading')
-        .map((record) => record.id)
-      await Promise.all([
-        writingIds.length ? essaysApi.batchDelete(writingIds) : Promise.resolve(null),
-        ...readingIds.map((id) => practiceHistory.delete('reading', id))
-      ])
+      await essaysApi.batchDelete(selectedIds.value)
       selectedIds.value = []
     } else if (deleteMode.value === 'all') {
-      await Promise.all([
-        shouldLoadWritingHistory(filters.value) ? essaysApi.deleteAll() : Promise.resolve(null),
-        shouldLoadReadingHistory(filters.value) ? practiceHistory.clear({ activity: 'reading' }) : Promise.resolve(null)
-      ])
+      const selectedActivity = filters.value.task_type === 'reading'
+        ? 'reading'
+        : (isKnownWritingTaskType(filters.value.task_type) ? 'writing' : null)
+      await essaysApi.deleteAll(selectedActivity)
     }
 
     const wasDeleteAll = deleteMode.value === 'all'
@@ -1202,26 +1186,27 @@ async function loadStatistics({ totalCount = total.value, rangeValue = statistic
     if (!statisticsRequestGate.isCurrent(requestId)) return
     if (parentListRequestId !== null && !listRequestGate.isCurrent(parentListRequestId)) return
 
-    if (result && result.count > 0) {
-      // STRICT PROTOCOL: Use only tr_ta field (no fallback)
+    if (result?.count > 0 && result.latest?.score && result.average) {
+      const latestScore = result.latest.score
+      const averageScore = result.average
       statistics.value = {
         count: result.count,
         latest: {
-          tr_ta: parseFloat(result.latest.tr_ta || 0),  // PROTOCOL: Always tr_ta
-          cc: parseFloat(result.latest.cc || 0),
-          lr: parseFloat(result.latest.lr || 0),
-          gra: parseFloat(result.latest.gra || 0)
+          tr_ta: parseFloat(latestScore.taskResponse || 0),
+          cc: parseFloat(latestScore.coherence || 0),
+          lr: parseFloat(latestScore.lexical || 0),
+          gra: parseFloat(latestScore.grammar || 0)
         },
         average: {
-          tr_ta: parseFloat(result.average.avg_tr_ta || 0),  // PROTOCOL: Always avg_tr_ta
-          cc: parseFloat(result.average.avg_cc || 0),
-          lr: parseFloat(result.average.avg_lr || 0),
-          gra: parseFloat(result.average.avg_gra || 0)
+          tr_ta: parseFloat(averageScore.taskResponse || 0),
+          cc: parseFloat(averageScore.coherence || 0),
+          lr: parseFloat(averageScore.lexical || 0),
+          gra: parseFloat(averageScore.grammar || 0)
         },
-        latest_task_type: isKnownWritingTaskType(result.latest.task_type)
-          ? result.latest.task_type
+        latest_task_type: isKnownWritingTaskType(result.latest.taskType)
+          ? result.latest.taskType
           : null,
-        latest_date: result.latest.submitted_at
+        latest_date: result.latest.submittedAt
       }
     } else {
       statistics.value = { count: 0 }

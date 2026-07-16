@@ -86,6 +86,16 @@ export async function getHistoryDetail(attemptId) {
   }
 }
 
+export async function getWritingHistoryStatistics(range = 'all') {
+  const response = await invokeCommand('history_writing_statistics', {
+    query: { range: String(range || 'all') }
+  })
+  return {
+    source: 'tauri',
+    statistics: unwrapCommandResponse(response, 'history_writing_statistics')
+  }
+}
+
 export async function exportHistory(format = 'csv', query = {}) {
   const response = await invokeCommand('export_history', {
     cmd: {
@@ -113,6 +123,20 @@ export async function exportHistory(format = 'csv', query = {}) {
 export async function deleteHistoryAttempt(attemptId) {
   const response = await invokeCommand('delete_history_attempt', { attemptId })
   return unwrapCommandResponse(response, 'delete_history_attempt')
+}
+
+export async function deleteHistoryAttempts(attemptIds) {
+  const response = await invokeCommand('delete_history_attempts', {
+    cmd: { attemptIds: Array.isArray(attemptIds) ? attemptIds : [] }
+  })
+  return Number(unwrapCommandResponse(response, 'delete_history_attempts') || 0)
+}
+
+export async function clearHistory(activity = null) {
+  const response = await invokeCommand('clear_history', {
+    cmd: { activity: activity || null }
+  })
+  return Number(unwrapCommandResponse(response, 'clear_history') || 0)
 }
 
 /**
@@ -197,8 +221,11 @@ export const historyRepository = {
   listHistory,
   listHistoryAll,
   getHistoryDetail,
+  getWritingHistoryStatistics,
   exportHistory,
   deleteHistoryAttempt,
+  deleteHistoryAttempts,
+  clearHistory,
   mapHistoryDetailToSubmission,
   isTauriRuntime
 }

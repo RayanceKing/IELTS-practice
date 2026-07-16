@@ -3,7 +3,10 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, WritingTaskType};
-use ielts_domain::dto::{AttemptRecord, SaveDraftCommand, SubmitAttemptCommand};
+use ielts_domain::dto::{
+    AttemptRecord, CloneWritingDraftCommand, SaveDraftCommand, SubmitAttemptCommand,
+};
+use uuid::Uuid;
 
 use crate::attempts::{parse_writing_task_type, upsert_attempt, writing_task_type_str};
 use crate::sqlite::{DbError, DbResult};
@@ -161,6 +164,132 @@ pub fn get_writing_draft(conn: &Connection, attempt_id: &str) -> DbResult<Option
     } else {
         Ok(None)
     }
+}
+
+/// A submitted/evaluated writing attempt is a historical input snapshot. When a
+/// learner chooses “return and edit”, copy that snapshot into a brand-new open
+/// draft rather than weakening the terminal-state guard used by autosave and
+/// submit.
+pub fn clone_writing_draft(
+    conn: &Connection,
+    cmd: &CloneWritingDraftCommand,
+) -> DbResult<WritingDraft> {
+    if cmd.source_attempt_id.trim().is_empty() || cmd.idempotency_key.trim().is_empty() {
+        return Err(DbError::Validation(
+            "source_attempt_id and idempotency_key are required".into(),
+        ));
+    }
+
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    if let Some(existing) = lookup_idempotency(&tx, "writing.clone", &cmd.idempotency_key)? {
+        let draft = get_writing_draft(&tx, &existing.attempt_id)?.ok_or_else(|| {
+            DbError::Message("writing clone idempotency points to a missing draft".into())
+        })?;
+        tx.commit()?;
+        return Ok(draft);
+    }
+
+    let source = load_existing_writing_attempt(&tx, &cmd.source_attempt_id)?.ok_or_else(|| {
+        DbError::Validation(format!(
+            "writing attempt does not exist: {}",
+            cmd.source_attempt_id
+        ))
+    })?;
+    if source.activity != "writing" {
+        return Err(DbError::Validation(
+            "only a writing attempt may be cloned to a draft".into(),
+        ));
+    }
+    if matches!(source.status.as_str(), "draft" | "active") {
+        return Err(DbError::Validation(
+            "open writing attempts should be edited directly, not cloned".into(),
+        ));
+    }
+    if source.suite_id.is_some() {
+        return Err(DbError::Validation(
+            "suite writing attempts cannot be cloned as a standalone draft".into(),
+        ));
+    }
+
+    let source_draft = get_writing_draft(&tx, &cmd.source_attempt_id)?.ok_or_else(|| {
+        DbError::Validation("source writing attempt has no durable draft snapshot".into())
+    })?;
+    let mode = source_draft
+        .mode
+        .ok_or_else(|| DbError::Validation("source writing attempt has no durable mode".into()))?;
+    if !matches!(mode, AttemptMode::Freeform | AttemptMode::Bank) {
+        return Err(DbError::Validation(
+            "source writing attempt has an unsupported editable mode".into(),
+        ));
+    }
+    let task_type = source_draft.task_type.ok_or_else(|| {
+        DbError::Validation("source writing attempt has no durable task type".into())
+    })?;
+
+    let attempt_id = format!("attempt-{}", Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+    let attempt = AttemptRecord {
+        schema_version: AttemptRecord::SCHEMA_VERSION,
+        id: attempt_id.clone(),
+        activity: Activity::Writing,
+        asset_id: source_draft.asset_id.clone(),
+        mode,
+        suite_id: None,
+        status: AttemptStatus::Draft,
+        started_at: now.clone(),
+        submitted_at: None,
+        completed_at: None,
+        duration_ms: 0,
+        score_value: None,
+        score_scale: None,
+        correct_count: None,
+        question_count: None,
+        title_snapshot: title_from_prompt(source_draft.prompt_snapshot.as_deref()),
+        prompt_snapshot: source_draft.prompt_snapshot.clone(),
+        content_text: Some(source_draft.content_text.clone()),
+        task_type: Some(task_type),
+        answers: vec![],
+        annotations: vec![],
+    };
+    upsert_attempt(&tx, &attempt)?;
+    tx.execute(
+        "INSERT INTO writing_drafts (
+            attempt_id, content_text, prompt_snapshot, task_type, word_count, idempotency_key, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            attempt_id,
+            source_draft.content_text,
+            source_draft.prompt_snapshot,
+            writing_task_type_str(task_type),
+            source_draft.word_count as i64,
+            cmd.idempotency_key,
+            now,
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO attempt_idempotency (
+            scope, idempotency_key, attempt_id, evaluation_id, response_json, created_at
+         ) VALUES ('writing.clone', ?1, ?2, NULL, ?3, ?4)",
+        params![
+            cmd.idempotency_key,
+            attempt.id,
+            serde_json::json!({ "attemptId": attempt.id }).to_string(),
+            now,
+        ],
+    )?;
+    tx.commit()?;
+
+    Ok(WritingDraft {
+        attempt_id,
+        asset_id: source_draft.asset_id,
+        mode: Some(mode),
+        content_text: source_draft.content_text,
+        prompt_snapshot: source_draft.prompt_snapshot,
+        task_type: Some(task_type),
+        word_count: source_draft.word_count,
+        idempotency_key: Some(cmd.idempotency_key.clone()),
+        updated_at: now,
+    })
 }
 
 fn parse_attempt_mode(raw: &str) -> AttemptMode {

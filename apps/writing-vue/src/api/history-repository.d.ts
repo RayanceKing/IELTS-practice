@@ -47,6 +47,9 @@ export interface HistoryViewModel {
 export function listHistory(query?: HistoryQuery): Promise<{ source: 'tauri'; items: HistoryViewModel[]; total: number; limit: number; offset: number; nextCursor: string | null }>
 export function listHistoryAll(query?: HistoryQuery, options?: { maxItems?: number }): Promise<{ source: 'tauri'; items: HistoryViewModel[]; total: number; limit: number; offset: number; nextCursor: string | null }>
 export function getHistoryDetail(attemptId: string): Promise<{ source: 'tauri'; detail: unknown }>
+export function getWritingHistoryStatistics(range?: 'all' | 'monthly' | 'task1' | 'task2'): Promise<{ source: 'tauri'; statistics: unknown }>
 export function exportHistory(format?: string, query?: HistoryQuery): Promise<{ source: 'tauri'; result: unknown }>
 export function deleteHistoryAttempt(attemptId: string): Promise<unknown>
+export function deleteHistoryAttempts(attemptIds: string[]): Promise<number>
+export function clearHistory(activity?: 'reading' | 'writing' | null): Promise<number>
 export function isTauriRuntime(): boolean

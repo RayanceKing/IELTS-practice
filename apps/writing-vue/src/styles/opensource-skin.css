@@ -28,6 +28,18 @@
   --atlas-glass-pressed: rgba(236, 241, 255, 0.7);
   --atlas-rim: rgba(255, 255, 255, 0.82);
   --atlas-line: rgba(92, 109, 164, 0.2);
+  --atlas-surface-raised: linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(244, 247, 255, 0.43));
+  --atlas-surface-soft: linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(242, 246, 255, 0.36));
+  --atlas-control-surface: rgba(255, 255, 255, 0.6);
+  --atlas-control-surface-hover: rgba(255, 255, 255, 0.82);
+  --atlas-input-surface: rgba(255, 255, 255, 0.72);
+  --atlas-input-placeholder: #8390ad;
+  --atlas-nav-surface: rgba(237, 242, 255, 0.46);
+  --atlas-nav-links-surface: rgba(255, 255, 255, 0.42);
+  --atlas-nav-active-surface: rgba(255, 255, 255, 0.76);
+  --atlas-brand-rim: rgba(255, 255, 255, 0.6);
+  --atlas-danger-surface: rgba(255, 244, 248, 0.68);
+  --atlas-info-surface: rgba(49, 133, 255, 0.1);
   --atlas-shadow: 0 18px 42px rgba(42, 57, 108, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.88);
   --atlas-shadow-high: 0 28px 68px rgba(38, 49, 101, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.92);
   --atlas-canvas: radial-gradient(circle at 7% -12%, rgba(129, 92, 246, 0.52), transparent 39rem), radial-gradient(circle at 96% 2%, rgba(59, 130, 246, 0.42), transparent 36rem), radial-gradient(circle at 51% 112%, rgba(124, 58, 237, 0.22), transparent 44rem), linear-gradient(145deg, #e8edff 0%, #edf2ff 46%, #dbeafe 100%);
@@ -220,6 +232,11 @@
   --lg-duration-normal: 260ms;
   --lg-duration-slow: 420ms;
   --lg-easing-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: var(--lg-duration-fast);
+  --duration-normal: var(--lg-duration-normal);
+  --duration-slow: var(--lg-duration-slow);
+  --ease-smooth: var(--lg-easing-spring);
+  --font-mono: var(--font-family-mono);
 
   min-height: 100vh;
   color: var(--atlas-ink);
@@ -243,6 +260,21 @@
     --atlas-glass-pressed: rgba(71, 86, 139, 0.5);
     --atlas-rim: rgba(229, 237, 255, 0.2);
     --atlas-line: rgba(188, 204, 242, 0.2);
+    --atlas-surface-raised: linear-gradient(135deg, rgba(35, 48, 91, 0.84), rgba(18, 28, 61, 0.68));
+    --atlas-surface-soft: linear-gradient(135deg, rgba(31, 44, 84, 0.74), rgba(17, 28, 59, 0.56));
+    --atlas-control-surface: rgba(55, 70, 119, 0.5);
+    --atlas-control-surface-hover: rgba(78, 96, 155, 0.62);
+    --atlas-input-surface: rgba(16, 26, 56, 0.7);
+    --atlas-input-placeholder: #aab7d2;
+    --atlas-nav-surface: rgba(10, 18, 43, 0.56);
+    --atlas-nav-links-surface: rgba(255, 255, 255, 0.08);
+    --atlas-nav-active-surface: rgba(255, 255, 255, 0.16);
+    --atlas-brand-rim: rgba(235, 241, 255, 0.24);
+    --atlas-danger-surface: rgba(126, 44, 76, 0.34);
+    --atlas-info-surface: rgba(91, 157, 255, 0.18);
+    --atlas-library-surface: linear-gradient(145deg, rgba(31, 45, 88, 0.82), rgba(17, 28, 60, 0.62));
+    --atlas-library-surface-soft: linear-gradient(145deg, rgba(37, 51, 95, 0.72), rgba(18, 30, 65, 0.52));
+    --atlas-library-muted: rgba(63, 80, 133, 0.46);
     --atlas-shadow: 0 18px 42px rgba(0, 0, 0, 0.32), inset 0 1px 1px rgba(255, 255, 255, 0.1);
     --atlas-shadow-high: 0 28px 68px rgba(0, 0, 0, 0.48), inset 0 1px 1px rgba(255, 255, 255, 0.12);
     --atlas-canvas: radial-gradient(circle at 7% -12%, rgba(113, 84, 223, 0.38), transparent 39rem), radial-gradient(circle at 96% 2%, rgba(39, 111, 202, 0.3), transparent 36rem), linear-gradient(145deg, #0b1024 0%, #101a37 52%, #14254a 100%);
@@ -271,7 +303,7 @@
 
 .atlas-source-ui :is(.glass-toolbar, .atlas-glass-panel, .card, .surface, .shell, .hero-panel, .dialog, .settings-detail-panel) {
   border: 1px solid var(--atlas-rim);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(244, 247, 255, 0.43));
+  background: var(--atlas-surface-raised);
   box-shadow: var(--atlas-shadow);
   backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
   -webkit-backdrop-filter: blur(var(--lg-blur-lg)) saturate(var(--lg-saturate));
@@ -284,7 +316,7 @@
 .atlas-source-ui :is(.btn, .btn-primary, .btn-secondary, .btn-warm-sand, .btn-danger, .btn-text, .action-btn, .page-btn) {
   border: 1px solid var(--atlas-rim);
   border-radius: var(--atlas-radius-sm);
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--atlas-control-surface);
   color: var(--atlas-ink);
   box-shadow: 0 6px 16px rgba(42, 57, 108, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.88);
   font-weight: 700;
@@ -296,7 +328,7 @@
 
 .atlas-source-ui :is(.btn, .btn-primary, .btn-secondary, .btn-warm-sand, .btn-danger, .btn-text, .action-btn, .page-btn):hover:not(:disabled) {
   transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--atlas-control-surface-hover);
   box-shadow: 0 12px 24px rgba(42, 57, 108, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.94);
 }
 
@@ -305,7 +337,7 @@
 }
 
 .atlas-source-ui :is(.btn-brand, .btn-primary, .primary-action, .hero-badge, .vocab-add) {
-  border-color: rgba(255, 255, 255, 0.6);
+  border-color: var(--atlas-brand-rim);
   background: var(--color-brand-gradient);
   color: #fff;
   box-shadow: 0 12px 24px rgba(87, 80, 224, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.34);
@@ -314,19 +346,19 @@
 .atlas-source-ui :is(.btn-danger, .danger) {
   color: var(--atlas-danger);
   border-color: rgba(186, 59, 93, 0.23);
-  background: rgba(255, 244, 248, 0.68);
+  background: var(--atlas-danger-surface);
 }
 
 .atlas-source-ui :is(input, textarea, select) {
   border: 1px solid rgba(104, 120, 174, 0.25);
   border-radius: var(--atlas-radius-sm);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--atlas-input-surface);
   color: var(--atlas-ink);
   box-shadow: inset 0 1px 2px rgba(63, 78, 137, 0.06), 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 .atlas-source-ui :is(input, textarea, select)::placeholder {
-  color: #8390ad;
+  color: var(--atlas-input-placeholder);
 }
 
 .atlas-source-ui :is(input, textarea, select, button, a):focus-visible {
@@ -350,7 +382,7 @@
 
 .atlas-source-ui .nav-shell {
   border-bottom: 1px solid rgba(255, 255, 255, 0.42);
-  background: rgba(237, 242, 255, 0.46);
+  background: var(--atlas-nav-surface);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
@@ -363,7 +395,7 @@
   gap: 4px;
   padding: 5px;
   border-color: var(--atlas-rim);
-  background: rgba(255, 255, 255, 0.42);
+  background: var(--atlas-nav-links-surface);
 }
 
 .atlas-source-ui .nav-item {
@@ -375,7 +407,7 @@
 .atlas-source-ui .nav-item:hover,
 .atlas-source-ui .nav-item.is-active {
   color: var(--atlas-ink);
-  background: rgba(255, 255, 255, 0.76);
+  background: var(--atlas-nav-active-surface);
   box-shadow: 0 5px 14px rgba(42, 57, 108, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.94);
 }
 
@@ -421,7 +453,7 @@
 .atlas-source-ui .settings-page.settings-page .settings-system-info,
 .atlas-source-ui .settings-page.settings-page .settings-backup-result {
   border-color: var(--atlas-rim);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.74), rgba(241, 245, 255, 0.42));
+  background: var(--atlas-surface-raised);
   box-shadow: var(--atlas-shadow);
 }
 
@@ -442,12 +474,12 @@
 .atlas-source-ui .settings-page.settings-page .btn-warning {
   color: var(--atlas-ink);
   border-color: var(--atlas-rim);
-  background: rgba(255, 255, 255, 0.58);
+  background: var(--atlas-control-surface);
 }
 
 .atlas-source-ui .settings-page.settings-page :is(.settings-system-info__status, .system-info-status, .settings-badge--success, .about-features li span) {
   border-color: rgba(49, 133, 255, 0.22) !important;
-  background: rgba(49, 133, 255, 0.1) !important;
+  background: var(--atlas-info-surface) !important;
   color: var(--atlas-accent-alt) !important;
 }
 

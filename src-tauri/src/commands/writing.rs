@@ -1,9 +1,12 @@
 //! Writing draft + evaluation Tauri commands (Phase 5).
 
+use ielts_domain::domain::WritingTaskType;
 use ielts_domain::dto::{
-    CommandResponse, ImportWritingTopicsCommand, ListWritingTopicsQuery, SaveDraftCommand,
-    SubmitAttemptCommand, UpsertWritingTopicCommand, WritingTopicDto, WritingTopicImportReport,
-    WritingTopicPage, WritingTopicStatistics,
+    CloneWritingDraftCommand, CommandResponse, ImportWritingPromptsCommand,
+    ImportWritingTopicsCommand, ListWritingTopicsQuery, SaveDraftCommand, SubmitAttemptCommand,
+    UpsertWritingPromptCommand, UpsertWritingTopicCommand, WritingPromptDto,
+    WritingPromptImportReport, WritingTopicDto, WritingTopicImportReport, WritingTopicPage,
+    WritingTopicStatistics,
 };
 use ielts_domain::ErrorEnvelope;
 use tauri::ipc::Channel;
@@ -12,12 +15,14 @@ use tauri::{AppHandle, Manager, State};
 use crate::app::state::{AppDb, AppVault};
 use crate::commands::ai::{load_provider_config, load_runtime};
 use ielts_db::{
-    delete_writing_topic, finish_evaluation, get_writing_draft, get_writing_topic,
-    import_writing_topics, list_events, list_writing_topics, load_evaluation_for_attempt,
-    prepare_evaluation, request_cancel, save_writing_draft, submit_writing_attempt,
-    upsert_writing_topic, writing_topic_statistics as load_writing_topic_statistics,
-    DeterministicProvider, EvaluationEvent, EvaluationHandle, EvaluationRunResult,
-    StartEvaluationCommand, WritingDraft, WritingProvider,
+    activate_writing_prompt, clone_writing_draft, delete_writing_prompt, delete_writing_topic,
+    finish_evaluation, get_writing_draft, get_writing_prompt, get_writing_topic,
+    import_writing_prompts, import_writing_topics, list_events, list_writing_prompts,
+    list_writing_topics, load_evaluation_for_attempt, prepare_evaluation, request_cancel,
+    save_writing_draft, submit_writing_attempt, upsert_writing_prompt, upsert_writing_topic,
+    writing_topic_statistics as load_writing_topic_statistics, DeterministicProvider,
+    EvaluationEvent, EvaluationHandle, EvaluationRunResult, StartEvaluationCommand, WritingDraft,
+    WritingProvider,
 };
 
 mod openai_provider;
@@ -61,6 +66,17 @@ pub fn writing_get_draft(
     match db.with_conn(|conn| get_writing_draft(conn, &attempt_id)) {
         Ok(d) => CommandResponse::success(d),
         Err(e) => CommandResponse::failure(map_err(e)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_clone_draft(
+    db: State<'_, AppDb>,
+    cmd: CloneWritingDraftCommand,
+) -> CommandResponse<WritingDraft> {
+    match db.with_conn(|conn| clone_writing_draft(conn, &cmd)) {
+        Ok(draft) => CommandResponse::success(draft),
+        Err(error) => CommandResponse::failure(map_err(error)),
     }
 }
 
@@ -316,6 +332,69 @@ pub fn writing_topic_import(
 pub fn writing_topic_statistics(db: State<'_, AppDb>) -> CommandResponse<WritingTopicStatistics> {
     match db.with_conn(load_writing_topic_statistics) {
         Ok(statistics) => CommandResponse::success(statistics),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_prompt_list(
+    db: State<'_, AppDb>,
+    task_type: Option<WritingTaskType>,
+) -> CommandResponse<Vec<WritingPromptDto>> {
+    match db.with_conn(|conn| list_writing_prompts(conn, task_type)) {
+        Ok(prompts) => CommandResponse::success(prompts),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_prompt_get(
+    db: State<'_, AppDb>,
+    id: String,
+) -> CommandResponse<Option<WritingPromptDto>> {
+    match db.with_conn(|conn| get_writing_prompt(conn, &id)) {
+        Ok(prompt) => CommandResponse::success(prompt),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_prompt_upsert(
+    db: State<'_, AppDb>,
+    cmd: UpsertWritingPromptCommand,
+) -> CommandResponse<WritingPromptDto> {
+    match db.with_conn(|conn| upsert_writing_prompt(conn, &cmd)) {
+        Ok(prompt) => CommandResponse::success(prompt),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_prompt_import(
+    db: State<'_, AppDb>,
+    cmd: ImportWritingPromptsCommand,
+) -> CommandResponse<WritingPromptImportReport> {
+    match db.with_conn(|conn| import_writing_prompts(conn, &cmd)) {
+        Ok(report) => CommandResponse::success(report),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_prompt_activate(
+    db: State<'_, AppDb>,
+    id: String,
+) -> CommandResponse<WritingPromptDto> {
+    match db.with_conn(|conn| activate_writing_prompt(conn, &id)) {
+        Ok(prompt) => CommandResponse::success(prompt),
+        Err(error) => CommandResponse::failure(map_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn writing_prompt_delete(db: State<'_, AppDb>, id: String) -> CommandResponse<bool> {
+    match db.with_conn(|conn| delete_writing_prompt(conn, &id)) {
+        Ok(deleted) => CommandResponse::success(deleted),
         Err(error) => CommandResponse::failure(map_err(error)),
     }
 }

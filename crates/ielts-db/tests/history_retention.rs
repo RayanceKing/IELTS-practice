@@ -165,8 +165,9 @@ fn v8_migration_moves_the_legacy_history_limit_without_leaving_a_mirror() {
     // Rewind only v8 on an otherwise genuine v7-shaped database. This proves
     // upgrade behavior without duplicating seven migration fixtures.
     conn.execute_batch(
-        "DROP TABLE history_retention_policy;
-         DELETE FROM schema_migrations WHERE version = 8;
+        "DROP TABLE writing_prompts;
+         DROP TABLE history_retention_policy;
+         DELETE FROM schema_migrations WHERE version >= 8;
          INSERT INTO settings(namespace, key, value_json, updated_at)
          VALUES ('app', 'history_limit', '\"150\"', '2026-01-01T00:00:00Z');",
     )
@@ -195,8 +196,9 @@ fn v8_migration_rejects_lossy_legacy_history_limits() {
     for raw_limit in [r#""150abc""#, r#""150.5""#, r#"" 150 ""#, "150abc", "150.5"] {
         let (_dir, mut conn) = open_db();
         conn.execute_batch(
-            "DROP TABLE history_retention_policy;
-             DELETE FROM schema_migrations WHERE version = 8;",
+            "DROP TABLE writing_prompts;
+             DROP TABLE history_retention_policy;
+             DELETE FROM schema_migrations WHERE version >= 8;",
         )
         .unwrap();
         conn.execute(

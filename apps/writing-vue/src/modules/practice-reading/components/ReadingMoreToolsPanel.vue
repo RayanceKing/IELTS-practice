@@ -1,7 +1,7 @@
 <template>
   <div id="more-view" :class="['view', 'hero-panel', 'hero-section', { active: activeView === 'more' }]" data-reading-more>
     <div class="hero-panel__header">
-      <h2 class="hero-panel__title heading-serif">✨ 更多工具</h2>
+      <h2 class="hero-panel__title heading-serif">更多工具</h2>
     </div>
     <p class="more-view-subtitle">探索额外的学习辅助功能，助你高效备考。</p>
     <div class="more-tools-grid">

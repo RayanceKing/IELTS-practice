@@ -5,7 +5,9 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, ToSql};
 use ielts_domain::domain::{Activity, AttemptMode, AttemptStatus, ScoreScale, WritingTaskType};
 use ielts_domain::dto::{
     ExportHistoryResult, HistoryDetailResponse, HistoryExportFormat, HistoryRetentionPolicyDto,
-    ListHistoryPage, ListHistoryQuery, SetHistoryRetentionPolicyResult, WritingEvaluationV4,
+    ListHistoryPage, ListHistoryQuery, SetHistoryRetentionPolicyResult, WritingCriterionScores,
+    WritingEvaluationV4, WritingHistoryLatestScore, WritingHistoryStatistics,
+    WritingHistoryStatisticsQuery, WritingHistoryStatisticsRange,
 };
 use ielts_domain::{history_item_from_attempt, AttemptRecord, HistoryListItemVm};
 
@@ -57,9 +59,9 @@ fn build_where(filter: &HistoryFilter) -> DbResult<(String, Vec<Box<dyn ToSql>>)
 
     // Memorize attempts are temporary read-only sessions; never list in normal history.
     clauses.push("mode != 'memorize'".into());
-    // Open drafts / in-progress sessions are not finished work — keep them off history lists
-    // (compose autosave + reading open draft resume via their own paths).
-    clauses.push("lower(status) NOT IN ('draft', 'active')".into());
+    // History is terminal work only. `submitted` and `reviewing` are still
+    // recoverable workflow state, not a learner-visible historical result.
+    clauses.push(RETAINABLE_TERMINAL_STATUS_SQL.into());
 
     if let Some(activity) = filter.activity {
         clauses.push("activity = ?".into());
@@ -294,6 +296,134 @@ pub fn get_history_detail(conn: &Connection, attempt_id: &str) -> DbResult<Histo
     })
 }
 
+/// Aggregate the actual persisted evaluation rows. The prior Vue implementation
+/// scanned a paged history list and returned a different shape than its own
+/// page expected, so the four-criterion card could never render truthfully.
+pub fn writing_history_statistics(
+    conn: &Connection,
+    query: &WritingHistoryStatisticsQuery,
+) -> DbResult<WritingHistoryStatistics> {
+    let range_clause = match query.range {
+        WritingHistoryStatisticsRange::All => "",
+        WritingHistoryStatisticsRange::Monthly => {
+            " AND date(COALESCE(a.completed_at, a.submitted_at, a.started_at)) >= date('now', 'start of month')"
+        }
+        WritingHistoryStatisticsRange::Task1 => " AND a.task_type = 'task1'",
+        WritingHistoryStatisticsRange::Task2 => " AND a.task_type = 'task2'",
+    };
+    let sql = format!(
+        "WITH latest_evaluation AS (
+            SELECT attempt_id, result_json,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY attempt_id
+                       ORDER BY COALESCE(completed_at, updated_at, started_at) DESC, id DESC
+                   ) AS row_number
+            FROM writing_evaluations
+            WHERE lower(status) IN ('completed', 'degraded')
+              AND result_json IS NOT NULL
+         )
+         SELECT a.task_type,
+                COALESCE(a.completed_at, a.submitted_at, a.started_at),
+                latest_evaluation.result_json
+         FROM attempts a
+         INNER JOIN latest_evaluation
+           ON latest_evaluation.attempt_id = a.id
+          AND latest_evaluation.row_number = 1
+         WHERE a.activity = 'writing'
+           AND a.mode != 'memorize'
+           AND {RETAINABLE_TERMINAL_STATUS_SQL}
+           AND a.task_type IS NOT NULL
+           {range_clause}
+         ORDER BY COALESCE(a.completed_at, a.submitted_at, a.started_at) DESC, a.id DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+
+    let mut total = WritingCriterionTotals::default();
+    let mut latest = None;
+    for row in rows {
+        let (task_type, submitted_at, result_json) = row?;
+        let Some(task_type) = WritingTaskType::parse_loose(&task_type) else {
+            continue;
+        };
+        let Ok(evaluation) = serde_json::from_str::<WritingEvaluationV4>(&result_json) else {
+            continue;
+        };
+        let Some(score) = evaluation.score else {
+            continue;
+        };
+        let criteria = WritingCriterionScores {
+            task_response: score.task_response,
+            coherence: score.coherence,
+            lexical: score.lexical,
+            grammar: score.grammar,
+        };
+        if !criteria_are_finite(&criteria) {
+            continue;
+        }
+        if latest.is_none() {
+            latest = Some(WritingHistoryLatestScore {
+                task_type,
+                submitted_at,
+                score: criteria.clone(),
+            });
+        }
+        total.add(&criteria);
+    }
+
+    Ok(WritingHistoryStatistics {
+        count: total.count,
+        latest,
+        average: total.average(),
+    })
+}
+
+#[derive(Default)]
+struct WritingCriterionTotals {
+    task_response: f64,
+    coherence: f64,
+    lexical: f64,
+    grammar: f64,
+    count: u32,
+}
+
+impl WritingCriterionTotals {
+    fn add(&mut self, score: &WritingCriterionScores) {
+        self.task_response += score.task_response;
+        self.coherence += score.coherence;
+        self.lexical += score.lexical;
+        self.grammar += score.grammar;
+        self.count += 1;
+    }
+
+    fn average(&self) -> Option<WritingCriterionScores> {
+        let divisor = f64::from(self.count);
+        (self.count > 0).then(|| WritingCriterionScores {
+            task_response: self.task_response / divisor,
+            coherence: self.coherence / divisor,
+            lexical: self.lexical / divisor,
+            grammar: self.grammar / divisor,
+        })
+    }
+}
+
+fn criteria_are_finite(score: &WritingCriterionScores) -> bool {
+    [
+        score.task_response,
+        score.coherence,
+        score.lexical,
+        score.grammar,
+    ]
+    .into_iter()
+    .all(f64::is_finite)
+}
+
 pub fn export_history(
     conn: &Connection,
     format: HistoryExportFormat,
@@ -335,6 +465,103 @@ pub fn delete_attempt(conn: &Connection, attempt_id: &str) -> DbResult<bool> {
     let deleted = delete_attempt_graph_in_transaction(&tx, attempt_id)?;
     tx.commit()?;
     Ok(deleted)
+}
+
+/// Delete a visible history selection atomically. A stale UI must never turn a
+/// bulk operation into a half-deleted list, and it must not be able to erase a
+/// draft/reviewing workflow that history intentionally hides.
+pub fn delete_history_attempts(conn: &Connection, attempt_ids: &[String]) -> DbResult<u32> {
+    let ids = normalized_history_ids(attempt_ids)?;
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let tx = conn.unchecked_transaction()?;
+    for id in &ids {
+        ensure_history_attempt(&tx, id)?;
+    }
+    let mut deleted = 0u32;
+    for id in &ids {
+        if delete_attempt_graph_in_transaction(&tx, id)? {
+            deleted += 1;
+        }
+    }
+    tx.commit()?;
+    Ok(deleted)
+}
+
+/// Clear terminal history in one transaction. `None` means every activity,
+/// matching the Settings wording “all history”; unfinished input is preserved.
+pub fn clear_history(conn: &Connection, activity: Option<Activity>) -> DbResult<u32> {
+    let tx = conn.unchecked_transaction()?;
+    let mut sql = format!(
+        "SELECT id FROM attempts
+         WHERE mode != 'memorize' AND {RETAINABLE_TERMINAL_STATUS_SQL}"
+    );
+    let mut ids = Vec::new();
+    if let Some(activity) = activity {
+        sql.push_str(" AND activity = ?1");
+        let mut stmt = tx.prepare(&sql)?;
+        let rows = stmt.query_map(params![activity_str(activity)], |row| {
+            row.get::<_, String>(0)
+        })?;
+        for row in rows {
+            ids.push(row?);
+        }
+    } else {
+        let mut stmt = tx.prepare(&sql)?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            ids.push(row?);
+        }
+    }
+    let mut deleted = 0u32;
+    for id in ids {
+        if delete_attempt_graph_in_transaction(&tx, &id)? {
+            deleted += 1;
+        }
+    }
+    tx.commit()?;
+    Ok(deleted)
+}
+
+fn normalized_history_ids(input: &[String]) -> DbResult<Vec<String>> {
+    let mut ids = Vec::with_capacity(input.len());
+    let mut seen = std::collections::HashSet::new();
+    for raw in input {
+        let id = raw.trim();
+        if id.is_empty() || id.len() > 160 {
+            return Err(DbError::Validation("invalid history attempt id".into()));
+        }
+        if seen.insert(id.to_string()) {
+            ids.push(id.to_string());
+        }
+    }
+    Ok(ids)
+}
+
+fn ensure_history_attempt(conn: &Connection, attempt_id: &str) -> DbResult<()> {
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT mode, status FROM attempts WHERE id = ?1",
+            params![attempt_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((mode, status)) = row else {
+        // Missing IDs are harmless replays: the final observable result is
+        // still “not in history”, while all existing IDs remain atomic.
+        return Ok(());
+    };
+    let is_terminal = matches!(
+        status.as_str(),
+        "completed" | "cancelled" | "failed" | "interrupted"
+    );
+    if mode == "memorize" || !is_terminal {
+        return Err(DbError::Validation(
+            "only terminal history attempts may be deleted".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Return the only persisted retention policy. A missing row is database

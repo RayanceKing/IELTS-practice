@@ -34,6 +34,19 @@ export async function getDraft(attemptId) {
   return { source: 'tauri', draft: unwrapCommandResponse(response, 'writing_get_draft') }
 }
 
+export async function cloneWritingDraft(sourceAttemptId, idempotencyKey) {
+  const response = await invokeCommand('writing_clone_draft', {
+    cmd: {
+      sourceAttemptId,
+      idempotencyKey: idempotencyKey || newIdempotencyKey('clone')
+    }
+  })
+  return {
+    source: 'tauri',
+    draft: unwrapCommandResponse(response, 'writing_clone_draft')
+  }
+}
+
 export async function submitAttempt(attemptId, idempotencyKey) {
   const response = await invokeCommand('writing_submit_attempt', {
     cmd: {
@@ -88,6 +101,7 @@ export async function getEvaluationForAttempt(attemptId) {
 export const writingRepository = {
   saveDraft,
   getDraft,
+  cloneWritingDraft,
   submitAttempt,
   startEvaluation,
   listEvaluationEvents,

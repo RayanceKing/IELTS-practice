@@ -18,13 +18,44 @@ use crate::migrate::current_version;
 use crate::settings::{list_secret_refs, list_settings, put_secret_ref, upsert_setting};
 use crate::sqlite::{DbError, DbResult};
 
-pub const BACKUP_SCHEMA_VERSION: u32 = 4;
+pub const BACKUP_SCHEMA_VERSION: u32 = 5;
 const LEGACY_BACKUP_SCHEMA_VERSION: u32 = 1;
 
 // Parent tables precede their children. Restore inserts in this order and
 // clears in reverse order, so foreign keys remain enabled for the whole
 // transaction.
 const CANONICAL_TABLES: &[&str] = &[
+    "practice_assets",
+    "writing_topics",
+    "writing_prompts",
+    "reading_suites",
+    "attempts",
+    "history_retention_policy",
+    "attempt_answers",
+    "attempt_annotations",
+    "writing_evaluations",
+    "writing_drafts",
+    "attempt_idempotency",
+    "evaluation_sessions",
+    "evaluation_checkpoints",
+    "evaluation_events",
+    "evaluation_lineage",
+    "reading_suite_items",
+    "endless_sessions",
+    "mode_idempotency",
+    "coach_threads",
+    "coach_messages",
+    "vocabulary_items",
+    "vocabulary_review_state",
+    "dictionary_entries",
+    "settings",
+    "migration_meta",
+];
+
+// Schema v4 predates the first-class prompt-policy table. Keep this exact
+// payload shape valid so old checksummed backups restore and migrate prompts
+// inside the target transaction.
+const V4_CANONICAL_TABLES: &[&str] = &[
     "practice_assets",
     "writing_topics",
     "reading_suites",
@@ -109,8 +140,10 @@ const V2_CANONICAL_TABLES: &[&str] = &[
 ];
 
 fn snapshot_tables_for_schema(schema_version: u32) -> &'static [&'static str] {
-    if schema_version >= 4 {
+    if schema_version >= 5 {
         CANONICAL_TABLES
+    } else if schema_version == 4 {
+        V4_CANONICAL_TABLES
     } else if schema_version == 3 {
         V3_CANONICAL_TABLES
     } else {
@@ -471,6 +504,16 @@ fn restore_snapshot(tx: &Transaction<'_>, package: &BackupPackage) -> DbResult<(
     }
     if package.manifest.schema_version < 4 {
         crate::history::restore_legacy_history_retention_policy(tx)?;
+    }
+    if package.manifest.schema_version < 5 {
+        // An older snapshot has no canonical prompt table. Ignore any stale
+        // checkpoint copied in its migration metadata, then project the
+        // restored settings rows while this restore transaction is still open.
+        tx.execute(
+            "DELETE FROM migration_meta WHERE key = 'writing_prompts.settings_v1_imported'",
+            [],
+        )?;
+        crate::writing::migrate_legacy_writing_prompts_in_transaction(tx)?;
     }
     assert_no_foreign_key_violations(tx)?;
     Ok(())

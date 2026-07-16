@@ -1,9 +1,10 @@
 //! Unified history Tauri commands (Phase 4).
 
 use ielts_domain::dto::{
-    CommandResponse, ExportHistoryCommand, ExportHistoryResult, HistoryDetailResponse,
-    HistoryRetentionPolicyDto, ListHistoryPage, ListHistoryQuery, SetHistoryRetentionPolicyCommand,
-    SetHistoryRetentionPolicyResult,
+    ClearHistoryCommand, CommandResponse, DeleteHistoryAttemptsCommand, ExportHistoryCommand,
+    ExportHistoryResult, HistoryDetailResponse, HistoryRetentionPolicyDto, ListHistoryPage,
+    ListHistoryQuery, SetHistoryRetentionPolicyCommand, SetHistoryRetentionPolicyResult,
+    WritingHistoryStatistics, WritingHistoryStatisticsQuery,
 };
 use ielts_domain::ErrorEnvelope;
 use tauri::State;
@@ -39,6 +40,36 @@ pub fn get_history_detail(
     match db.with_conn(|conn| ielts_db::get_history_detail(conn, &attempt_id)) {
         Ok(detail) => CommandResponse::success(detail),
         Err(e) => CommandResponse::failure(map_db_err(e)),
+    }
+}
+
+#[tauri::command]
+pub fn history_writing_statistics(
+    db: State<'_, AppDb>,
+    query: WritingHistoryStatisticsQuery,
+) -> CommandResponse<WritingHistoryStatistics> {
+    match db.with_conn(|conn| ielts_db::writing_history_statistics(conn, &query)) {
+        Ok(statistics) => CommandResponse::success(statistics),
+        Err(error) => CommandResponse::failure(map_db_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn delete_history_attempts(
+    db: State<'_, AppDb>,
+    cmd: DeleteHistoryAttemptsCommand,
+) -> CommandResponse<u32> {
+    match db.with_conn(|conn| ielts_db::delete_history_attempts(conn, &cmd.attempt_ids)) {
+        Ok(deleted) => CommandResponse::success(deleted),
+        Err(error) => CommandResponse::failure(map_db_err(error)),
+    }
+}
+
+#[tauri::command]
+pub fn clear_history(db: State<'_, AppDb>, cmd: ClearHistoryCommand) -> CommandResponse<u32> {
+    match db.with_conn(|conn| ielts_db::clear_history(conn, cmd.activity)) {
+        Ok(deleted) => CommandResponse::success(deleted),
+        Err(error) => CommandResponse::failure(map_db_err(error)),
     }
 }
 

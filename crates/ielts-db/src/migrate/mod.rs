@@ -55,6 +55,11 @@ fn migrations() -> &'static [Migration] {
                 name: "history_retention_policy",
                 sql: include_str!("../../migrations/0008_history_retention_policy.sql"),
             },
+            Migration {
+                version: 9,
+                name: "writing_prompt_policy",
+                sql: include_str!("../../migrations/0009_writing_prompt_policy.sql"),
+            },
         ]
     })
 }
@@ -102,6 +107,13 @@ pub fn migrate(conn: &mut Connection) -> DbResult<Vec<i64>> {
         tx.commit()?;
         applied.push(migration.version);
         version = migration.version;
+    }
+    // The v9 table has to exist before this data-preserving bridge runs. SQL
+    // migrations cannot safely normalize every historical prompt payload, so
+    // the Rust aggregate converts valid rows while retaining the original
+    // settings bytes as a recoverable one-time migration source.
+    if version >= 9 {
+        crate::writing::migrate_legacy_writing_prompts(conn)?;
     }
     Ok(applied)
 }

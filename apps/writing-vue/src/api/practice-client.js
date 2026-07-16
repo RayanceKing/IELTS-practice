@@ -20,6 +20,7 @@ import {
   listHistoryAll,
   getHistoryDetail,
   deleteHistoryAttempt,
+  clearHistory,
   mapHistoryDetailToSubmission
 } from '@/api/history-repository.js'
 import {
@@ -195,13 +196,7 @@ export const practiceHistory = {
   },
 
   async clear(filters = {}) {
-    const result = await listHistoryAll({
-      activity: filters.activity || null
-    })
-    for (const item of result.items || []) {
-      await deleteHistoryAttempt(item.id)
-    }
-    return { deleted: (result.items || []).length }
+    return { deleted: await clearHistory(filters.activity || null) }
   },
 
   async exportArchive(filters = { activity: 'reading' }) {

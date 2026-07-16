@@ -5,10 +5,10 @@ use serde_json::Value;
 
 use ielts_domain::domain::WritingTaskType;
 
-use crate::settings::{get_setting, list_settings};
+use crate::settings::get_setting;
 use crate::sqlite::DbResult;
+use crate::writing::active_writing_prompt;
 
-const NS_PROMPTS: &str = "prompts";
 /// The Settings product facade writes user preferences to `app`.
 /// `model` is read-only compatibility for pre-cutover databases.
 const NS_APP: &str = "app";
@@ -32,19 +32,7 @@ pub fn resolve_writing_eval_policy(
     let prompt = resolve_active_prompt(conn, task_type)?;
     let temperature = resolve_temperature(conn, task_type)?;
     let (system_prompt, prompt_id, prompt_version) = match prompt {
-        Some(p) => {
-            let body =
-                extract_prompt_body(&p.value).unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.into());
-            let version = p
-                .value
-                .get("version")
-                .or_else(|| p.value.get("promptVersion"))
-                .or_else(|| p.value.get("prompt_version"))
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| format!("prompt-{}", p.key));
-            (body, Some(p.key), version)
-        }
+        Some(p) => (p.body, Some(p.id), p.version),
         None => (DEFAULT_SYSTEM_PROMPT.to_string(), None, "prompt-v1".into()),
     };
     Ok(ResolvedWritingEvalPolicy {
@@ -55,16 +43,10 @@ pub fn resolve_writing_eval_policy(
     })
 }
 
-#[derive(Debug, Clone)]
-struct PromptRow {
-    key: String,
-    value: Value,
-}
-
 fn resolve_active_prompt(
     conn: &Connection,
     task_type: Option<WritingTaskType>,
-) -> DbResult<Option<PromptRow>> {
+) -> DbResult<Option<ielts_domain::dto::WritingPromptDto>> {
     // A custom evaluation prompt is task-specific policy.  If the caller has no
     // task type, there is no safe way to select one, so use the built-in schema
     // instruction instead of arbitrarily applying a Task 1/2 prompt.
@@ -72,57 +54,7 @@ fn resolve_active_prompt(
         return Ok(None);
     };
 
-    let rows = list_settings(conn, Some(NS_PROMPTS))?;
-    Ok(rows
-        .into_iter()
-        .map(|entry| PromptRow {
-            key: entry.key,
-            value: entry.value,
-        })
-        .find(|prompt| {
-            is_active(&prompt.value) && prompt_task_type(&prompt.value) == Some(task_type)
-        }))
-}
-
-fn is_active(value: &Value) -> bool {
-    // `is_active` is the current Settings contract.  Read `active` only for
-    // pre-cutover exports, and never let a stale alias override the canonical
-    // field when both are present.
-    value
-        .get("is_active")
-        .and_then(|v| v.as_bool())
-        .or_else(|| value.get("active").and_then(|v| v.as_bool()))
-        .unwrap_or(false)
-}
-
-fn prompt_task_type(value: &Value) -> Option<WritingTaskType> {
-    let raw = value
-        .get("task_type")
-        .or_else(|| value.get("taskType"))
-        .and_then(Value::as_str)?
-        .trim()
-        .to_ascii_lowercase();
-    let normalized = raw.replace([' ', '-'], "_");
-    WritingTaskType::parse_loose(&normalized)
-}
-
-fn extract_prompt_body(value: &Value) -> Option<String> {
-    for key in [
-        "body",
-        "content",
-        "system",
-        "systemPrompt",
-        "prompt",
-        "text",
-    ] {
-        if let Some(s) = value.get(key).and_then(|v| v.as_str()) {
-            let trimmed = s.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
+    active_writing_prompt(conn, task_type)
 }
 
 fn resolve_temperature(conn: &Connection, task_type: Option<WritingTaskType>) -> DbResult<f32> {
@@ -190,13 +122,16 @@ mod tests {
     use crate::settings::upsert_setting;
     use rusqlite::Connection;
 
+    const LEGACY_PROMPTS_NAMESPACE: &str = "prompts";
+
     fn connection() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE settings (
-                namespace TEXT NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL, PRIMARY KEY(namespace, key)
-            );",
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::migrate::migrate(&mut conn).unwrap();
+        // These unit fixtures model an existing v8 database where prompt
+        // settings predate the v9 projection migration.
+        conn.execute(
+            "DELETE FROM migration_meta WHERE key = 'writing_prompts.settings_v1_imported'",
+            [],
         )
         .unwrap();
         conn
@@ -216,7 +151,7 @@ mod tests {
         upsert_setting(&conn, NS_APP, "temperature_task2", &Value::from(0.75)).unwrap();
         upsert_setting(
             &conn,
-            NS_PROMPTS,
+            LEGACY_PROMPTS_NAMESPACE,
             "p1",
             &serde_json::json!({
                 "id": "p1",
@@ -262,7 +197,7 @@ mod tests {
         let conn = connection();
         upsert_setting(
             &conn,
-            NS_PROMPTS,
+            LEGACY_PROMPTS_NAMESPACE,
             "task1-active",
             &serde_json::json!({
                 "id": "task1-active",
@@ -274,7 +209,7 @@ mod tests {
         .unwrap();
         upsert_setting(
             &conn,
-            NS_PROMPTS,
+            LEGACY_PROMPTS_NAMESPACE,
             "task2-active",
             &serde_json::json!({
                 "id": "task2-active",
@@ -299,7 +234,7 @@ mod tests {
         let conn = connection();
         upsert_setting(
             &conn,
-            NS_PROMPTS,
+            LEGACY_PROMPTS_NAMESPACE,
             "task1-inactive",
             &serde_json::json!({
                 "id": "task1-inactive",
@@ -311,7 +246,7 @@ mod tests {
         .unwrap();
         upsert_setting(
             &conn,
-            NS_PROMPTS,
+            LEGACY_PROMPTS_NAMESPACE,
             "task2-active",
             &serde_json::json!({
                 "id": "task2-active",
@@ -336,7 +271,7 @@ mod tests {
         let conn = connection();
         upsert_setting(
             &conn,
-            NS_PROMPTS,
+            LEGACY_PROMPTS_NAMESPACE,
             "conflicting-aliases",
             &serde_json::json!({
                 "id": "conflicting-aliases",

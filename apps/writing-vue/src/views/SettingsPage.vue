@@ -1,5 +1,5 @@
 <template>
-  <div id="settings-view" class="settings-page view hero-panel hero-section active" data-writing-settings>
+  <div id="settings-view" class="settings-page view active" data-writing-settings>
     <div class="hero-panel__header">
       <h2 class="hero-panel__title heading-serif">系统设置</h2>
     </div>
@@ -1409,7 +1409,7 @@ function confirmClearHistory() {
   openConfirmDialog({
     kind: 'clear-history',
     section: 'data',
-    title: '⚠️ 清空所有历史记录',
+    title: '清空所有历史记录',
     message: '此操作将删除所有历史记录，且不可恢复。',
     keyword: '确认删除',
     confirmLabel: '确认清空',

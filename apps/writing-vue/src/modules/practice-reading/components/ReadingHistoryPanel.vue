@@ -43,14 +43,7 @@
       </div>
 
       <div class="practice-insights-grid">
-        <section
-          id="practice-trend-card"
-          class="practice-trend-card"
-          role="button"
-          tabindex="0"
-          aria-label="打开练习趋势筛选范围"
-          aria-pressed="false"
-        >
+        <section id="practice-trend-card" class="practice-trend-card">
           <div class="practice-trend-card__rotor">
             <div class="practice-trend-card__face practice-trend-card__front">
               <div class="practice-trend-card__header">
@@ -87,14 +80,6 @@
                   ></span>
                 </div>
               </div>
-            </div>
-            <div class="practice-trend-card__face practice-trend-card__back">
-              <div class="practice-trend-card__header">
-                <div>
-                  <p class="practice-trend-card__eyebrow">Range</p>
-                  <h3 class="practice-trend-card__title">筛选范围</h3>
-                </div>
-              </div>
               <div class="practice-trend-options" aria-label="练习趋势筛选范围">
                 <button
                   v-for="range in practiceTrendRanges"
@@ -104,7 +89,7 @@
                   type="button"
                   :data-practice-trend-range="range.value"
                   :aria-pressed="practiceTrendRange === range.value ? 'true' : 'false'"
-                  @click.stop="$emit('select-practice-trend-range', range.value)"
+                  @click="$emit('select-practice-trend-range', range.value)"
                 >
                   {{ range.label }}
                 </button>

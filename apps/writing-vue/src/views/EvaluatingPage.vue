@@ -78,8 +78,8 @@
           <button class="btn btn-secondary w-full" :disabled="isRetrying || isComplete" @click="handleRetry">
             {{ isRetrying ? '重试中...' : '重试评分' }}
           </button>
-          <button class="btn btn-warn w-full" :disabled="isRetrying" @click="handleCancel">
-            取消评分
+          <button class="btn btn-warn w-full" :disabled="isRetrying || isCancelling" @click="handleCancel">
+            {{ isCancelling ? '正在返回写作…' : '取消评分' }}
           </button>
         </div>
       </aside>
@@ -114,6 +114,7 @@ const isComplete = ref(false)
 const hasNavigatedToResult = ref(false)
 const timelineLogs = ref([])
 const isRetrying = ref(false)
+const isCancelling = ref(false)
 const currentEvaluationId = ref(null)
 let eventListenerId = null
 const seenEventSequences = new Set()
@@ -309,25 +310,37 @@ async function hydrateSessionState() {
 }
 
 async function handleCancel() {
-  if (isRetrying.value) return
-  if (currentEvaluationId.value) {
-    try {
-      const cancelled = await evaluate.cancel(props.sessionId)
-      if (!cancelled?.cancelled) {
-        throw new Error('评测未能取消，请稍后重试')
+  if (isRetrying.value || isCancelling.value) return
+  isCancelling.value = true
+  try {
+    if (currentEvaluationId.value) {
+      try {
+        const cancelled = await evaluate.cancel(props.sessionId)
+        if (!cancelled?.cancelled) {
+          appendLog('system', '原评测已结束或无法取消；将保留原记录并创建可编辑副本。')
+        }
+      } catch (cancelError) {
+        // Editing must not depend on best-effort cancellation. The clone command
+        // snapshots immutable input, so a provider that finishes late can only
+        // affect the original historical attempt.
+        console.warn('取消旧评测失败，继续创建可编辑副本:', cancelError)
+        appendLog('system', '原评测未确认取消；已继续创建独立可编辑副本。')
       }
-    } catch (err) {
-      console.error('取消失败:', err)
-      const message = resolveApiErrorMessage(err, String(err?.code || 'cancel_failed'))
-      error.value = { code: 'cancel_failed', message }
-      appendLog('error', `取消失败：${message}`)
-      return
     }
+    const draft = await evaluate.cloneDraft(props.sessionId)
+    const attemptId = draft.attemptId || draft.attempt_id
+    await router.push({
+      name: 'Compose',
+      query: { resumeAttemptId: attemptId }
+    })
+  } catch (err) {
+    console.error('取消并创建可编辑副本失败:', err)
+    const message = resolveApiErrorMessage(err, String(err?.code || 'cancel_failed'))
+    error.value = { code: 'cancel_failed', message }
+    appendLog('error', `取消失败：${message}`)
+  } finally {
+    isCancelling.value = false
   }
-  await router.push({
-    name: 'Compose',
-    query: { resumeAttemptId: props.sessionId }
-  })
 }
 
 function retryTaskType() {
@@ -383,17 +396,7 @@ async function handleRetry() {
 }
 
 async function handleBack() {
-  if (!isComplete.value) {
-    try {
-      await evaluate.cancel(props.sessionId)
-    } catch (err) {
-      console.warn('返回写作页前取消评测失败:', err)
-    }
-  }
-  await router.push({
-    name: 'Compose',
-    query: { resumeAttemptId: props.sessionId }
-  })
+  if (!isComplete.value) await handleCancel()
 }
 
 async function navigateToResult() {

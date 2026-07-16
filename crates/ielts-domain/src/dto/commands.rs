@@ -122,6 +122,101 @@ pub struct HistoryDetailResponse {
     pub evaluation: Option<WritingEvaluationV4>,
 }
 
+/// Server-owned range for the Writing-only four-criterion statistics card.
+/// Unlike the generic history list, this never mixes Reading accuracy with
+/// IELTS band scores.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub enum WritingHistoryStatisticsRange {
+    #[default]
+    All,
+    Monthly,
+    Task1,
+    Task2,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct WritingHistoryStatisticsQuery {
+    #[serde(default)]
+    pub range: WritingHistoryStatisticsRange,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct WritingCriterionScores {
+    pub task_response: f64,
+    pub coherence: f64,
+    pub lexical: f64,
+    pub grammar: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct WritingHistoryLatestScore {
+    pub task_type: WritingTaskType,
+    pub submitted_at: String,
+    pub score: WritingCriterionScores,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct WritingHistoryStatistics {
+    pub count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest: Option<WritingHistoryLatestScore>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub average: Option<WritingCriterionScores>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct DeleteHistoryAttemptsCommand {
+    pub attempt_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct ClearHistoryCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<Activity>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(
@@ -434,6 +529,20 @@ pub struct SaveDraftCommand {
 )]
 pub struct SubmitAttemptCommand {
     pub attempt_id: String,
+    pub idempotency_key: String,
+}
+
+/// Preserve a terminal writing snapshot and create a distinct open draft for
+/// further editing. The source attempt is never reopened or overwritten.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts-export",
+    derive(TS),
+    ts(export, export_to = "../../../apps/writing-vue/src/types/generated/")
+)]
+pub struct CloneWritingDraftCommand {
+    pub source_attempt_id: String,
     pub idempotency_key: String,
 }
 

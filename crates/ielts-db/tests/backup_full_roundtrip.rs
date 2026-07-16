@@ -2,7 +2,7 @@ use ielts_db::{
     create_backup_package, import_backup, list_ai_configs,
     list_ai_configs_with_secret_availability, migrate, open_connection, put_secret_ref,
     reconcile_default_ai_config_with_secret_availability, set_default_ai_config, upsert_ai_config,
-    DbOpenOptions,
+    upsert_setting, DbOpenOptions,
 };
 use ielts_domain::dto::{AiConfigDto, BackupPackage, BackupSqlValue};
 use rusqlite::Connection;
@@ -186,7 +186,7 @@ fn full_backup_roundtrip_preserves_every_user_truth_table() {
     seed_complete_user_state(&source);
 
     let package = create_backup_package(&source, "roundtrip-test").unwrap();
-    assert_eq!(package.manifest.schema_version, 4);
+    assert_eq!(package.manifest.schema_version, 5);
     assert_eq!(
         package.manifest.table_count as usize,
         package.database.len()
@@ -383,9 +383,11 @@ fn legacy_v2_snapshot_without_writing_topics_remains_restorable() {
 
     legacy.manifest.schema_version = 2;
     legacy.manifest.database_schema_version = 5;
-    legacy
-        .database
-        .retain(|table| table.name != "writing_topics" && table.name != "history_retention_policy");
+    legacy.database.retain(|table| {
+        table.name != "writing_topics"
+            && table.name != "writing_prompts"
+            && table.name != "history_retention_policy"
+    });
     legacy.manifest.table_count = legacy.database.len() as u32;
     legacy.manifest.row_count = legacy
         .database
@@ -417,6 +419,52 @@ fn legacy_v2_snapshot_without_writing_topics_remains_restorable() {
             )
             .unwrap(),
         1
+    );
+}
+
+#[test]
+fn legacy_v4_snapshot_projects_prompt_settings_inside_restore_transaction() {
+    let dir = tempdir().unwrap();
+    let source = open_v2(dir.path().join("prompt-v4-source.db"));
+    upsert_setting(
+        &source,
+        "prompts",
+        "legacy-task2",
+        &json!({
+            "id": "legacy-task2",
+            "taskType": "task2",
+            "version": "legacy-v4",
+            "body": "RESTORED PROMPT POLICY",
+            "isActive": true,
+        }),
+    )
+    .unwrap();
+    let mut legacy = create_backup_package(&source, "v4-prompt-source").unwrap();
+    legacy.manifest.schema_version = 4;
+    legacy
+        .database
+        .retain(|table| table.name != "writing_prompts");
+    legacy.manifest.table_count = legacy.database.len() as u32;
+    legacy.manifest.row_count = legacy
+        .database
+        .iter()
+        .map(|table| table.rows.len() as u64)
+        .sum::<u64>()
+        + legacy.secret_refs.len() as u64;
+    rechecksum(&mut legacy);
+
+    let target = open_v2(dir.path().join("prompt-v4-target.db"));
+    let report = import_backup(&target, &legacy, false).unwrap();
+    assert!(report.ok, "{:?}", report.errors);
+    assert_eq!(
+        target
+            .query_row(
+                "SELECT body FROM writing_prompts WHERE id = 'legacy-task2' AND is_active = 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        "RESTORED PROMPT POLICY"
     );
 }
 
