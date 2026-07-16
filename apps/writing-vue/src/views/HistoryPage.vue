@@ -2,7 +2,7 @@
   <div class="history-page">
     <div class="page-header page-header--workspace">
       <div class="page-header__copy">
-        <span class="history-eyebrow">Learning archive</span>
+        <span class="history-eyebrow">学习档案</span>
         <h1 class="heading-serif">练习历史</h1>
         <p>阅读与写作记录、趋势和复盘统一保存在本机。</p>
       </div>
@@ -135,7 +135,7 @@
         <div class="analytics-side">
           <section v-if="hasWritingAnalytics" class="stat-comparison analytics-compare-card">
             <div class="section-header">
-              <h3>Detailed Comparison</h3>
+              <h3>详细对比</h3>
               <div class="range-selector">
                 <label>范围</label>
                 <select v-model="statisticsRange">
@@ -253,8 +253,8 @@
 
     <template v-else>
       <div class="recent-practices-head">
-        <h2 class="heading-serif">Recent Practices</h2>
-        <button class="btn-text" @click="exportCSV">View History Report</button>
+        <h2 class="heading-serif">最近练习</h2>
+        <button class="btn-text" @click="exportCSV">导出历史报告</button>
       </div>
 
       <div class="essay-list">

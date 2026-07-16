@@ -157,6 +157,32 @@ fn timer_pause_and_countdown_policy() {
 }
 
 #[test]
+fn malformed_suite_timer_is_rejected_instead_of_silently_reset() {
+    let (dir, conn) = open_db();
+    seed_assets(&conn, &dir, &["p1", "p2", "p3"]);
+    let session = create_suite_session(
+        &conn,
+        &CreateSuiteCommand {
+            flow_mode: Some("simulation".into()),
+            frequency_scope: Some("all".into()),
+            seed: Some("malformed-timer".into()),
+            sequence: suite_sequence(),
+            timer: None,
+            idempotency_key: Some("malformed-suite-timer".into()),
+        },
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE reading_suites SET timer_state_json = '{not-json', timer_policy_json = '{not-json' WHERE id = ?1",
+        [&session.session_id],
+    )
+    .unwrap();
+
+    let error = get_suite_session(&conn, &session.session_id).unwrap_err();
+    assert!(error.to_string().contains("suite timer state is invalid"));
+}
+
+#[test]
 fn suite_create_submit_and_recover() {
     let (dir, conn) = open_db();
     seed_assets(&conn, &dir, &["p1", "p2", "p3"]);

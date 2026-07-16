@@ -86,6 +86,7 @@ function testReadingActionOwnership() {
   const nav = read('apps/writing-vue/src/modules/practice-reading/components/ReadingAnswerNav.vue')
   const interactions = read('apps/writing-vue/src/modules/practice-reading/useReadingInteractions.ts')
   const preferences = read('apps/writing-vue/src/modules/practice-reading/useReadingUiPreferences.ts')
+  const preferenceStore = read('apps/writing-vue/src/composables/useTauriPreferences.js')
 
   has(nav, 'id="exit-btn"', 'stable Reading exit identifier')
   has(nav, '@click="handleLeave"', 'guarded Reading exit')
@@ -101,6 +102,18 @@ function testReadingActionOwnership() {
   has(page, 'aria-controls="settings-panel"', 'Reading settings trigger relationship')
   has(preferences, 'function handleSettingsDialogKeydown', 'Reading settings keyboard controller')
   has(preferences, 'function focusFirstPanelControl', 'Reading settings initial focus')
+  has(preferenceStore, 'async function setDurable', 'awaitable SQLite preference migration write')
+  has(preferenceStore, 'async function hydrateStrict', 'fail-closed preference migration hydration')
+  has(preferences, 'await preferences.setDurable(key, legacy)', 'durable legacy preference migration')
+  lacks(preferences, 'function takeLocal', 'delete-before-persist legacy migration')
+  const migrationSource = preferences.slice(
+    preferences.indexOf('async function migrateLocalIfMissing'),
+    preferences.indexOf('async function initializeReadingPreferences')
+  )
+  assert.ok(
+    migrationSource.indexOf('await preferences.setDurable') < migrationSource.indexOf('removeLocal(key)'),
+    'legacy storage must be removed only after SQLite confirms the write'
+  )
   for (const copy of ["return '提交作答'", "return '清空作答'", "<h3 id=\"notes-panel-title\">阅读笔记</h3>"]) {
     has(page, copy, 'Chinese Reading product copy')
   }

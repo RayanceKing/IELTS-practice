@@ -979,15 +979,19 @@ fn load_suite(conn: &Connection, suite_id: &str) -> DbResult<ReadingSuiteSession
         timer_json,
     ) = row.map_err(|_| DbError::Message(format!("suite not found: {suite_id}")))?;
 
-    let timer: TimerState = timer_json
-        .as_deref()
-        .and_then(|j| serde_json::from_str(j).ok())
-        .unwrap_or_else(|| {
+    let timer: TimerState = match timer_json.as_deref() {
+        Some(json) => serde_json::from_str(json).map_err(|error| {
+            DbError::Message(format!(
+                "suite timer state is invalid for {suite_id}: {error}"
+            ))
+        })?,
+        None => {
             let fallback = chrono::DateTime::parse_from_rfc3339(&created_at)
                 .map(|d| d.timestamp_millis())
                 .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis());
             TimerState::new_suite(fallback)
-        });
+        }
+    };
 
     let mut stmt = conn.prepare(
         "SELECT item_index, asset_id, attempt_id, status, title, category, submitted_at, score_json

@@ -79,16 +79,22 @@
       <section class="hero-panel hero-section system-info-panel">
         <h3 class="heading-serif">系统信息</h3>
         <div class="hero-surface settings-system-info system-info-surface">
-          <div class="settings-system-info__status system-info-status">题库状态: {{ topicLibraryStatus }}</div>
-          <div>总题目数: <span id="total-exams">{{ topicLibraryStats.total }}</span></div>
-          <div>Task 1: <span id="html-exams">{{ topicLibraryStats.task1 }}</span></div>
-          <div>Task 2: <span id="pdf-exams">{{ topicLibraryStats.task2 }}</span></div>
-          <div>最近更新: <span id="last-update">{{ topicLibraryStats.lastUpdate }}</span></div>
-          <div>Host: <span>{{ hostName }}</span></div>
-          <div>Tauri版本: <span>{{ tauriVersion }}</span></div>
-          <div>数据目录: <span class="settings-path-clip">{{ userDataPath || pathsLoadingLabel }}</span></div>
-          <div v-if="backupsPath || pathsResolved">备份目录: <span class="settings-path-clip">{{ backupsPath || '未获取' }}</span></div>
-          <div v-else>备份目录: <span class="settings-path-clip">加载中...</span></div>
+          <div class="settings-system-info__status system-info-status">{{ topicLibraryStatus }}</div>
+          <div class="settings-system-metrics">
+            <div><span>题目总数</span><strong id="total-exams">{{ topicLibraryStats.total }}</strong></div>
+            <div><span>Task 1</span><strong id="html-exams">{{ topicLibraryStats.task1 }}</strong></div>
+            <div><span>Task 2</span><strong id="pdf-exams">{{ topicLibraryStats.task2 }}</strong></div>
+          </div>
+          <p class="hero-panel__muted">最近更新：<span id="last-update">{{ topicLibraryStats.lastUpdate }}</span></p>
+          <details class="settings-technical-details">
+            <summary>技术详情</summary>
+            <dl>
+              <div><dt>桌面宿主</dt><dd>{{ hostName }}</dd></div>
+              <div><dt>Tauri 版本</dt><dd>{{ tauriVersion }}</dd></div>
+              <div><dt>数据目录</dt><dd class="settings-path-clip">{{ userDataPath || pathsLoadingLabel }}</dd></div>
+              <div><dt>备份目录</dt><dd class="settings-path-clip">{{ backupsPath || (pathsResolved ? '未获取' : '加载中...') }}</dd></div>
+            </dl>
+          </details>
         </div>
         <div class="settings-credit">
           <a href="https://docs.qq.com/doc/DSXZhWUtqeVN0d1ZT" target="_blank" rel="noopener noreferrer" class="inline-hover-link">问题反馈</a>
@@ -695,7 +701,7 @@ const tabs = [
     key: 'about',
     label: '关于',
     summary: '版本、运行环境、能力',
-    kicker: 'About',
+    kicker: '关于',
     title: '关于产品',
     description: '查看 Tauri 桌面客户端、Rust 数据内核和本机数据路径。',
     icon: icons.about

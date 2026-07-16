@@ -2,7 +2,7 @@
   <div class="compose-page">
     <section v-if="showDraftNotification" class="draft-banner draft-notification card card-whisper">
       <div class="draft-banner__copy">
-        <span class="panel-label">Draft Recovery</span>
+        <span class="panel-label">草稿恢复</span>
         <strong>检测到未保存的草稿</strong>
         <p>可以直接恢复继续写，也可以丢弃后从空白工作台开始。</p>
       </div>
@@ -20,8 +20,8 @@
       <aside class="practice-left card card-whisper">
         <header class="compose-hero">
           <div class="compose-hero__copy">
-            <span class="hero-chip">Writing Task {{ taskType === 'task1' ? '1' : '2' }}</span>
-            <h1 class="heading-serif">Immersive Writing Practice</h1>
+            <span class="hero-chip">写作任务 {{ taskType === 'task1' ? '1' : '2' }}</span>
+            <h1 class="heading-serif">沉浸式写作练习</h1>
           </div>
 
           <div class="compose-hero__metrics">

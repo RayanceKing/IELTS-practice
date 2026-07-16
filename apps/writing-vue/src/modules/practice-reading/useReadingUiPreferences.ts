@@ -21,13 +21,20 @@ type ReadingUiPreferencesOptions = {
   assetSource: () => AssetLike
 }
 
-function takeLocal(key: string): string | null {
+function peekLocal(key: string): string | null {
   try {
-    const value = window.localStorage?.getItem(key) ?? null
-    if (value != null) window.localStorage?.removeItem(key)
-    return value
+    return window.localStorage?.getItem(key) ?? null
   } catch {
     return null
+  }
+}
+
+function removeLocal(key: string) {
+  try {
+    window.localStorage?.removeItem(key)
+  } catch {
+    // A failed cleanup is safe: the canonical value already exists and a
+    // later migration pass can retry removing the legacy source.
   }
 }
 
@@ -69,24 +76,24 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
     return `${NOTES_STORAGE_PREFIX}${assetId}`
   }
 
-  function migrateLocalIfMissing(key: string): string {
+  async function migrateLocalIfMissing(key: string): Promise<string> {
     const current = preferences.get(key, '')
     if (current) return current
-    const legacy = takeLocal(key)
+    const legacy = peekLocal(key)
     if (legacy != null && legacy !== '') {
-      preferences.set(key, legacy)
+      await preferences.setDurable(key, legacy)
+      removeLocal(key)
       return legacy
     }
     return current
   }
 
   async function initializeReadingPreferences() {
-    await preferences.hydrate()
-    const storedFont = migrateLocalIfMissing(FONT_KEY)
+    await preferences.hydrateStrict()
+    const storedFont = await migrateLocalIfMissing(FONT_KEY)
     if (isFontSize(storedFont)) readingFontSize.value = storedFont
-    takeLocal(LEGACY_THEME_KEY)
-    preferences.set(LEGACY_THEME_KEY, '')
-    const storedSuiteFlow = migrateLocalIfMissing(SUITE_AUTO_ADVANCE_STORAGE_KEY)
+    removeLocal(LEGACY_THEME_KEY)
+    const storedSuiteFlow = await migrateLocalIfMissing(SUITE_AUTO_ADVANCE_STORAGE_KEY)
     if (storedSuiteFlow === 'true' || storedSuiteFlow === 'false') {
       suiteAutoAdvance.value = storedSuiteFlow === 'true'
     }
@@ -193,8 +200,10 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
       return
     }
     const key = notesKey(String(assetId))
-    const stored = migrateLocalIfMissing(key)
-    notesText.value = stored || ''
+    const storedPreference = String(preferences.get(key, '') || '')
+    const storedLocal = String(peekLocal(key) || '')
+    const stored = storedPreference || storedLocal
+    notesText.value = stored
     void (async () => {
       try {
         const existing = await listAnnotations(String(assetId), null)
@@ -223,7 +232,8 @@ export function useReadingUiPreferences(options: ReadingUiPreferencesOptions) {
         }
         if (loadSequence !== notesLoadSequence) return
         notesText.value = mergedText
-        preferences.set(key, '')
+        await preferences.setDurable(key, '')
+        if (storedLocal) removeLocal(key)
       } catch (error) {
         if (loadSequence !== notesLoadSequence) return
         notesError.value = '阅读笔记加载失败，旧笔记尚未删除。'

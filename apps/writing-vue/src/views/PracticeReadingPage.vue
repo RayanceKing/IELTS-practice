@@ -3852,13 +3852,14 @@ function getQuestionKindLabel(kind) {
 .snapshot-message {
   position: static;
   flex: 0 0 auto;
-  align-self: stretch;
-  margin: 0 18px;
+  align-self: center;
+  width: min(42rem, calc(100% - 36px));
+  margin: 8px 18px;
   padding: 8px 10px;
-  border: 1px solid var(--atlas-accent-ring);
+  border: 1px solid var(--atlas-rim);
   border-radius: 8px;
-  background: var(--atlas-accent-soft);
-  color: var(--atlas-accent-strong);
+  background: var(--atlas-glass-elevated);
+  color: var(--atlas-ink);
   font-size: 0.86rem;
   box-shadow: var(--atlas-shadow);
 }

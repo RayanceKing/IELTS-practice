@@ -520,6 +520,64 @@
   box-shadow: var(--atlas-shadow);
 }
 
+.atlas-source-ui .history-page.history-page .empty-state {
+  min-height: 0;
+  padding: 18px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.atlas-source-ui .settings-page .settings-system-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.atlas-source-ui .settings-page .settings-system-metrics > div {
+  padding: 10px 12px;
+  border: 1px solid var(--atlas-rim);
+  border-radius: var(--atlas-radius-sm);
+  background: var(--atlas-control-surface);
+}
+
+.atlas-source-ui .settings-page .settings-system-metrics :is(span, strong) {
+  display: block;
+}
+
+.atlas-source-ui .settings-page .settings-system-metrics span,
+.atlas-source-ui .settings-page .settings-technical-details dt {
+  color: var(--atlas-ink-soft);
+  font-size: 0.78rem;
+}
+
+.atlas-source-ui .settings-page .settings-technical-details {
+  grid-column: 1 / -1;
+}
+
+.atlas-source-ui .settings-page .settings-technical-details summary {
+  cursor: pointer;
+  color: var(--atlas-ink-soft);
+  font-weight: 700;
+}
+
+.atlas-source-ui .settings-page .settings-technical-details dl {
+  margin: 10px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.atlas-source-ui .settings-page .settings-technical-details dl > div {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 12px;
+}
+
+.atlas-source-ui .settings-page .settings-technical-details :is(dt, dd) {
+  margin: 0;
+}
+
 .atlas-source-ui .history-page.history-page .filter-panel {
   padding: 18px 20px;
 }

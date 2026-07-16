@@ -7,7 +7,7 @@ const cache = new Map()
 let hydrated = false
 let hydrationPromise
 
-async function hydrate() {
+function ensureHydrated() {
   if (hydrated) return
   if (!hydrationPromise) {
     hydrationPromise = listSettings('frontend-preferences')
@@ -17,11 +17,25 @@ async function hydrate() {
         }
         hydrated = true
       })
-      .catch(() => {
-        hydrated = true
+      .catch((error) => {
+        hydrationPromise = undefined
+        throw error
       })
   }
-  await hydrationPromise
+  return hydrationPromise
+}
+
+async function hydrate() {
+  try {
+    await ensureHydrated()
+  } catch {
+    // Ordinary controls may keep their setup defaults. Data migrations use
+    // hydrateStrict so they never mistake a failed read for an empty database.
+  }
+}
+
+async function hydrateStrict() {
+  await ensureHydrated()
 }
 
 export function useTauriPreferences() {
@@ -37,11 +51,21 @@ export function useTauriPreferences() {
   }
 
   function set(key, value) {
+    const hadPrevious = cache.has(key)
+    const previous = cache.get(key)
     cache.set(key, value)
-    void upsertSetting('frontend-preferences', key, value).catch(() => {})
+    void upsertSetting('frontend-preferences', key, value).catch(() => {
+      if (hadPrevious) cache.set(key, previous)
+      else cache.delete(key)
+    })
   }
 
-  return { ready, get, set, hydrate }
+  async function setDurable(key, value) {
+    await upsertSetting('frontend-preferences', key, value)
+    cache.set(key, value)
+  }
+
+  return { ready, get, set, setDurable, hydrate, hydrateStrict }
 }
 
 export default useTauriPreferences
