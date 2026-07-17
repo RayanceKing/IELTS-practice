@@ -723,6 +723,10 @@ fn delete_attempt_graph_in_transaction(conn: &Connection, attempt_id: &str) -> D
         "DELETE FROM settings WHERE namespace = 'reading_draft' AND key = ?1",
         params![attempt_id],
     )?;
+    conn.execute(
+        "DELETE FROM reading_timer_states WHERE scope = 'attempt' AND owner_id = ?1",
+        params![attempt_id],
+    )?;
     delete_mode_idempotency_replays_for_attempt(conn, attempt_id)?;
     let deleted = conn.execute("DELETE FROM attempts WHERE id = ?1", params![attempt_id])?;
     Ok(deleted > 0)

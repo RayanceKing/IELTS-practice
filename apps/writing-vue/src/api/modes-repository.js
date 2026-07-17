@@ -83,6 +83,24 @@ export async function advanceEndless(sessionId) {
   return { source: 'tauri', session: unwrapCommandResponse(response, 'endless_advance') }
 }
 
+export async function saveEndlessPassageDraft(payload) {
+  const response = await invokeCommand('endless_save_passage_draft', {
+    cmd: {
+      sessionId: payload.sessionId,
+      assetId: payload.assetId,
+      assetRevision: payload.assetRevision ?? null,
+      assetFingerprint: payload.assetFingerprint || null,
+      answers: payload.answers || {},
+      markedQuestions: payload.markedQuestions || [],
+      questionTimeline: payload.questionTimeline || [],
+      titleSnapshot: payload.titleSnapshot || null,
+      timerSnapshot: payload.timerSnapshot || null,
+      idempotencyKey: payload.idempotencyKey || `endless-draft-${payload.sessionId}-${payload.assetId}`
+    }
+  })
+  return { source: 'tauri', result: unwrapCommandResponse(response, 'endless_save_passage_draft') }
+}
+
 export async function saveSuitePassageDraft(payload) {
   const response = await invokeCommand('suite_save_passage_draft', {
     cmd: {
@@ -120,6 +138,7 @@ export async function submitEndless(payload) {
       questionTimeline: payload.questionTimeline || [],
       durationMs: payload.durationMs ?? null,
       titleSnapshot: payload.titleSnapshot || null,
+      timerSnapshot: payload.timerSnapshot || null,
       // A lost IPC response is a retry of this exact session passage, not a
       // new submission. The server owns replay; this key must survive reload.
       idempotencyKey: payload.idempotencyKey || endlessSubmitIdempotencyKey(sessionId, assetId)
@@ -152,6 +171,7 @@ export const modesRepository = {
   cancelSuite,
   createEndless,
   getEndless,
+  saveEndlessPassageDraft,
   cancelEndless,
   advanceEndless,
   submitEndless,

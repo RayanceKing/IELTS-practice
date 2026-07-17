@@ -10,6 +10,9 @@ use ielts_domain::dto::{AttemptAnswer, AttemptRecord};
 
 use crate::attempts::upsert_attempt;
 use crate::history::prune_terminal_attempts_in_transaction;
+use crate::modes::timer::{
+    load_reading_timer_state, save_reading_timer_state, TimerOwnerScope, TimerState,
+};
 use crate::reading::assets::{
     load_answer_key, load_controls, load_kinds, load_practice_asset_payload,
 };
@@ -34,6 +37,8 @@ pub struct ReadingDraftCommand {
     pub asset_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_snapshot: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer_snapshot: Option<TimerState>,
     pub idempotency_key: String,
 }
 
@@ -86,6 +91,14 @@ pub struct ReadingSubmitResult {
     pub idempotent_replay: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingOpenDraft {
+    pub attempt: AttemptRecord,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer: Option<TimerState>,
+}
+
 pub fn save_reading_draft(conn: &Connection, cmd: &ReadingDraftCommand) -> DbResult<AttemptRecord> {
     let tx = conn.unchecked_transaction()?;
     let attempt = save_reading_draft_in_transaction(&tx, cmd)?;
@@ -118,7 +131,22 @@ pub(crate) fn save_reading_draft_in_scope(
         cmd.asset_revision,
         cmd.asset_fingerprint.as_deref(),
     )?;
-    let now = chrono::Utc::now().to_rfc3339();
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let now = chrono::DateTime::from_timestamp_millis(now_ms)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc3339();
+    let started_at: Option<String> = conn
+        .query_row(
+            "SELECT started_at FROM attempts WHERE id = ?1",
+            params![cmd.attempt_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let duration_ms = cmd
+        .timer_snapshot
+        .as_ref()
+        .map(|timer| timer.elapsed_ms(now_ms))
+        .unwrap_or(0);
     let answers = answers_to_vec(&cmd.answers, &cmd.marked_questions, &cmd.question_timeline);
     let attempt = AttemptRecord {
         schema_version: AttemptRecord::SCHEMA_VERSION,
@@ -128,10 +156,10 @@ pub(crate) fn save_reading_draft_in_scope(
         mode,
         suite_id: suite_id.map(str::to_string),
         status: AttemptStatus::Draft,
-        started_at: now.clone(),
+        started_at: started_at.unwrap_or_else(|| now.clone()),
         submitted_at: None,
         completed_at: None,
-        duration_ms: 0,
+        duration_ms,
         score_value: None,
         score_scale: None,
         correct_count: None,
@@ -148,6 +176,16 @@ pub(crate) fn save_reading_draft_in_scope(
         annotations: vec![],
     };
     upsert_attempt(conn, &attempt)?;
+    if mode == AttemptMode::Single {
+        if let Some(timer) = cmd.timer_snapshot.as_ref() {
+            save_reading_timer_state(
+                conn,
+                TimerOwnerScope::Attempt,
+                &cmd.attempt_id,
+                timer,
+            )?;
+        }
+    }
     conn.execute(
         "INSERT INTO attempt_idempotency (scope, idempotency_key, attempt_id, evaluation_id, response_json, created_at)
          VALUES ('reading.draft', ?1, ?2, NULL, NULL, ?3)
@@ -390,7 +428,7 @@ pub fn get_open_reading_draft(
     conn: &Connection,
     asset_id: &str,
 ) -> DbResult<Option<AttemptRecord>> {
-    get_open_reading_draft_for_scope(conn, asset_id, None)
+    get_open_reading_draft_for_identity(conn, asset_id, AttemptMode::Single, None)
 }
 
 /// Latest open draft for an asset within one practice scope.
@@ -401,11 +439,72 @@ pub fn get_open_reading_draft_for_scope(
     asset_id: &str,
     suite_id: Option<&str>,
 ) -> DbResult<Option<AttemptRecord>> {
+    let suite_id = suite_id.map(str::trim).filter(|value| !value.is_empty());
+    let mode = if suite_id.is_some() {
+        AttemptMode::Suite
+    } else {
+        AttemptMode::Single
+    };
+    get_open_reading_draft_for_identity(conn, asset_id, mode, suite_id)
+}
+
+pub fn get_open_reading_draft_with_timer(
+    conn: &Connection,
+    asset_id: &str,
+    suite_id: Option<&str>,
+    endless_session_id: Option<&str>,
+) -> DbResult<Option<ReadingOpenDraft>> {
+    let endless_session_id = endless_session_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let suite_id = suite_id.map(str::trim).filter(|value| !value.is_empty());
+    if suite_id.is_some() && endless_session_id.is_some() {
+        return Err(DbError::Validation(
+            "reading draft cannot belong to suite and endless simultaneously".into(),
+        ));
+    }
+    let (mode, owner_id) = if let Some(id) = endless_session_id {
+        (AttemptMode::Endless, Some(id))
+    } else if let Some(id) = suite_id {
+        (AttemptMode::Suite, Some(id))
+    } else {
+        (AttemptMode::Single, None)
+    };
+    let Some(attempt) = get_open_reading_draft_for_identity(conn, asset_id, mode, owner_id)? else {
+        return Ok(None);
+    };
+    let timer = match mode {
+        AttemptMode::Single => load_reading_timer_state(
+            conn,
+            TimerOwnerScope::Attempt,
+            &attempt.id,
+        )?,
+        AttemptMode::Endless => load_reading_timer_state(
+            conn,
+            TimerOwnerScope::Endless,
+            owner_id.expect("endless owner checked"),
+        )?,
+        _ => None,
+    };
+    Ok(Some(ReadingOpenDraft { attempt, timer }))
+}
+
+fn get_open_reading_draft_for_identity(
+    conn: &Connection,
+    asset_id: &str,
+    mode: AttemptMode,
+    owner_id: Option<&str>,
+) -> DbResult<Option<AttemptRecord>> {
     let asset_id = asset_id.trim();
     if asset_id.is_empty() {
         return Err(DbError::Validation("asset_id required".into()));
     }
-    let suite_id = suite_id.map(str::trim).filter(|value| !value.is_empty());
+    let owner_id = owner_id.map(str::trim).filter(|value| !value.is_empty());
+    let mode_name = match mode {
+        AttemptMode::Suite => "suite",
+        AttemptMode::Endless => "endless",
+        _ => "single",
+    };
     // Open drafts include both `draft` and `active`: patch_reading_answer may promote
     // an in-progress attempt to active, and callers must still resume it.
     let attempt_id: Option<String> = conn
@@ -413,11 +512,11 @@ pub fn get_open_reading_draft_for_scope(
             "SELECT id FROM attempts
              WHERE activity = 'reading' AND asset_id = ?1
                AND lower(status) IN ('draft', 'active')
-               AND ((?2 IS NULL AND mode = 'single' AND suite_id IS NULL)
-                 OR (?2 IS NOT NULL AND mode = 'suite' AND suite_id = ?2))
+               AND mode = ?2
+               AND ((?3 IS NULL AND suite_id IS NULL) OR suite_id = ?3)
              ORDER BY started_at DESC
              LIMIT 1",
-            params![asset_id, suite_id],
+            params![asset_id, mode_name, owner_id],
             |row| row.get(0),
         )
         .optional()?;

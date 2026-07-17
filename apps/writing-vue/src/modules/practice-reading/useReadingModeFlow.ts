@@ -355,7 +355,8 @@ export function useReadingModeFlow(options: ReadingModeFlowOptions) {
           markedQuestions: attempt.markedQuestions,
           questionTimeline: options.buildPersistedQuestionTimeline(attempt.questionTimelineLite),
           durationMs: Math.round((durationSec || 0) * 1000),
-          titleSnapshot: currentAsset.title || currentAsset.name || null
+          titleSnapshot: currentAsset.title || currentAsset.name || null,
+          timerSnapshot: attempt.timerSnapshot || null
         })
         const rawSub = endlessResult.result && endlessResult.result.submission
         const nextId = endlessResult.result?.nextAssetId

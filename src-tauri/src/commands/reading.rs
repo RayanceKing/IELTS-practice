@@ -7,11 +7,12 @@ use tauri::State;
 
 use crate::app::state::AppDb;
 use ielts_db::{
-    export_reading_archive, get_open_reading_draft_for_scope, import_reading_archive_value,
+    export_reading_archive, get_open_reading_draft_with_timer, import_reading_archive_value,
     list_assets, load_pdf_data_url, load_practice_asset_payload, patch_reading_answer,
     pick_reading_practice_asset, save_reading_draft, submit_reading_attempt, AssetIndexEntry,
     PickReadingPracticeAssetCommand, PickedReadingPracticeAsset, ReadingArchiveImportResult,
-    ReadingArchiveSnapshot, ReadingDraftCommand, ReadingSubmitCommand, ReadingSubmitResult,
+    ReadingArchiveSnapshot, ReadingDraftCommand, ReadingOpenDraft, ReadingSubmitCommand,
+    ReadingSubmitResult,
 };
 
 fn map_err(err: ielts_db::DbError) -> ErrorEnvelope {
@@ -100,10 +101,16 @@ pub fn reading_get_open_draft(
     db: State<'_, AppDb>,
     asset_id: String,
     suite_id: Option<String>,
-) -> CommandResponse<Option<ielts_domain::dto::AttemptRecord>> {
-    match db
-        .with_conn(|conn| get_open_reading_draft_for_scope(conn, &asset_id, suite_id.as_deref()))
-    {
+    endless_session_id: Option<String>,
+) -> CommandResponse<Option<ReadingOpenDraft>> {
+    match db.with_conn(|conn| {
+        get_open_reading_draft_with_timer(
+            conn,
+            &asset_id,
+            suite_id.as_deref(),
+            endless_session_id.as_deref(),
+        )
+    }) {
         Ok(a) => CommandResponse::success(a),
         Err(e) => CommandResponse::failure(map_err(e)),
     }

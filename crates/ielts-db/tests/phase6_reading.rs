@@ -4,10 +4,10 @@ use serde_json::json;
 use tempfile::tempdir;
 
 use ielts_db::{
-    compare_answer, import_asset_payload_file, load_pdf_data_url, load_practice_asset_payload,
-    migrate, open_connection, patch_reading_answer, save_reading_draft, score_attempt,
-    submit_reading_attempt, DbOpenOptions, MatchMode, ReadingDraftCommand, ReadingQuestionProgress,
-    ReadingSubmitCommand,
+    compare_answer, get_open_reading_draft_with_timer, import_asset_payload_file,
+    load_pdf_data_url, load_practice_asset_payload, migrate, open_connection,
+    patch_reading_answer, save_reading_draft, score_attempt, submit_reading_attempt, DbOpenOptions,
+    MatchMode, ReadingDraftCommand, ReadingQuestionProgress, ReadingSubmitCommand, TimerState,
 };
 
 fn open_db() -> (tempfile::TempDir, rusqlite::Connection) {
@@ -126,6 +126,16 @@ fn draft_patch_and_idempotent_submit() {
             asset_revision: Some(asset.schema_version),
             asset_fingerprint: Some(asset.fingerprint.clone()),
             title_snapshot: Some("Demo Passage".into()),
+            timer_snapshot: Some(TimerState {
+                source: "local".into(),
+                anchor_ms: 1_000,
+                effective_start_time_ms: 1_000,
+                mode: ielts_db::TimerMode::Elapsed,
+                limit_seconds: None,
+                paused_offset_ms: 500,
+                paused_at_ms: Some(6_000),
+                running: false,
+            }),
             idempotency_key: "draft-1".into(),
         },
     )
@@ -221,6 +231,7 @@ fn draft_marks_and_timeline_restore_from_canonical_answers() {
             asset_revision: Some(asset.schema_version),
             asset_fingerprint: Some(asset.fingerprint),
             title_snapshot: None,
+            timer_snapshot: None,
             idempotency_key: "draft-restore-1".into(),
         },
     )
@@ -241,6 +252,14 @@ fn draft_marks_and_timeline_restore_from_canonical_answers() {
         .answers
         .iter()
         .any(|answer| answer.question_id == "q3" && answer.marked));
+    let restored_with_timer = get_open_reading_draft_with_timer(&conn, &asset.id, None, None)
+        .unwrap()
+        .unwrap();
+    let timer = restored_with_timer.timer.unwrap();
+    assert_eq!(timer.source, "single");
+    assert_eq!(timer.anchor_ms, 1_000);
+    assert_eq!(timer.paused_offset_ms, 500);
+    assert!(!timer.running);
     let legacy_mirrors: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM settings WHERE namespace = 'reading_draft'",

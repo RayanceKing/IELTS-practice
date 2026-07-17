@@ -72,20 +72,24 @@ export async function saveReadingDraft(payload) {
       markedQuestions: payload.markedQuestions || [],
       questionTimeline: payload.questionTimeline || [],
       titleSnapshot: payload.titleSnapshot || null,
+      timerSnapshot: payload.timerSnapshot || null,
       idempotencyKey: payload.idempotencyKey || newKey('draft')
     }
   })
   return { source: 'tauri', attempt: unwrapCommandResponse(response, 'reading_save_draft') }
 }
 
-export async function getOpenReadingDraft(assetId, suiteId = null) {
+export async function getOpenReadingDraft(assetId, suiteId = null, endlessSessionId = null) {
   const response = await invokeCommand('reading_get_open_draft', {
     assetId: String(assetId || '').trim(),
-    suiteId: String(suiteId || '').trim() || null
+    suiteId: String(suiteId || '').trim() || null,
+    endlessSessionId: String(endlessSessionId || '').trim() || null
   })
+  const draft = unwrapCommandResponse(response, 'reading_get_open_draft') || null
   return {
     source: 'tauri',
-    attempt: unwrapCommandResponse(response, 'reading_get_open_draft') || null
+    attempt: draft?.attempt || null,
+    timer: draft?.timer || null
   }
 }
 

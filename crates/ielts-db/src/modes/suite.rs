@@ -731,6 +731,7 @@ pub fn save_suite_passage_draft(
             asset_revision: cmd.asset_revision,
             asset_fingerprint: cmd.asset_fingerprint.clone(),
             title_snapshot: cmd.title_snapshot.clone(),
+            timer_snapshot: None,
             idempotency_key: format!("suite-draft-{}", cmd.idempotency_key),
         },
         AttemptMode::Suite,

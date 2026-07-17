@@ -4,7 +4,7 @@ import { invokeCommand, unwrapCommandResponse } from '@/api/tauri-bridge.js'
 type TimerMode = 'elapsed' | 'countdown'
 
 type TimerState = {
-  source: 'local' | 'suite'
+  source: 'local' | 'single' | 'suite' | 'endless'
   anchorMs: number
   effectiveStartTimeMs: number
   mode: TimerMode
@@ -37,7 +37,9 @@ export function normalizeSuiteTimerState(value: unknown): TimerState | null {
   const parsedPausedOffsetMs = input.pausedOffsetMs == null ? 0 : Number(input.pausedOffsetMs)
   const parsedPausedAtMs = input.pausedAtMs == null ? Number.NaN : Number(input.pausedAtMs)
   return {
-    source: 'suite',
+    source: ['local', 'single', 'suite', 'endless'].includes(String(input.source))
+      ? String(input.source) as TimerState['source']
+      : 'suite',
     anchorMs: Math.floor(anchorMs),
     effectiveStartTimeMs: Math.floor(anchorMs),
     mode: String(input.mode).toLowerCase() === 'countdown' ? 'countdown' : 'elapsed',
@@ -100,10 +102,17 @@ export function useReadingTimer(options: ReadingTimerOptions = {}) {
   function applySuiteTimerState() {
     const timer = suiteTimerState.value
     if (!activeSuiteSessionId.value || !timer) return
+    applyPracticeTimerState(timer)
+  }
+
+  function applyPracticeTimerState(value: unknown) {
+    const timer = normalizeSuiteTimerState(value)
+    if (!timer) return false
     runtimeTimer.value = { ...timer }
     startedAt.value = new Date(timer.anchorMs).toISOString()
     timerRunning.value = timer.running && !reviewMode.value
     void refreshFromRust()
+    return true
   }
 
   function resolveTimerAnchorMs() {
@@ -212,7 +221,7 @@ export function useReadingTimer(options: ReadingTimerOptions = {}) {
 
   return {
     elapsedSeconds, timerRunning, startedAt, suiteTimerState, timerDisplaySeconds, formattedTimer,
-    applySuiteTimerState, getPracticeTimerSnapshot, resolvePracticeTiming, startPracticeTimer,
+    applySuiteTimerState, applyPracticeTimerState, getPracticeTimerSnapshot, resolvePracticeTiming, startPracticeTimer,
     stopPracticeTimer, toggleTimer, resetPracticeTimerClock, setPracticeTimerElapsedSeconds
   }
 }

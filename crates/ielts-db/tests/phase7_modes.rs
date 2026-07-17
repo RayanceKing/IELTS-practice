@@ -861,6 +861,7 @@ fn generic_reading_writes_cannot_mutate_a_memorize_attempt() {
             marked_questions: vec![],
             question_timeline: vec![],
             title_snapshot: None,
+            timer_snapshot: None,
             idempotency_key: "illegal-memorize-draft".into(),
         },
     )

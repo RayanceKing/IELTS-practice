@@ -450,6 +450,7 @@ import {
 import { isTauriRuntime } from '@/api/tauri-bridge.js'
 import { getOpenReadingDraft } from '@/api/reading-repository.js'
 import {
+  saveEndlessPassageDraft,
   saveSuitePassageDraft
 } from '@/api/modes-repository.js'
 
@@ -689,6 +690,7 @@ const {
   suiteTimerState,
   formattedTimer,
   applySuiteTimerState,
+  applyPracticeTimerState,
   getPracticeTimerSnapshot,
   resolvePracticeTiming,
   startPracticeTimer,
@@ -1090,8 +1092,12 @@ async function loadAsset() {
     }
     if (replaySessionId) {
       await loadSubmittedSession(replaySessionId)
-    } else if (isTauriRuntime() && !isMemorizeMode.value && !isEndlessMode.value) {
-      await hydrateOpenDraft(normalizedAssetId, activeSuiteSessionId.value || null)
+    } else if (isTauriRuntime() && !isMemorizeMode.value) {
+      await hydrateOpenDraft(
+        normalizedAssetId,
+        activeSuiteSessionId.value || null,
+        activeEndlessSessionId.value || null
+      )
     }
   } catch (loadError) {
     console.error('加载阅读资源失败:', loadError)
@@ -1167,10 +1173,14 @@ async function loadSubmittedSession(sessionId) {
   }
 }
 
-async function hydrateOpenDraft(assetId, suiteId = null) {
+async function hydrateOpenDraft(assetId, suiteId = null, endlessSessionId = null) {
   try {
     const expectedSuiteId = String(suiteId || '').trim()
-    const { attempt } = await getOpenReadingDraft(assetId, expectedSuiteId || null)
+    const { attempt, timer } = await getOpenReadingDraft(
+      assetId,
+      expectedSuiteId || null,
+      String(endlessSessionId || '').trim() || null
+    )
     if (!attempt?.id) return
     const draftSuiteId = String(attempt.suiteId || attempt.suite_id || '').trim()
     if (draftSuiteId !== expectedSuiteId) {
@@ -1182,6 +1192,7 @@ async function hydrateOpenDraft(assetId, suiteId = null) {
       return
     }
     tauriAttemptId = String(attempt.id)
+    if (timer) applyPracticeTimerState(timer)
     const answers = {}
     const marked = []
     for (const entry of attempt.answers || []) {
@@ -1506,7 +1517,7 @@ function syncNativeReadOnly(control) {
 }
 
 function scheduleDraftAutosave() {
-  if (!isTauriRuntime() || readOnlyMode.value || isEndlessMode.value) {
+  if (!isTauriRuntime() || readOnlyMode.value) {
     return
   }
   if (draftAutosaveTimer) clearTimeout(draftAutosaveTimer)
@@ -1519,7 +1530,7 @@ function scheduleDraftAutosave() {
 }
 
 async function persistTauriDraft() {
-  if (!isTauriRuntime() || !asset.value?.id || readOnlyMode.value || isEndlessMode.value) return
+  if (!isTauriRuntime() || !asset.value?.id || readOnlyMode.value) return
   if (activeSuiteSessionId.value) {
     const { result } = await saveSuitePassageDraft({
       suiteId: activeSuiteSessionId.value,
@@ -1536,6 +1547,21 @@ async function persistTauriDraft() {
     tauriAttemptId = String(result?.attempt?.id || tauriAttemptId || '')
     return
   }
+  if (isEndlessMode.value && activeEndlessSessionId.value) {
+    const { result } = await saveEndlessPassageDraft({
+      sessionId: activeEndlessSessionId.value,
+      assetId: asset.value.id,
+      assetRevision: asset.value.schemaVersion ?? null,
+      assetFingerprint: asset.value.fingerprint || null,
+      answers: snapshotAnswerMap(),
+      markedQuestions: markedQuestions.value.slice(),
+      questionTimeline: buildPersistedQuestionTimeline(),
+      titleSnapshot: asset.value.title || asset.value.name || null,
+      timerSnapshot: getPracticeTimerSnapshot()
+    })
+    tauriAttemptId = String(result?.attempt?.id || tauriAttemptId || '')
+    return
+  }
   if (!tauriAttemptId) tauriAttemptId = readingAttempt.newAttemptId()
   await readingAttempt.persistDraft({
     attemptId: tauriAttemptId,
@@ -1545,13 +1571,14 @@ async function persistTauriDraft() {
     answers: snapshotAnswerMap(),
     markedQuestions: markedQuestions.value.slice(),
     questionTimeline: buildPersistedQuestionTimeline(),
-    titleSnapshot: asset.value.title || asset.value.name || null
+    titleSnapshot: asset.value.title || asset.value.name || null,
+    timerSnapshot: getPracticeTimerSnapshot()
   })
 }
 
 function toggleTimer() {
   togglePracticeTimer()
-  if (isTauriRuntime() && !readOnlyMode.value && !isEndlessMode.value) {
+  if (isTauriRuntime() && !readOnlyMode.value) {
     void persistTauriDraft().catch((error) => {
       console.warn('切换阅读计时时保存草稿失败', error)
     })

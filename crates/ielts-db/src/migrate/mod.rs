@@ -60,6 +60,11 @@ fn migrations() -> &'static [Migration] {
                 name: "writing_prompt_policy",
                 sql: include_str!("../../migrations/0009_writing_prompt_policy.sql"),
             },
+            Migration {
+                version: 10,
+                name: "reading_timer_states",
+                sql: include_str!("../../migrations/0010_reading_timer_states.sql"),
+            },
         ]
     })
 }

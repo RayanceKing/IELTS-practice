@@ -18,13 +18,45 @@ use crate::migrate::current_version;
 use crate::settings::{list_secret_refs, list_settings, put_secret_ref, upsert_setting};
 use crate::sqlite::{DbError, DbResult};
 
-pub const BACKUP_SCHEMA_VERSION: u32 = 5;
+pub const BACKUP_SCHEMA_VERSION: u32 = 6;
 const LEGACY_BACKUP_SCHEMA_VERSION: u32 = 1;
 
 // Parent tables precede their children. Restore inserts in this order and
 // clears in reverse order, so foreign keys remain enabled for the whole
 // transaction.
 const CANONICAL_TABLES: &[&str] = &[
+    "practice_assets",
+    "writing_topics",
+    "writing_prompts",
+    "reading_suites",
+    "attempts",
+    "history_retention_policy",
+    "attempt_answers",
+    "attempt_annotations",
+    "writing_evaluations",
+    "writing_drafts",
+    "attempt_idempotency",
+    "evaluation_sessions",
+    "evaluation_checkpoints",
+    "evaluation_events",
+    "evaluation_lineage",
+    "reading_suite_items",
+    "endless_sessions",
+    "reading_timer_states",
+    "mode_idempotency",
+    "coach_threads",
+    "coach_messages",
+    "vocabulary_items",
+    "vocabulary_review_state",
+    "dictionary_entries",
+    "settings",
+    "migration_meta",
+];
+
+// Schema v5 has first-class Writing prompts but predates durable standalone
+// and Endless Reading timer state. Existing table columns remain unchanged, so
+// the old checksummed package can restore without fabricating a timer table.
+const V5_CANONICAL_TABLES: &[&str] = &[
     "practice_assets",
     "writing_topics",
     "writing_prompts",
@@ -140,8 +172,10 @@ const V2_CANONICAL_TABLES: &[&str] = &[
 ];
 
 fn snapshot_tables_for_schema(schema_version: u32) -> &'static [&'static str] {
-    if schema_version >= 5 {
+    if schema_version >= 6 {
         CANONICAL_TABLES
+    } else if schema_version == 5 {
+        V5_CANONICAL_TABLES
     } else if schema_version == 4 {
         V4_CANONICAL_TABLES
     } else if schema_version == 3 {
@@ -748,6 +782,9 @@ fn validate_logical_references(tables: &HashMap<&str, &BackupTable>) -> DbResult
     require_optional_refs(tables["reading_suite_items"], "attempt_id", &attempts)?;
     require_optional_refs(tables["endless_sessions"], "current_asset_id", &assets)?;
     require_optional_refs(tables["endless_sessions"], "current_attempt_id", &attempts)?;
+    if let Some(timers) = tables.get("reading_timer_states") {
+        validate_timer_owner_refs(timers, &attempts, &text_set(tables["endless_sessions"], "id")?)?;
+    }
     require_optional_refs(tables["coach_threads"], "attempt_id", &attempts)?;
     require_optional_refs(tables["coach_threads"], "asset_id", &assets)?;
     require_refs(tables["coach_messages"], "thread_id", &threads)?;
@@ -801,6 +838,35 @@ fn require_optional_refs(
                     table.name, column
                 )))
             }
+        }
+    }
+    Ok(())
+}
+
+fn validate_timer_owner_refs(
+    table: &BackupTable,
+    attempts: &HashSet<String>,
+    endless_sessions: &HashSet<String>,
+) -> DbResult<()> {
+    let scope_index = column_index(table, "scope")?;
+    let owner_index = column_index(table, "owner_id")?;
+    for row in &table.rows {
+        let (BackupSqlValue::Text(scope), BackupSqlValue::Text(owner_id)) =
+            (&row[scope_index], &row[owner_index])
+        else {
+            return Err(DbError::Validation(
+                "reading timer owner must be text".into(),
+            ));
+        };
+        let valid = match scope.as_str() {
+            "attempt" => attempts.contains(owner_id),
+            "endless" => endless_sessions.contains(owner_id),
+            _ => false,
+        };
+        if !valid {
+            return Err(DbError::Validation(format!(
+                "dangling reading timer owner {scope}:{owner_id}"
+            )));
         }
     }
     Ok(())

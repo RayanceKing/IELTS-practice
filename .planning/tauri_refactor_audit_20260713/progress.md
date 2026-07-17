@@ -1,0 +1,22 @@
+# 审计进度
+
+- 2026-07-13：用户确认执行范围。
+- 2026-07-13：读取 `planning-with-files` 技能并运行 session catchup；未发现待恢复输出。
+- 2026-07-13：建立本次审计的持久化计划文件。
+- 2026-07-13：Git 仅显示本轮新增 `.planning/`；前一阶段产品变更已在 `f306bdd`。
+- 2026-07-13：创建空检查点提交 `0cea4a7`，未混入审计文件。
+- 2026-07-13：开始读取任务书；原始输出过长被截断，改为按区段补读。
+- 2026-07-13：`rg.exe` 因 WindowsApps 权限拒绝无法启动；记录后改用 PowerShell 搜索。
+- 2026-07-13：提取任务书 1434 行章节索引，形成三组并发审计边界。
+- 2026-07-13：补读阅读/历史/UX 冻结/目标架构/最小字段及 Phase 0–10 全部任务段落。
+- 2026-07-13：阶段 2 完成；准备并发只读审计。
+- 2026-07-13：三名子代理完成平台/核心引擎/前端 QA 只读审计；未修改工作区。
+- 2026-07-13：固化其交叉结论，进入主代理证据核验与门禁复跑。
+- 2026-07-13：按仓库规定顺序复跑 static suite 6/6、packaged smoke 5/5，均通过。
+- 2026-07-13：主代理抽查 backup、TS 契约、updater/capability、写作评测、阅读 payload/判分、suite picker 与 dragdrop，关键 P0 均由代码直接确认。
+- 2026-07-13：`cargo test --workspace` 失败（ielts-db 13 passed / 2 failed）；记录后改为静态定位，不重复整套命令。
+- 2026-07-13：定位 settings 测试失败为 `hasSecret` 元数据触发粗糙 secret-key heuristic；Vue typecheck 通过。
+- 2026-07-13：尝试 `cargo test -p ielts-db --tests` 仍运行同一 lib unit target，重复得到 13/15；按两次失败停止 broad test。
+- 2026-07-13：点名 integration targets 后 `ai_config_security` 2/3 失败；同根因累计三次，停止重复该失败链。
+- 2026-07-13：排除该失败链后运行 Phase 3–8/import integration targets，36/36 通过。
+- 2026-07-13：完成主代理交叉核验与最终优先级判定。

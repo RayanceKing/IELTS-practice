@@ -12,8 +12,12 @@ use crate::modes::suite::{
     frequency_matches, list_answerable_reading_assets, normalize_category, FrequencyScope,
 };
 use crate::reading::attempt::{
-    submit_reading_attempt_in_scope, ReadingQuestionProgress, ReadingSubmitCommand,
-    ReadingSubmitResult,
+    save_reading_draft_in_scope, submit_reading_attempt_in_scope, ReadingDraftCommand,
+    ReadingQuestionProgress, ReadingSubmitCommand, ReadingSubmitResult,
+};
+use crate::modes::timer::{
+    delete_reading_timer_state, load_reading_timer_state, save_reading_timer_state,
+    TimerOwnerScope, TimerState,
 };
 use crate::sqlite::{DbError, DbResult};
 
@@ -46,6 +50,8 @@ pub struct EndlessSession {
     pub current_asset_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_attempt_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer: Option<TimerState>,
     pub completed_asset_ids: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -90,7 +96,39 @@ pub struct SubmitEndlessCommand {
     pub duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_snapshot: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer_snapshot: Option<TimerState>,
     pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct SaveEndlessPassageDraftCommand {
+    pub session_id: String,
+    pub asset_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_revision: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_fingerprint: Option<String>,
+    #[serde(default)]
+    pub answers: Value,
+    #[serde(default)]
+    pub marked_questions: Vec<String>,
+    #[serde(default)]
+    pub question_timeline: Vec<ReadingQuestionProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_snapshot: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer_snapshot: Option<TimerState>,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveEndlessPassageDraftResult {
+    pub session: EndlessSession,
+    pub attempt: ielts_domain::dto::AttemptRecord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +156,33 @@ fn parse_status(raw: &str) -> EndlessStatus {
     }
 }
 
+fn new_endless_timer(now_ms: i64) -> TimerState {
+    let mut timer = TimerState::new_suite(now_ms);
+    timer.source = "endless".into();
+    timer
+}
+
+fn ensure_current_endless_asset(session: &EndlessSession, asset_id: &str) -> DbResult<()> {
+    if session.status != EndlessStatus::Active {
+        return Err(DbError::Validation("endless session not active".into()));
+    }
+    if session
+        .completed_asset_ids
+        .iter()
+        .any(|completed| completed == asset_id)
+    {
+        return Err(DbError::Validation(
+            "endless asset is already completed in this session".into(),
+        ));
+    }
+    if session.current_asset_id.as_deref() != Some(asset_id) {
+        return Err(DbError::Validation(
+            "endless operation must target the current asset".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn create_endless_session(
     conn: &Connection,
     cmd: &CreateEndlessCommand,
@@ -129,7 +194,10 @@ pub fn create_endless_session(
             }
         }
     }
-    let now = chrono::Utc::now().to_rfc3339();
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let now = chrono::DateTime::from_timestamp_millis(now_ms)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc3339();
     let id = format!("endless-{}", Uuid::new_v4());
     let policy = cmd.pool_policy.clone().unwrap_or(EndlessPoolPolicy {
         categories: vec![],
@@ -144,21 +212,77 @@ pub fn create_endless_session(
         pool,
         current_asset_id: first,
         current_attempt_id: None,
+        timer: Some(new_endless_timer(now_ms)),
         completed_asset_ids: vec![],
         created_at: now.clone(),
         updated_at: now,
     };
-    persist(conn, &session)?;
+    let tx = conn.unchecked_transaction()?;
+    persist(&tx, &session)?;
+    if let Some(timer) = session.timer.as_ref() {
+        save_reading_timer_state(&tx, TimerOwnerScope::Endless, &session.id, timer)?;
+    }
     if let Some(key) = cmd.idempotency_key.as_deref() {
         if !key.trim().is_empty() {
-            store_idempotent(conn, key, &session)?;
+            store_idempotent(&tx, key, &session)?;
         }
     }
+    tx.commit()?;
     Ok(session)
 }
 
 pub fn get_endless_session(conn: &Connection, id: &str) -> DbResult<EndlessSession> {
     load(conn, id)
+}
+
+pub fn save_endless_passage_draft(
+    conn: &Connection,
+    cmd: &SaveEndlessPassageDraftCommand,
+) -> DbResult<SaveEndlessPassageDraftResult> {
+    if cmd.idempotency_key.trim().is_empty() {
+        return Err(DbError::Validation("idempotency_key required".into()));
+    }
+    let tx = conn.unchecked_transaction()?;
+    let mut session = load(&tx, &cmd.session_id)?;
+    ensure_current_endless_asset(&session, &cmd.asset_id)?;
+    let attempt_id = session.current_attempt_id.clone().unwrap_or_else(|| {
+        format!(
+            "reading-{}-{:016x}",
+            session.id,
+            stable_key_hash(&cmd.asset_id)
+        )
+    });
+    let attempt = save_reading_draft_in_scope(
+        &tx,
+        &ReadingDraftCommand {
+            attempt_id: attempt_id.clone(),
+            asset_id: cmd.asset_id.clone(),
+            answers: cmd.answers.clone(),
+            marked_questions: cmd.marked_questions.clone(),
+            question_timeline: cmd.question_timeline.clone(),
+            asset_revision: cmd.asset_revision,
+            asset_fingerprint: cmd.asset_fingerprint.clone(),
+            title_snapshot: cmd.title_snapshot.clone(),
+            timer_snapshot: None,
+            idempotency_key: format!("endless-draft-{}", cmd.idempotency_key),
+        },
+        AttemptMode::Endless,
+        Some(&session.id),
+    )?;
+    if let Some(snapshot) = cmd.timer_snapshot.as_ref() {
+        let timer = save_reading_timer_state(
+            &tx,
+            TimerOwnerScope::Endless,
+            &session.id,
+            snapshot,
+        )?;
+        session.timer = Some(timer);
+    }
+    session.current_attempt_id = Some(attempt_id);
+    session.updated_at = chrono::Utc::now().to_rfc3339();
+    persist(&tx, &session)?;
+    tx.commit()?;
+    Ok(SaveEndlessPassageDraftResult { session, attempt })
 }
 
 /// Endless mode never repeats a completed asset within one session.
@@ -194,6 +318,8 @@ pub fn cancel_endless(conn: &Connection, session_id: &str) -> DbResult<EndlessSe
         session.current_attempt_id = None;
         session.updated_at = chrono::Utc::now().to_rfc3339();
         persist(conn, &session)?;
+        delete_reading_timer_state(conn, TimerOwnerScope::Endless, session_id)?;
+        session.timer = None;
     }
     Ok(session)
 }
@@ -272,31 +398,26 @@ fn submit_endless_passage_in_transaction(
         return Ok(prev);
     }
     let mut session = load(conn, &cmd.session_id)?;
-    if session.status != EndlessStatus::Active {
-        return Err(DbError::Validation("endless session not active".into()));
-    }
-    if session
-        .completed_asset_ids
-        .iter()
-        .any(|asset_id| asset_id == &cmd.asset_id)
-    {
-        return Err(DbError::Validation(
-            "endless asset is already completed in this session".into(),
-        ));
-    }
-    if session.current_asset_id.as_deref() != Some(cmd.asset_id.as_str()) {
-        return Err(DbError::Validation(
-            "endless submit must target the current asset".into(),
-        ));
+    ensure_current_endless_asset(&session, &cmd.asset_id)?;
+    if let Some(snapshot) = cmd.timer_snapshot.as_ref() {
+        let timer = save_reading_timer_state(
+            conn,
+            TimerOwnerScope::Endless,
+            &session.id,
+            snapshot,
+        )?;
+        session.timer = Some(timer);
     }
 
-    // Stable across retries so a crash after the inner reading submit cannot
-    // strand the mode transition behind a different generated attempt id.
-    let attempt_id = format!(
-        "reading-{}-{:016x}",
-        session.id,
-        stable_key_hash(&cmd.idempotency_key)
-    );
+    // A draft already owns the attempt identity. A direct submit without an
+    // autosave uses the same deterministic session+asset identity.
+    let attempt_id = session.current_attempt_id.clone().unwrap_or_else(|| {
+        format!(
+            "reading-{}-{:016x}",
+            session.id,
+            stable_key_hash(&cmd.asset_id)
+        )
+    });
     let submission = submit_reading_attempt_in_scope(
         conn,
         &ReadingSubmitCommand {
@@ -315,8 +436,6 @@ fn submit_endless_passage_in_transaction(
         Some(&session.id),
     )?;
 
-    let persisted_attempt_id = submission.attempt.id.clone();
-
     if !session
         .completed_asset_ids
         .iter()
@@ -324,12 +443,23 @@ fn submit_endless_passage_in_transaction(
     {
         session.completed_asset_ids.push(cmd.asset_id.clone());
     }
-    session.current_attempt_id = Some(persisted_attempt_id);
+    session.current_attempt_id = None;
     let remaining = remaining_pool(&session);
     let next_asset_id = remaining.first().cloned();
     session.current_asset_id = next_asset_id.clone();
     if next_asset_id.is_none() {
         session.status = EndlessStatus::Completed;
+        session.timer = None;
+        delete_reading_timer_state(conn, TimerOwnerScope::Endless, &session.id)?;
+    } else {
+        let timer = new_endless_timer(chrono::Utc::now().timestamp_millis());
+        let timer = save_reading_timer_state(
+            conn,
+            TimerOwnerScope::Endless,
+            &session.id,
+            &timer,
+        )?;
+        session.timer = Some(timer);
     }
     session.updated_at = chrono::Utc::now().to_rfc3339();
     persist(conn, &session)?;
@@ -390,7 +520,8 @@ fn persist(conn: &Connection, session: &EndlessSession) -> DbResult<()> {
 }
 
 fn load(conn: &Connection, id: &str) -> DbResult<EndlessSession> {
-    conn.query_row(
+    let mut session = conn
+        .query_row(
         "SELECT id, status, pool_policy_json, pool_json, current_asset_id, current_attempt_id,
                 completed_asset_ids_json, created_at, updated_at
          FROM endless_sessions WHERE id = ?1",
@@ -409,13 +540,22 @@ fn load(conn: &Connection, id: &str) -> DbResult<EndlessSession> {
                 pool: serde_json::from_str(&pool_json).unwrap_or_default(),
                 current_asset_id: r.get(4)?,
                 current_attempt_id: r.get(5)?,
+                timer: None,
                 completed_asset_ids: serde_json::from_str(&completed_json).unwrap_or_default(),
                 created_at: r.get(7)?,
                 updated_at: r.get(8)?,
             })
         },
-    )
-    .map_err(|_| DbError::Message(format!("endless not found: {id}")))
+        )
+        .map_err(|_| DbError::Message(format!("endless not found: {id}")))?;
+    session.timer = load_reading_timer_state(conn, TimerOwnerScope::Endless, id)?;
+    if session.timer.is_none() && session.status == EndlessStatus::Active {
+        let fallback = chrono::DateTime::parse_from_rfc3339(&session.created_at)
+            .map(|value| value.timestamp_millis())
+            .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis());
+        session.timer = Some(new_endless_timer(fallback));
+    }
+    Ok(session)
 }
 
 fn store_idempotent(conn: &Connection, key: &str, session: &EndlessSession) -> DbResult<()> {

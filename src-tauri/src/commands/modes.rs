@@ -8,9 +8,10 @@ use crate::app::state::AppDb;
 use ielts_db::{
     advance_endless, cancel_endless, cancel_suite, create_endless_session, create_memorize_session,
     create_suite_session, finish_memorize_session, get_endless_session, get_suite_session,
-    submit_endless_passage, submit_suite_passage, AdvanceEndlessCommand, CreateEndlessCommand,
-    CreateMemorizeCommand, CreateSuiteCommand, EndlessSession, MemorizeSession,
-    ReadingSuiteSession, SaveSuitePassageDraftCommand, SaveSuitePassageDraftResult,
+    save_endless_passage_draft, submit_endless_passage, submit_suite_passage,
+    AdvanceEndlessCommand, CreateEndlessCommand, CreateMemorizeCommand, CreateSuiteCommand,
+    EndlessSession, MemorizeSession, ReadingSuiteSession, SaveEndlessPassageDraftCommand,
+    SaveEndlessPassageDraftResult, SaveSuitePassageDraftCommand, SaveSuitePassageDraftResult,
     SubmitEndlessCommand, SubmitEndlessResult, SubmitSuitePassageCommand, SubmitSuitePassageResult,
     TimerState,
 };
@@ -93,6 +94,17 @@ pub fn endless_get(db: State<'_, AppDb>, session_id: String) -> CommandResponse<
     match db.with_conn(|conn| get_endless_session(conn, &session_id)) {
         Ok(v) => CommandResponse::success(v),
         Err(e) => CommandResponse::failure(map_err(e)),
+    }
+}
+
+#[tauri::command]
+pub fn endless_save_passage_draft(
+    db: State<'_, AppDb>,
+    cmd: SaveEndlessPassageDraftCommand,
+) -> CommandResponse<SaveEndlessPassageDraftResult> {
+    match db.with_conn(|conn| save_endless_passage_draft(conn, &cmd)) {
+        Ok(value) => CommandResponse::success(value),
+        Err(error) => CommandResponse::failure(map_err(error)),
     }
 }
 

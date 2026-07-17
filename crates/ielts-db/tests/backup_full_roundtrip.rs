@@ -184,9 +184,25 @@ fn full_backup_roundtrip_preserves_every_user_truth_table() {
     let dir = tempdir().unwrap();
     let source = open_v2(dir.path().join("source.db"));
     seed_complete_user_state(&source);
+    source
+        .execute(
+            "INSERT INTO reading_timer_states(scope, owner_id, state_json, updated_at)
+             VALUES ('attempt', 'r1', ?1, '2026-07-17T00:00:00Z')",
+            [json!({
+                "source": "single",
+                "anchorMs": 1_000,
+                "effectiveStartTimeMs": 1_000,
+                "mode": "elapsed",
+                "pausedOffsetMs": 0,
+                "pausedAtMs": 6_000,
+                "running": false
+            })
+            .to_string()],
+        )
+        .unwrap();
 
     let package = create_backup_package(&source, "roundtrip-test").unwrap();
-    assert_eq!(package.manifest.schema_version, 5);
+    assert_eq!(package.manifest.schema_version, 6);
     assert_eq!(
         package.manifest.table_count as usize,
         package.database.len()
@@ -225,6 +241,16 @@ fn full_backup_roundtrip_preserves_every_user_truth_table() {
     assert!(restored.ok, "{:?}", restored.errors);
     assert_eq!(restored.tables_imported, package.manifest.table_count);
     assert_eq!(restored.rows_imported, package.manifest.row_count);
+    assert_eq!(
+        target
+            .query_row(
+                "SELECT COUNT(*) FROM reading_timer_states WHERE scope='attempt' AND owner_id='r1'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1
+    );
 
     let target_package = create_backup_package(&target, "after-restore").unwrap();
     assert_eq!(target_package.database, package.database);
@@ -387,6 +413,7 @@ fn legacy_v2_snapshot_without_writing_topics_remains_restorable() {
         table.name != "writing_topics"
             && table.name != "writing_prompts"
             && table.name != "history_retention_policy"
+            && table.name != "reading_timer_states"
     });
     legacy.manifest.table_count = legacy.database.len() as u32;
     legacy.manifest.row_count = legacy
@@ -443,7 +470,7 @@ fn legacy_v4_snapshot_projects_prompt_settings_inside_restore_transaction() {
     legacy.manifest.schema_version = 4;
     legacy
         .database
-        .retain(|table| table.name != "writing_prompts");
+        .retain(|table| table.name != "writing_prompts" && table.name != "reading_timer_states");
     legacy.manifest.table_count = legacy.database.len() as u32;
     legacy.manifest.row_count = legacy
         .database
@@ -465,6 +492,39 @@ fn legacy_v4_snapshot_projects_prompt_settings_inside_restore_transaction() {
             )
             .unwrap(),
         "RESTORED PROMPT POLICY"
+    );
+}
+
+#[test]
+fn legacy_v5_snapshot_without_reading_timers_remains_restorable() {
+    let dir = tempdir().unwrap();
+    let source = open_v2(dir.path().join("timer-v5-source.db"));
+    seed_complete_user_state(&source);
+    let mut legacy = create_backup_package(&source, "timer-v5-source").unwrap();
+    legacy.manifest.schema_version = 5;
+    legacy.manifest.database_schema_version = 9;
+    legacy
+        .database
+        .retain(|table| table.name != "reading_timer_states");
+    legacy.manifest.table_count = legacy.database.len() as u32;
+    legacy.manifest.row_count = legacy
+        .database
+        .iter()
+        .map(|table| table.rows.len() as u64)
+        .sum::<u64>()
+        + legacy.secret_refs.len() as u64;
+    rechecksum(&mut legacy);
+
+    let target = open_v2(dir.path().join("timer-v5-target.db"));
+    let report = import_backup(&target, &legacy, false).unwrap();
+    assert!(report.ok, "{:?}", report.errors);
+    assert_eq!(
+        target
+            .query_row("SELECT COUNT(*) FROM reading_timer_states", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        0
     );
 }
 

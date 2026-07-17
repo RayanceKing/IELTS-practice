@@ -120,6 +120,7 @@ pub fn run() {
             commands::modes::suite_cancel,
             commands::modes::endless_create,
             commands::modes::endless_get,
+            commands::modes::endless_save_passage_draft,
             commands::modes::endless_cancel,
             commands::modes::endless_advance,
             commands::modes::endless_submit,
