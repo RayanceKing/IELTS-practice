@@ -33,8 +33,8 @@
     <div class="filter-panel card">
       <div class="filter-row">
         <div class="filter-item">
-          <label>任务类型</label>
-          <select v-model="filters.task_type">
+          <label for="history-task-type">任务类型</label>
+          <select id="history-task-type" v-model="filters.task_type">
             <option value="">全部</option>
             <option value="task1">Task 1</option>
             <option value="task2">Task 2</option>
@@ -43,27 +43,32 @@
         </div>
 
         <div class="filter-item">
-          <label>日期范围</label>
+          <label for="history-start-date">日期范围</label>
           <div class="date-range">
             <input 
+              id="history-start-date"
               type="date" 
               v-model="filters.start_date"
               :max="filters.end_date || today"
+              aria-label="开始日期"
             />
             <span>至</span>
             <input 
+              id="history-end-date"
               type="date" 
               v-model="filters.end_date"
               :min="filters.start_date"
               :max="today"
+              aria-label="结束日期"
             />
           </div>
         </div>
 
         <div class="filter-item">
-          <label>{{ scoreFilterLabel }}</label>
+          <label for="history-min-score">{{ scoreFilterLabel }}</label>
           <div class="score-range">
             <input 
+              id="history-min-score"
               type="number" 
               v-model.number="filters.min_score"
               :min="scoreFilterBounds.min"
@@ -71,9 +76,11 @@
               :step="scoreFilterBounds.step"
               :disabled="!scoreFilterEnabled"
               :placeholder="scoreFilterEnabled ? `最低${scoreFilterUnit}` : '先选择任务类型'"
+              aria-label="最低分数"
             />
             <span>至</span>
             <input 
+              id="history-max-score"
               type="number" 
               v-model.number="filters.max_score"
               :min="scoreFilterBounds.min"
@@ -81,6 +88,7 @@
               :step="scoreFilterBounds.step"
               :disabled="!scoreFilterEnabled"
               :placeholder="scoreFilterEnabled ? `最高${scoreFilterUnit}` : '先选择任务类型'"
+              aria-label="最高分数"
             />
           </div>
           <p v-if="!scoreFilterEnabled" class="score-range-hint">请先选择阅读或具体写作 Task；混合历史不能把准确率和 Band 分数混在一起筛选。</p>
@@ -91,6 +99,7 @@
 
       <div class="search-row">
         <input 
+          id="history-search"
           type="text"
           v-model="filters.search"
           placeholder="搜索题目标题或作文内容"
@@ -103,7 +112,7 @@
     <!-- 统计分析区域 -->
     <div v-if="showAnalyticsSection" class="statistics-section card">
       <div
-        v-if="statistics || trendData.length > 0"
+        v-if="statistics || trendSeries.length > 0"
         :class="['statistics-content', 'analytics-layout', { 'analytics-layout--trend-only': !hasWritingAnalytics }]"
       >
         <section v-if="hasWritingAnalytics" class="stat-chart analytics-radar-card">
@@ -137,8 +146,8 @@
             <div class="section-header">
               <h3>详细对比</h3>
               <div class="range-selector">
-                <label>范围</label>
-                <select v-model="statisticsRange">
+                <label for="history-statistics-range">范围</label>
+                <select id="history-statistics-range" v-model="statisticsRange">
                   <option value="all">全部历史</option>
                   <option value="recent10">最近10次</option>
                   <option value="thisMonth">本月</option>
@@ -147,7 +156,8 @@
                 </select>
               </div>
             </div>
-            <table v-if="statistics.count > 0" class="comparison-table">
+            <div v-if="statistics.count > 0" class="comparison-table-scroll">
+              <table class="comparison-table">
               <thead>
                 <tr>
                   <th>评分项</th>
@@ -190,7 +200,8 @@
                   </td>
                 </tr>
               </tbody>
-            </table>
+              </table>
+            </div>
             <div v-else class="empty-comparison">
               <p>{{ getRangeDescription() }}下暂无数据</p>
             </div>
@@ -204,16 +215,22 @@
           <section class="trend-chart-container analytics-trend-card test-dashboard-card">
             <h3>
               <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-              {{ trendChartTitle }}
+              学习趋势
             </h3>
-            <LineChart
-              :historyData="trendData"
-              :min-score="trendChartMinScore"
-              :max-score="trendChartMaxScore"
-              :grid-lines="trendChartGridLines"
-              :score-suffix="trendChartScoreSuffix"
-              :axis-label-decimals="trendChartAxisLabelDecimals"
-            />
+            <div class="trend-series-list">
+              <section v-for="series in trendSeries" :key="series.key" class="trend-series" :data-trend-scale="series.key">
+                <h4>{{ series.title }}</h4>
+                <LineChart
+                  :historyData="series.data"
+                  :min-score="series.minScore"
+                  :max-score="series.maxScore"
+                  :grid-lines="series.gridLines"
+                  :score-prefix="series.scorePrefix"
+                  :score-suffix="series.scoreSuffix"
+                  :axis-label-decimals="series.axisLabelDecimals"
+                />
+              </section>
+            </div>
           </section>
         </div>
       </div>
@@ -235,19 +252,43 @@
     </div>
 
     <!-- 列表区域 -->
-    <div v-if="loading" class="loading">加载中...</div>
+    <div
+      v-if="loading"
+      class="loading history-list-state history-list-state--loading card"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <span class="history-state-spinner" aria-hidden="true"></span>
+      <p class="state-message">加载历史记录中...</p>
+    </div>
     
-    <div v-else-if="error" class="error-state card">
+    <div
+      v-else-if="error"
+      class="error-state history-list-state history-list-state--error card"
+      role="alert"
+      aria-live="assertive"
+    >
       <p class="state-message"><span class="state-icon" aria-hidden="true">!</span>{{ error }}</p>
       <button class="btn btn-brand" @click="loadEssays">重试</button>
     </div>
 
-    <div v-else-if="essays.length === 0 && !hasActiveFilters" class="empty-state card">
-      <p>暂无历史记录，提交作文或完成阅读练习后查看历史</p>
+    <div
+      v-else-if="essays.length === 0 && !hasActiveFilters"
+      class="empty-state history-list-state history-list-state--empty card"
+      role="status"
+      aria-live="polite"
+    >
+      <p class="state-message">暂无历史记录，提交作文或完成阅读练习后查看历史</p>
     </div>
 
-    <div v-else-if="essays.length === 0 && hasActiveFilters" class="empty-state card">
-      <p>当前筛选条件无结果，请调整筛选条件</p>
+    <div
+      v-else-if="essays.length === 0 && hasActiveFilters"
+      class="empty-state history-list-state history-list-state--filtered card"
+      role="status"
+      aria-live="polite"
+    >
+      <p class="state-message">当前筛选条件无结果，请调整筛选条件</p>
       <button class="btn btn-warm-sand" @click="resetFilters">重置筛选</button>
     </div>
 
@@ -258,16 +299,29 @@
       </div>
 
       <div class="essay-list">
-        <div v-for="essay in essays" :key="essay.id" class="essay-item card">
-          <div class="essay-checkbox">
+        <div
+          v-for="essay in essays"
+          :key="essay.id"
+          class="essay-item card"
+          :data-history-id="essay.id"
+        >
+          <label class="essay-checkbox">
             <input
               type="checkbox"
               :checked="selectedIds.includes(essay.id)"
+              :aria-label="`选择历史记录：${essay.title}`"
               @change="toggleSelection(essay.id)"
             />
-          </div>
+          </label>
 
-          <div class="essay-content" @click="viewDetail(essay.id)">
+          <div
+            class="essay-content"
+            role="button"
+            tabindex="0"
+            @click="viewDetail(essay.id)"
+            @keydown.enter="viewDetail(essay.id)"
+            @keydown.space.prevent="viewDetail(essay.id)"
+          >
             <div class="essay-header">
               <span :class="['task-badge', getRecordTaskClass(essay)]">
                 {{ getRecordTypeLabel(essay) }}
@@ -281,23 +335,19 @@
 
             <div class="essay-stats">
               <span class="stat-item">{{ getRecordDurationLabel(essay) }}</span>
-              <span class="stat-item">{{ getRecordSizeLabel(essay) }}</span>
-              <span :class="['stat-item', 'score', getScoreClass(essay.scoreValue)]">
-                {{ formatRecordScore(essay) }}
-              </span>
             </div>
           </div>
 
           <div class="essay-right">
             <div class="essay-score-pod">
-              <span>{{ essay.activity === 'reading' ? 'Accuracy' : 'Overall Score' }}</span>
+              <span>{{ essay.scoreLabel || (essay.activity === 'reading' ? 'Accuracy' : 'Overall Band') }}</span>
               <strong>{{ formatRecordScore(essay) }}</strong>
             </div>
             <div class="essay-actions">
-              <button class="btn-icon" @click.stop="viewDetail(essay.id)" title="查看详情">
+              <button type="button" class="btn-icon" @click.stop="viewDetail(essay.id)" title="查看详情" aria-label="查看详情">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
               </button>
-              <button class="btn-icon" @click.stop="confirmDelete(essay.id)" title="删除">
+              <button type="button" class="btn-icon" @click.stop="confirmDelete(essay.id)" title="删除" aria-label="删除">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
               </button>
             </div>
@@ -455,6 +505,11 @@
             </div>
           </div>
         </div>
+
+        <div v-else class="detail-empty-state" role="status">
+          <p>这条记录暂时没有可显示的评分详情。</p>
+          <button class="btn btn-warm-sand" @click="closeDetail">关闭</button>
+        </div>
       </div>
     </div>
 
@@ -556,34 +611,56 @@ const trendRecords = computed(() => {
   }).slice(-15)
 })
 
-const trendUsesPercentScale = computed(() => trendRecords.value.some((record) => record.activity === 'reading'))
+function trendScaleForRecord(record) {
+  if (record?.scoreScale === 'ratio' || record?.activity === 'reading') return 'reading'
+  return 'writing'
+}
 
-const trendData = computed(() => {
-  return trendRecords.value.map((record) => {
-    const d = new Date(record.submittedAt || 0);
-    const score = record.activity === 'reading'
-      ? Number(record.scoreValue || 0) * 100
-      : Number(record.scoreValue || 0) * (trendUsesPercentScale.value ? 10 : 1)
-    return {
-      date: `${d.getMonth() + 1}/${d.getDate()}`,
-      score
-    };
-  });
+const trendSeries = computed(() => {
+  const grouped = { writing: [], reading: [] }
+  for (const record of trendRecords.value) {
+    const date = new Date(record.submittedAt || 0)
+    const key = trendScaleForRecord(record)
+    grouped[key].push({
+      date: `${date.getMonth() + 1}/${date.getDate()}`,
+      score: key === 'reading'
+        ? Number(record.scoreValue || 0) * 100
+        : Number(record.scoreValue || 0)
+    })
+  }
+
+  const series = []
+  if (grouped.writing.length > 0) {
+    series.push({
+      key: 'writing',
+      title: '写作 Band 趋势',
+      data: grouped.writing,
+      minScore: 0,
+      maxScore: 9,
+      gridLines: [0, 1.5, 3, 4.5, 6, 7.5, 9],
+      scorePrefix: 'Band ',
+      scoreSuffix: '',
+      axisLabelDecimals: 1
+    })
+  }
+  if (grouped.reading.length > 0) {
+    series.push({
+      key: 'reading',
+      title: '阅读正确率趋势',
+      data: grouped.reading,
+      minScore: 0,
+      maxScore: 100,
+      gridLines: [0, 20, 40, 60, 80, 100],
+      scorePrefix: '',
+      scoreSuffix: '%',
+      axisLabelDecimals: 0
+    })
+  }
+  return series
 })
 
 const hasWritingAnalytics = computed(() => writingHistoryTotal.value > 0 && statistics.value && statistics.value.count > 0)
-const showAnalyticsSection = computed(() => total.value > 0 && (hasWritingAnalytics.value || trendData.value.length > 0 || loadingStatistics.value))
-const trendIsReadingOnly = computed(() => trendRecords.value.length > 0 && trendRecords.value.every((record) => record.activity === 'reading'))
-const trendChartTitle = computed(() => {
-  if (trendIsReadingOnly.value) return 'Accuracy Trend'
-  if (trendUsesPercentScale.value) return 'Practice Trend'
-  return 'Score Trend'
-})
-const trendChartMinScore = computed(() => trendUsesPercentScale.value ? 0 : 4)
-const trendChartMaxScore = computed(() => trendUsesPercentScale.value ? 100 : 9)
-const trendChartGridLines = computed(() => trendUsesPercentScale.value ? [0, 20, 40, 60, 80, 100] : [4, 5, 6, 7, 8, 9])
-const trendChartScoreSuffix = computed(() => trendUsesPercentScale.value ? '%' : ' 分')
-const trendChartAxisLabelDecimals = computed(() => trendUsesPercentScale.value ? 0 : 1)
+const showAnalyticsSection = computed(() => total.value > 0 && (hasWritingAnalytics.value || trendSeries.value.length > 0 || loadingStatistics.value))
 
 // 筛选条件（严格按照后端契约）
 const filters = ref({
@@ -928,8 +1005,15 @@ async function loadEssays() {
     const page = await historyRepository.listHistory(query)
     if (!listRequestGate.isCurrent(requestId)) return
 
+    const pageTotal = Number(page.total || 0)
+    const maxPage = Math.max(1, Math.ceil(pageTotal / paginationSnapshot.limit))
+    if (paginationSnapshot.page > maxPage) {
+      pagination.value.page = maxPage
+      return
+    }
+
     essaysList.value = page.items || []
-    total.value = Number(page.total || 0)
+    total.value = pageTotal
     writingHistoryTotal.value = query.activity === 'reading' ? 0 : total.value
     readingHistoryTotal.value = query.activity === 'writing' ? 0 : total.value
     keepVisibleSelections()
@@ -1259,23 +1343,19 @@ function getTaskCriterionLabel(taskType) {
 }
 
 function getRecordDurationLabel(record) {
-  if (record?.activity === 'reading') {
-    const duration = Number(record.duration || 0)
-    if (!duration) return '阅读练习'
+  const durationMs = Number(record?.durationMs || 0)
+  const duration = durationMs > 0
+    ? Math.round(durationMs / 1000)
+    : Number(record?.duration || 0)
+  if (duration > 0) {
     const minutes = Math.floor(duration / 60)
     const seconds = duration % 60
     return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
   }
+  if (record?.activity === 'reading') return '阅读练习'
   const taskType = record?.taskType ?? record?.task_type
   if (taskType === 'task1') return '20 min'
   if (taskType === 'task2') return '40 min'
-  return '—'
-}
-
-function getRecordSizeLabel(record) {
-  if (record?.activity === 'reading') {
-    return `${Number(record.questionCount || 0)} 题`
-  }
   return '—'
 }
 
@@ -1290,12 +1370,6 @@ function getTopicSourceLabel(source) {
   if (source === 'topic_bank') return '题库题目'
   if (source === 'custom_input') return '自定义题目'
   return '未标记'
-}
-
-function getScoreClass(score) {
-  if (score >= 7) return 'high'
-  if (score >= 6) return 'medium'
-  return 'low'
 }
 
 function formatDifference(diff) {
@@ -1676,22 +1750,6 @@ onBeforeUnmount(() => {
 
 .stat-item {
   color: var(--text-secondary);
-}
-
-.stat-item.score {
-  font-weight: 600;
-}
-
-.stat-item.score.high {
-  color: var(--atlas-success);
-}
-
-.stat-item.score.medium {
-  color: var(--atlas-warning);
-}
-
-.stat-item.score.low {
-  color: var(--atlas-danger);
 }
 
 .essay-actions {
@@ -2399,8 +2457,6 @@ onBeforeUnmount(() => {
     align-items: flex-start;
   }
 
-  .history-page .batch-actions,
-  .history-page .pagination,
   .history-page .essay-item {
     grid-template-columns: 1fr;
     align-items: stretch;

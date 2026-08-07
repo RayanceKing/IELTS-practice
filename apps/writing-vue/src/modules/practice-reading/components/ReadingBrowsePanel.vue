@@ -53,6 +53,10 @@
     <div class="search-box">
       <div class="search-row">
         <div class="search-input-wrap">
+          <svg class="search-leading-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m20 20-4-4"></path>
+          </svg>
           <input
             :value="keyword"
             type="text"
@@ -133,7 +137,12 @@
         <p>正在加载题目列表...</p>
       </div>
       <div v-else-if="filteredReadingAssets.length === 0" class="exam-list-empty" role="status">
-        <div class="exam-list-empty-icon" aria-hidden="true">搜索</div>
+        <div class="exam-list-empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m20 20-4-4M8.5 11h5"></path>
+          </svg>
+        </div>
         <p class="exam-list-empty-text">未找到匹配的题目</p>
         <p class="exam-list-empty-hint">请调整筛选条件或搜索词后再试</p>
         <div v-if="keyword" class="exam-list-empty-actions">

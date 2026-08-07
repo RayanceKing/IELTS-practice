@@ -1,9 +1,12 @@
 <template>
-  <nav class="nav-shell glass-toolbar">
+  <nav class="nav-shell glass-toolbar" aria-label="主导航">
     <div class="nav-inner">
       <router-link to="/" class="brand-block">
-        <strong class="brand-title">IELTS Practice</strong>
-        <span class="brand-subtitle">Reading + Writing</span>
+        <span class="brand-mark" aria-hidden="true">A</span>
+        <span class="brand-copy">
+          <strong class="brand-title">IELTS Atlas</strong>
+          <span class="brand-subtitle">Reading + Writing</span>
+        </span>
       </router-link>
 
       <div class="nav-cluster">
@@ -14,7 +17,16 @@
             :to="item.to"
             class="nav-item"
             :class="{ 'is-active': isNavActive(item) }"
+            :aria-current="isNavActive(item) ? 'page' : undefined"
           >
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path v-if="item.key === 'overview'" d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" />
+              <path v-else-if="item.key === 'reading'" d="M5 4.5A2.5 2.5 0 0 1 7.5 2H20v18H7.5A2.5 2.5 0 0 0 5 22V4.5ZM5 4.5V19" />
+              <path v-else-if="item.key === 'writing'" d="m14.5 5.5 4-4 4 4-10 10-5 1 1-5 6-6ZM13 7l4 4" />
+              <path v-else-if="item.key === 'history'" d="M4 19V5m0 14h16M8 16v-5m4 5V7m4 9v-8" />
+              <path v-else-if="item.key === 'agent'" d="M8 7.5A3.5 3.5 0 0 1 11.5 4h1A3.5 3.5 0 0 1 16 7.5v1A3.5 3.5 0 0 1 12.5 12h-1A3.5 3.5 0 0 1 8 8.5v-1ZM6 15h12M9 18h6M12 12v3" />
+              <path v-else d="M12 3v2m0 14v2M3 12h2m14 0h2M5.64 5.64l1.41 1.41m9.9 9.9 1.41 1.41m0-12.72-1.41 1.41m-9.9 9.9-1.41 1.41M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" />
+            </svg>
             <span class="nav-label">{{ item.label }}</span>
           </router-link>
         </div>
@@ -32,6 +44,7 @@ const navItems = [
   { key: 'overview', to: '/', label: '总览', path: '/', view: undefined },
   { key: 'reading', to: { path: '/', query: { view: 'browse' } }, label: '阅读', path: '/', view: 'browse' },
   { key: 'writing', to: '/writing', label: '写作', path: '/writing' },
+  { key: 'agent', to: '/agent', label: 'Agent', path: '/agent' },
   { key: 'history', to: '/history', label: '历史', path: '/history' },
   { key: 'settings', to: '/settings', label: '设置', path: '/settings' }
 ]
@@ -57,9 +70,9 @@ function isNavActive(item) {
 }
 
 .nav-inner {
-  width: min(1520px, 100%);
+  width: min(var(--shui-shell-max-width), 100%);
   margin: 0 auto;
-  padding: 12px 24px;
+  padding: 12px clamp(16px, 3vw, 28px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -68,12 +81,37 @@ function isNavActive(item) {
 
 .brand-block {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
   color: inherit;
   text-decoration: none;
-  min-width: 230px;
+  min-width: 244px;
+  gap: 11px;
+  text-align: left;
+}
+
+.brand-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--atlas-brand-rim);
+  border-radius: 13px;
+  background: var(--color-brand-gradient);
+  color: #fff;
+  box-shadow: 0 9px 18px rgba(87, 80, 224, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  font-family: var(--font-family-display);
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.brand-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
 }
 
 .brand-title {
@@ -112,9 +150,13 @@ function isNavActive(item) {
 }
 
 .nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   color: var(--text-secondary);
   text-decoration: none;
-  font-size: 0.9rem;
+  min-height: 38px;
+  font-size: 0.88rem;
   border-radius: 999px;
   padding: 8px 14px;
   transition: all var(--duration-fast) var(--ease-smooth);
@@ -127,6 +169,13 @@ function isNavActive(item) {
   box-shadow: var(--atlas-nav-active-shadow);
 }
 
+.nav-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+
 @media (max-width: 900px) {
   .nav-inner {
     padding: 12px 16px;
@@ -136,6 +185,7 @@ function isNavActive(item) {
 
   .brand-block {
     min-width: 0;
+    justify-content: flex-start;
   }
 
   .nav-cluster {
@@ -145,7 +195,36 @@ function isNavActive(item) {
 
   .nav-links {
     flex: 1;
+    min-width: 0;
     overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-item {
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .nav-links {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    overflow: visible;
+    border-radius: var(--atlas-radius-md);
+  }
+
+  .nav-item {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    justify-content: center;
+    padding: 8px 6px;
+    white-space: nowrap;
   }
 }
 </style>

@@ -518,7 +518,6 @@ function appendLog(kind, message, event = null) {
   display: grid;
   grid-template-columns: minmax(0, 1.32fr) minmax(320px, 0.68fr);
   gap: 18px;
-  min-height: calc(100vh - 168px);
 }
 
 .essay-panel {

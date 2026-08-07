@@ -4146,11 +4146,6 @@ function getQuestionKindLabel(kind) {
   font-size: 12px;
 }
 
-.reading-coach-panel__status.is-error,
-.reading-coach-panel__error {
-  color: var(--atlas-danger);
-}
-
 .reading-coach-panel__messages {
   display: grid;
   flex: 1;

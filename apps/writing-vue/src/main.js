@@ -71,6 +71,11 @@ const router = createRouter({
             component: () => import('./views/HistoryPage.vue')
         },
         {
+            path: '/agent',
+            name: 'AgentWorkspace',
+            component: () => import('./views/AgentWorkspacePage.vue')
+        },
+        {
             path: '/settings',
             name: 'Settings',
             component: () => import('./views/SettingsPage.vue')

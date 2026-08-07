@@ -625,7 +625,6 @@ function writeNew() {
 .p-6 { padding: 24px; }
 .w-full { width: 100%; }
 
-.text-primary { color: var(--atlas-accent); }
 .text-secondary { color: var(--atlas-ink-soft); }
 .font-bold { font-weight: 600; }
 .font-normal { font-weight: 400; }

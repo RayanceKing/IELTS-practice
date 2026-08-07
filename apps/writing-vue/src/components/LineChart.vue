@@ -83,6 +83,10 @@ const props = defineProps({
     type: String,
     default: ' 分'
   },
+  scorePrefix: {
+    type: String,
+    default: ''
+  },
   axisLabelDecimals: {
     type: Number,
     default: 1
@@ -113,7 +117,7 @@ const getYPos = (val) => {
 
 const formatAxisLabel = (value) => Number(value || 0).toFixed(Math.max(0, Number(props.axisLabelDecimals || 0)))
 
-const formatPointValue = (value) => `${Number(value || 0).toFixed(Math.max(0, Number(props.axisLabelDecimals || 0)))}${props.scoreSuffix}`
+const formatPointValue = (value) => `${props.scorePrefix}${Number(value || 0).toFixed(Math.max(0, Number(props.axisLabelDecimals || 0)))}${props.scoreSuffix}`
 
 const visibleHistoryData = computed(() => props.historyData.slice(-15))
 
@@ -154,6 +158,9 @@ const pathD = computed(() => {
 const areaD = computed(() => {
   if (!pathD.value) return ''
   const bottomY = height - padding.bottom
+  if (points.value.length === 1) {
+    return `${pathD.value} L ${width - padding.right} ${bottomY} L ${padding.left} ${bottomY} Z`
+  }
   const startX = points.value[0].x
   const endX = points.value[points.value.length - 1].x
   return `${pathD.value} L ${endX} ${bottomY} L ${startX} ${bottomY} Z`

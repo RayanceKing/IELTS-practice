@@ -1,7 +1,11 @@
 <template>
   <div id="overview-view" :class="['view', 'hero-panel', 'hero-section', { active: activeView === 'overview' }]" data-reading-overview>
     <div class="hero-panel__header">
-      <h2 class="hero-panel__title heading-serif">学习总览</h2>
+      <div>
+        <p class="hero-panel__eyebrow">Reading workspace</p>
+        <h2 class="hero-panel__title heading-serif">学习总览</h2>
+        <p class="hero-panel__subtitle">从题库浏览到套题练习，保持稳定的学习节奏。</p>
+      </div>
     </div>
     <div class="category-grid" id="category-overview">
       <div class="overview-section-heading">
@@ -40,7 +44,7 @@
         :data-reading-category-card="entry.category"
       >
         <div class="category-header">
-          <div class="category-icon" aria-hidden="true">阅读</div>
+          <div class="category-icon" aria-hidden="true">{{ entry.category }}</div>
           <div>
             <div class="category-title">{{ entry.category }} 阅读</div>
             <div class="category-meta">{{ entry.total }} 篇</div>

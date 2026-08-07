@@ -14,12 +14,17 @@
       </div>
     </header>
 
-    <div v-if="error" class="inline-message inline-message-error">
+    <div v-if="error" class="inline-message inline-message-error" role="alert" aria-live="assertive">
       <span>{{ error }}</span>
       <button class="btn-text" type="button" @click="loadSuite">重试</button>
     </div>
 
-    <div v-if="loading" class="surface loading">正在加载套题状态...</div>
+    <div v-if="loading" class="surface loading" role="status" aria-live="polite" aria-busy="true">正在加载套题状态...</div>
+
+    <div v-else-if="!suite && !error" class="surface suite-empty-state" role="status">
+      <p>当前没有可显示的套题 session。</p>
+      <router-link class="btn btn-secondary" to="/library">返回练习库</router-link>
+    </div>
 
     <section v-if="!loading && suite" class="suite-workspace">
       <aside class="surface suite-summary" data-reading-suite-summary>
@@ -192,6 +197,7 @@ function passageSessionId(entry) {
 function getStatusLabel(status) {
   if (status === 'completed') return '已完成'
   if (status === 'cancelled') return '已取消'
+  if (status === 'interrupted') return '已中断'
   return '进行中'
 }
 

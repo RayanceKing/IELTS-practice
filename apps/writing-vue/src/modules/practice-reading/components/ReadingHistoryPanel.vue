@@ -102,10 +102,6 @@
           id="practice-custom-card"
           class="practice-custom-card"
           :class="{ 'is-flipped': practiceWidgetSelectorOpen }"
-          role="button"
-          tabindex="0"
-          aria-label="打开自定义练习组件选择"
-          :aria-pressed="practiceWidgetSelectorOpen ? 'true' : 'false'"
         >
           <div class="practice-custom-card__rotor">
             <div class="practice-trend-card__face practice-custom-card__front">
@@ -423,6 +419,7 @@
               :data-record-id="record.id"
               :tabindex="bulkDeleteMode ? '0' : '-1'"
               aria-label="选择练习记录"
+              @click.stop
               @change.stop="$emit('toggle-history-selection', record.id)"
             >
           </div>
@@ -444,24 +441,26 @@
               </small>
             </div>
           </div>
-          <div class="record-percentage-container">
-            <div class="record-percentage" :style="{ color: getScoreColor(historyPercentage(record)) }">
-              {{ historyPercentage(record) }}%
+          <div class="record-result">
+            <div class="record-percentage-container">
+              <div class="record-percentage" :style="{ color: getScoreColor(historyPercentage(record)) }">
+                {{ historyPercentage(record) }}%
+              </div>
             </div>
-          </div>
-          <div v-if="!bulkDeleteMode" class="record-actions-container">
-            <button
-              type="button"
-              class="delete-record-btn"
-              title="删除此记录"
-              :aria-label="`删除练习记录: ${record.title || '无标题'}`"
-              data-record-action="delete"
-              :data-record-id="record.id"
-              :disabled="historyBusy"
-              @click.stop="$emit('delete-history-record', record)"
-            >
-              <span aria-hidden="true">删除</span>
-            </button>
+            <div v-if="!bulkDeleteMode" class="record-actions-container">
+              <button
+                type="button"
+                class="delete-record-btn"
+                title="删除此记录"
+                :aria-label="`删除练习记录: ${record.title || '无标题'}`"
+                data-record-action="delete"
+                :data-record-id="record.id"
+                :disabled="historyBusy"
+                @click.stop="$emit('delete-history-record', record)"
+              >
+                <span aria-hidden="true">删除</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

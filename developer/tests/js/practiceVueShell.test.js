@@ -34,14 +34,15 @@ function testVueRoutesAndShell() {
     "path: '/reading/:assetId'",
     "path: '/reading-suite/:sessionId'",
     "path: '/reading/:assetId/review/:sessionId'",
-    "path: '/writing'"
+    "path: '/writing'",
+    "path: '/agent'"
   ]) has(routes, route, 'Vue practice route')
 
   has(app, 'showShellNav', 'shared App shell nav gate')
   has(app, 'framelessRouteNames', 'immersive-only shell escape hatch')
   lacks(app, "'PracticeLibrary'", 'Library must remain inside the shared App shell')
   has(nav, '<router-link to="/" class="brand-block">', 'product brand route')
-  for (const label of ["label: '阅读'", "label: '写作'", "label: '历史'", "label: '设置'"]) {
+  for (const label of ["label: '阅读'", "label: '写作'", "label: 'Agent'", "label: '历史'", "label: '设置'"]) {
     has(nav, label, 'global product navigation')
   }
 }

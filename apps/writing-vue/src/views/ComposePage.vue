@@ -808,7 +808,6 @@ async function submitEssay() {
   padding: 5px 11px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--atlas-accent) 24%, var(--atlas-rim));
-  background: var(--atlas-accent-soft);
   color: var(--atlas-accent);
   font-size: 11px;
   font-weight: 700;
@@ -1376,10 +1375,6 @@ async function submitEssay() {
 
   .editor-head__stats {
     align-items: stretch;
-  }
-
-  .practice-left {
-    padding: 18px;
   }
 
   .essay-input {

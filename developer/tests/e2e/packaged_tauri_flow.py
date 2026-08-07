@@ -30,6 +30,7 @@ SETTINGS_SCREENSHOT = ROOT / "developer/tests/e2e/reports/settings-current.png"
 HISTORY_SCREENSHOT = ROOT / "developer/tests/e2e/reports/history-current.png"
 COMPOSE_SCREENSHOT = ROOT / "developer/tests/e2e/reports/compose-current.png"
 TOPICS_SCREENSHOT = ROOT / "developer/tests/e2e/reports/topics-current.png"
+AGENT_SCREENSHOT = ROOT / "developer/tests/e2e/reports/agent-current.png"
 READING_P95_BUDGET_MS = 3000
 
 
@@ -341,7 +342,7 @@ def main() -> int:
         driver.create(str(app.resolve()))
         checks["launch"] = "passed"
         wait_for_vue(driver)
-        for route in ("#/writing", "#/topics", "#/settings", "#/history", "#/"):
+        for route in ("#/writing", "#/topics", "#/settings", "#/history", "#/agent", "#/"):
             reached = driver.script("location.hash=arguments[0]; return location.hash === arguments[0]", [route])
             if not reached: raise RuntimeError(f"Vue hash route failed: {route}")
         checks["vueRoutes"] = "passed"
@@ -360,6 +361,9 @@ def main() -> int:
             ),
             "history": capture_route_visual(
                 driver, "#/history", ".history-page", HISTORY_SCREENSHOT
+            ),
+            "agent": capture_route_visual(
+                driver, "#/agent", "[data-agent-workspace]", AGENT_SCREENSHOT
             ),
         }
         checks["uiRouteVisuals"] = "passed"

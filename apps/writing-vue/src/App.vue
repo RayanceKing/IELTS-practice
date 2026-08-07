@@ -53,9 +53,9 @@ const routeViewKey = computed(() => route.path || String(route.name || route.ful
 
 .app-main {
   flex: 1;
-  width: min(1520px, 100%);
+  width: min(var(--shui-shell-max-width), 100%);
   margin: 0 auto;
-  padding: 24px 32px 48px;
+  padding: 28px clamp(16px, 4vw, 40px) 56px;
   position: relative;
   z-index: 1;
 }
@@ -80,7 +80,7 @@ const routeViewKey = computed(() => route.path || String(route.name || route.ful
 
 @media (max-width: 900px) {
   .app-main {
-    padding: 22px 16px 32px;
+    padding: 22px 16px 36px;
   }
 }
 </style>

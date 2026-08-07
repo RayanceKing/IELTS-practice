@@ -216,8 +216,11 @@
             <label>题目图片</label>
             <div
               class="image-uploader"
+              role="button"
+              tabindex="0"
               :class="{ 'has-image': editorForm.imagePreview }"
               @click="triggerFileInput"
+              @keydown.enter.space.prevent="triggerFileInput"
             >
               <div v-if="editorForm.imagePreview" class="preview-container">
                 <img :src="editorForm.imagePreview" />
@@ -1262,6 +1265,7 @@ onBeforeUnmount(() => {
 .image-uploader,
 .file-drop-zone {
   position: relative;
+  display: block;
   border: 1px dashed var(--atlas-accent-ring);
   border-radius: var(--atlas-radius-sm);
   background: var(--lg-bg-interactive);
@@ -1284,9 +1288,15 @@ onBeforeUnmount(() => {
 }
 
 .image-uploader:hover:not(.is-disabled),
+.image-uploader:focus-within,
 .file-drop-zone:hover {
   border-color: var(--atlas-accent);
   background: var(--lg-bg-elevated);
+}
+
+.image-uploader:focus-within {
+  outline: 3px solid var(--atlas-accent-ring);
+  outline-offset: 3px;
 }
 
 .image-uploader.is-disabled {

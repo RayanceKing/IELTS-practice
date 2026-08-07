@@ -206,7 +206,7 @@ import {
 import { useReadingHistory } from '@/modules/practice-reading/useReadingHistory'
 import { useReadingLibrary } from '@/modules/practice-reading/useReadingLibrary'
 import { useReadingSuite } from '@/modules/practice-reading/useReadingSuite'
-import { historyPercentage, sortReadingHistory } from '@/modules/practice-reading/historyStats'
+import { historyPercentage, safeDateMs, sortReadingHistory } from '@/modules/practice-reading/historyStats'
 import { useTauriPreferences } from '@/composables/useTauriPreferences.js'
 import { createEndless, createMemorize } from '@/api/modes-repository.js'
 import { getReadingPdfDataUrl, pickReadingPracticeAsset } from '@/api/reading-repository.js'
@@ -1565,11 +1565,16 @@ function updateSegmentedIndicators() {
   min-width: 0;
 }
 
+.practice-library [hidden] {
+  display: none !important;
+}
+
 .practice-library .library-workspace-header {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 20px;
+  min-width: 0;
 }
 
 .practice-library .library-workspace-header__copy {
@@ -1621,6 +1626,7 @@ function updateSegmentedIndicators() {
 .practice-library .library-view-tabs {
   justify-content: flex-end;
   max-width: 100%;
+  min-width: 0;
 }
 
 .practice-library .library-view-tabs__button,
@@ -1674,6 +1680,49 @@ function updateSegmentedIndicators() {
   margin-bottom: 20px;
 }
 
+.practice-library .browse-title-bar {
+  position: relative;
+}
+
+.practice-library .browse-title-trigger {
+  display: inline-grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+}
+
+.practice-library .browse-title-trigger .ui-emoji-icon,
+.practice-library .browse-title-trigger svg {
+  width: 18px;
+  height: 18px;
+}
+
+.practice-library .browse-preference-panel {
+  position: absolute;
+  top: 48px;
+  left: 0;
+  z-index: 8;
+  padding: 10px 12px;
+}
+
+.practice-library .browse-preference-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.practice-library .practice-history-header {
+  justify-content: flex-start;
+  gap: 20px;
+}
+
+.practice-library .practice-history-header > .hero-panel__actions:last-child {
+  margin-left: auto;
+}
+
 .practice-library .hero-panel__title,
 .practice-library .overview-section-title,
 .practice-library .backup-list-title {
@@ -1701,6 +1750,10 @@ function updateSegmentedIndicators() {
 
 .practice-library .category-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.practice-library .practice-history-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .practice-library .overview-section-heading {
@@ -1820,6 +1873,17 @@ function updateSegmentedIndicators() {
   flex: 1 1 auto;
 }
 
+.practice-library .search-leading-icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  z-index: 1;
+  width: 17px;
+  height: 17px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
 .practice-library .browse-sort-wrapper {
   flex: 0 0 min(190px, 40%);
   min-width: 130px;
@@ -1832,6 +1896,23 @@ function updateSegmentedIndicators() {
   min-height: 42px;
   padding: 0 38px 0 14px;
   font: inherit;
+}
+
+.practice-library .search-input {
+  padding-left: 42px;
+}
+
+.practice-library .practice-history-search-row {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.practice-library .practice-history-search-row .search-input {
+  padding-left: 14px;
+}
+
+.practice-library .practice-history-search-row .search-input-wrap {
+  width: 100%;
 }
 
 .practice-library .search-clear-btn,
@@ -1887,6 +1968,18 @@ function updateSegmentedIndicators() {
   min-height: 180px;
   padding: 24px;
   text-align: center;
+}
+
+.practice-library .exam-list-empty-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+}
+
+.practice-library .exam-list-empty-icon svg {
+  width: 24px;
+  height: 24px;
 }
 
 .practice-library .practice-stats,
@@ -1951,6 +2044,7 @@ function updateSegmentedIndicators() {
 .practice-library .practice-trend-card__rotor,
 .practice-library .practice-custom-card__rotor {
   position: relative;
+  height: 100%;
   min-height: inherit;
   transform-style: preserve-3d;
   transition: transform var(--lg-duration-normal) var(--lg-easing-spring);
@@ -1964,6 +2058,7 @@ function updateSegmentedIndicators() {
   display: grid;
   align-content: start;
   gap: 14px;
+  height: 100%;
   min-height: inherit;
   padding: 18px;
   backface-visibility: hidden;
@@ -1989,6 +2084,9 @@ function updateSegmentedIndicators() {
 
 .practice-library #practice-trend-canvas,
 .practice-library #practice-radar-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
   display: block;
   width: 100%;
   height: 100%;
@@ -2056,6 +2154,23 @@ function updateSegmentedIndicators() {
   gap: 14px;
   min-width: 0;
   padding: 16px;
+}
+
+.practice-library .record-result {
+  display: contents;
+}
+
+.practice-library .practice-record-title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.practice-library .practice-history-list > .loading,
+.practice-library .practice-history-list > .history-empty-placeholder {
+  grid-column: 1 / -1;
 }
 
 .practice-library .record-meta-line {
@@ -2282,10 +2397,16 @@ function updateSegmentedIndicators() {
   }
 
   .practice-library .library-view-tabs {
+    width: 100%;
+    min-width: 0;
     flex-wrap: nowrap;
     justify-content: flex-start;
     overflow-x: auto;
-    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .practice-library .library-view-tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .practice-library .library-view-tabs__button {
@@ -2293,7 +2414,8 @@ function updateSegmentedIndicators() {
   }
 
   .practice-library .category-grid,
-  .practice-library .practice-insights-grid {
+  .practice-library .practice-insights-grid,
+  .practice-library .practice-history-list {
     grid-template-columns: 1fr;
   }
 
@@ -2310,9 +2432,50 @@ function updateSegmentedIndicators() {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .practice-library .record-actions-container,
-  .practice-library .record-percentage-container {
+  .practice-library .history-item .record-info,
+  .practice-library .history-item .record-result {
+    grid-column: 1 / -1;
+  }
+
+  .practice-library .history-item:has(.record-selection:not(.record-selection-hidden)) .record-info {
     grid-column: 2;
+  }
+
+  .practice-library .history-item:has(.record-selection:not(.record-selection-hidden)) .record-result {
+    grid-column: 2;
+  }
+
+  .practice-library .practice-history-header {
+    gap: 12px;
+  }
+
+  .practice-library .practice-history-header > .hero-panel__actions {
+    width: 100%;
+  }
+
+  .practice-library .practice-history-header > .hero-panel__actions:last-child {
+    margin-left: 0;
+  }
+
+  .practice-library .record-result {
+    display: flex;
+    grid-column: 2;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .practice-library .record-actions-container {
+    display: flex;
+    min-width: 0;
+    margin-left: auto;
+  }
+
+  .practice-library .record-percentage-container,
+  .practice-library .record-actions-container {
+    grid-column: auto;
   }
 }
 
@@ -2337,6 +2500,13 @@ function updateSegmentedIndicators() {
   .practice-library .clock-overlay-inner {
     min-width: 0;
     width: 100%;
+  }
+}
+
+@media (max-width: 360px) {
+  .practice-library .practice-custom-card__front > .practice-trend-card__header {
+    align-items: flex-start;
+    flex-wrap: wrap;
   }
 }
 </style>
