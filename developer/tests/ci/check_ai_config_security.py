@@ -11,7 +11,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 VUE_ROOT = ROOT / "apps/writing-vue/src"
-AI_RUST = ROOT / "src-tauri/src/commands/ai.rs"
+AI_COMMANDS_RUST = ROOT / "src-tauri/src/commands/ai.rs"
+AI_CONFIG_RUST = ROOT / "src-tauri/src/ai/config.rs"
 AI_SETTINGS_RUST = ROOT / "crates/ielts-db/src/settings/mod.rs"
 WRITING_RUST = ROOT / "src-tauri/src/commands/writing.rs"
 TAURI_LIB = ROOT / "src-tauri/src/lib.rs"
@@ -66,7 +67,8 @@ def check_rust_owned_crud(failures: list[str]) -> None:
 
 
 def check_runtime_contract(failures: list[str]) -> None:
-    commands = AI_RUST.read_text(encoding="utf-8", errors="replace")
+    commands = AI_COMMANDS_RUST.read_text(encoding="utf-8", errors="replace")
+    config = AI_CONFIG_RUST.read_text(encoding="utf-8", errors="replace")
     settings = AI_SETTINGS_RUST.read_text(encoding="utf-8", errors="replace")
     client = CLIENT.read_text(encoding="utf-8", errors="replace")
     repository = SETTINGS_REPOSITORY.read_text(encoding="utf-8", errors="replace")
@@ -80,10 +82,14 @@ def check_runtime_contract(failures: list[str]) -> None:
         fail("Rust AI settings owner does not reconcile the persisted default", failures)
     if "reconcile_default_ai_config_with_secret_availability" not in settings:
         fail("Rust AI settings owner does not distinguish a local vault key from a secret reference", failures)
-    if "pub fn reconcile_default_ai_config_with_vault" not in commands:
-        fail("Rust AI command layer does not reconcile the active configuration against the local vault", failures)
-    if "list_ai_configs_with_secret_availability" not in commands:
-        fail("Rust AI command layer exposes backup-restored secret references as usable configs", failures)
+    has_vault_reconciliation = (
+        "fn reconcile_default_ai_config_with_vault" in config
+        or "fn reconcile_default_ai_config_with_refs" in config
+    )
+    if not has_vault_reconciliation or "list_ai_configs_with_vault" not in commands:
+        fail("Rust AI adapter does not reconcile the active configuration against the local vault", failures)
+    if "list_ai_configs_with_secret_availability" not in config:
+        fail("Rust AI adapter exposes backup-restored secret references as usable configs", failures)
     if "config_id: String" not in commands or "load_runtime_for_config(&db, &vault, &config_id)" not in commands:
         fail("AI provider test does not target the user-selected configuration", failures)
     if "testAiProvider(configId)" not in repository or "async test(id)" not in client:

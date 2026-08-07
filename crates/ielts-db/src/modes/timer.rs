@@ -171,7 +171,8 @@ pub fn save_reading_timer_state(
     let fallback = chrono::Utc::now().timestamp_millis();
     let mut state = snapshot.clone().normalize(fallback);
     state.source = scope.source().into();
-    let json = serde_json::to_string(&state).map_err(|error| DbError::Message(error.to_string()))?;
+    let json =
+        serde_json::to_string(&state).map_err(|error| DbError::Message(error.to_string()))?;
     conn.execute(
         "INSERT INTO reading_timer_states(scope, owner_id, state_json, updated_at)
          VALUES (?1, ?2, ?3, ?4)
@@ -223,11 +224,7 @@ pub fn delete_reading_timer_state(
     Ok(())
 }
 
-fn ensure_timer_owner(
-    conn: &Connection,
-    scope: TimerOwnerScope,
-    owner_id: &str,
-) -> DbResult<()> {
+fn ensure_timer_owner(conn: &Connection, scope: TimerOwnerScope, owner_id: &str) -> DbResult<()> {
     let valid = match scope {
         TimerOwnerScope::Attempt => conn
             .query_row(

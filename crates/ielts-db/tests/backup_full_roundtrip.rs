@@ -2,7 +2,7 @@ use ielts_db::{
     create_backup_package, import_backup, list_ai_configs,
     list_ai_configs_with_secret_availability, migrate, open_connection, put_secret_ref,
     reconcile_default_ai_config_with_secret_availability, set_default_ai_config, upsert_ai_config,
-    upsert_setting, DbOpenOptions,
+    upsert_setting, validate_backup, DbOpenOptions,
 };
 use ielts_domain::dto::{AiConfigDto, BackupPackage, BackupSqlValue};
 use rusqlite::Connection;
@@ -144,6 +144,24 @@ fn seed_complete_user_state(conn: &Connection) {
           ('message-1', 'thread-1', 'user', 'Why A?', '{"questionId":"q1"}', 'completed', '2026-01-05T00:00:10Z', 1),
           ('message-2', 'thread-1', 'assistant', 'Because the passage says so.', NULL, 'completed', '2026-01-05T00:00:20Z', 2);
 
+        INSERT INTO agent_runs (
+          id, provider_id, model, status, rounds, tool_call_count, result_json, error_json,
+          created_at, updated_at, completed_at
+        ) VALUES (
+          'agent-run-1', 'openai-compatible', 'gpt-test', 'completed', 2, 1,
+          '{"model":"gpt-test","hasContent":true}', NULL,
+          '2026-01-05T01:00:00Z', '2026-01-05T01:00:02Z', '2026-01-05T01:00:02Z'
+        );
+
+        INSERT INTO agent_tool_calls (
+          run_id, call_id, sequence, round_index, tool_name, status, arguments_json,
+          result_json, error_json, started_at, completed_at
+        ) VALUES (
+          'agent-run-1', 'tool-call-1', 1, 1, 'read_file', 'succeeded',
+          '{"path":"notes.txt"}', '{"path":"notes.txt","bytes":5,"sha256":"abc"}', NULL,
+          '2026-01-05T01:00:01Z', '2026-01-05T01:00:01Z'
+        );
+
         INSERT INTO vocabulary_items (
           id, term, normalized_term, definition, phonetic, part_of_speech, example,
           source_asset_id, source_attempt_id, tags_json, created_at, updated_at
@@ -202,7 +220,7 @@ fn full_backup_roundtrip_preserves_every_user_truth_table() {
         .unwrap();
 
     let package = create_backup_package(&source, "roundtrip-test").unwrap();
-    assert_eq!(package.manifest.schema_version, 6);
+    assert_eq!(package.manifest.schema_version, 7);
     assert_eq!(
         package.manifest.table_count as usize,
         package.database.len()
@@ -414,6 +432,8 @@ fn legacy_v2_snapshot_without_writing_topics_remains_restorable() {
             && table.name != "writing_prompts"
             && table.name != "history_retention_policy"
             && table.name != "reading_timer_states"
+            && table.name != "agent_runs"
+            && table.name != "agent_tool_calls"
     });
     legacy.manifest.table_count = legacy.database.len() as u32;
     legacy.manifest.row_count = legacy
@@ -468,9 +488,12 @@ fn legacy_v4_snapshot_projects_prompt_settings_inside_restore_transaction() {
     .unwrap();
     let mut legacy = create_backup_package(&source, "v4-prompt-source").unwrap();
     legacy.manifest.schema_version = 4;
-    legacy
-        .database
-        .retain(|table| table.name != "writing_prompts" && table.name != "reading_timer_states");
+    legacy.database.retain(|table| {
+        table.name != "writing_prompts"
+            && table.name != "reading_timer_states"
+            && table.name != "agent_runs"
+            && table.name != "agent_tool_calls"
+    });
     legacy.manifest.table_count = legacy.database.len() as u32;
     legacy.manifest.row_count = legacy
         .database
@@ -503,9 +526,11 @@ fn legacy_v5_snapshot_without_reading_timers_remains_restorable() {
     let mut legacy = create_backup_package(&source, "timer-v5-source").unwrap();
     legacy.manifest.schema_version = 5;
     legacy.manifest.database_schema_version = 9;
-    legacy
-        .database
-        .retain(|table| table.name != "reading_timer_states");
+    legacy.database.retain(|table| {
+        table.name != "reading_timer_states"
+            && table.name != "agent_runs"
+            && table.name != "agent_tool_calls"
+    });
     legacy.manifest.table_count = legacy.database.len() as u32;
     legacy.manifest.row_count = legacy
         .database
@@ -526,6 +551,66 @@ fn legacy_v5_snapshot_without_reading_timers_remains_restorable() {
             .unwrap(),
         0
     );
+}
+
+#[test]
+fn legacy_v6_snapshot_without_agent_tables_remains_restorable() {
+    let dir = tempdir().unwrap();
+    let source = open_v2(dir.path().join("agent-v6-source.db"));
+    seed_complete_user_state(&source);
+    let mut legacy = create_backup_package(&source, "agent-v6-source").unwrap();
+    legacy.manifest.schema_version = 6;
+    legacy.manifest.database_schema_version = 10;
+    legacy
+        .database
+        .retain(|table| table.name != "agent_runs" && table.name != "agent_tool_calls");
+    legacy.manifest.table_count = legacy.database.len() as u32;
+    legacy.manifest.row_count = legacy
+        .database
+        .iter()
+        .map(|table| table.rows.len() as u64)
+        .sum::<u64>()
+        + legacy.secret_refs.len() as u64;
+    rechecksum(&mut legacy);
+
+    let target = open_v2(dir.path().join("agent-v6-target.db"));
+    seed_complete_user_state(&target);
+    let report = import_backup(&target, &legacy, false).unwrap();
+    assert!(report.ok, "{:?}", report.errors);
+    assert_eq!(
+        target
+            .query_row("SELECT COUNT(*) FROM agent_runs", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        0,
+        "a v6 backup has no Agent audit rows and must not retain target-only rows"
+    );
+}
+
+#[test]
+fn backup_rejects_dangling_agent_tool_call_reference() {
+    let dir = tempdir().unwrap();
+    let source = open_v2(dir.path().join("agent-reference-source.db"));
+    seed_complete_user_state(&source);
+    let mut package = create_backup_package(&source, "agent-reference-source").unwrap();
+    let calls = package
+        .database
+        .iter_mut()
+        .find(|table| table.name == "agent_tool_calls")
+        .unwrap();
+    let run_id = calls
+        .columns
+        .iter()
+        .position(|column| column == "run_id")
+        .unwrap();
+    calls.rows[0][run_id] = BackupSqlValue::Text("missing-run".into());
+    rechecksum(&mut package);
+
+    let error = validate_backup(&package).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("dangling reference agent_tool_calls.run_id=missing-run"));
 }
 
 #[test]

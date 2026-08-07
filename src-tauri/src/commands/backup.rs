@@ -273,7 +273,7 @@ pub fn import_backup_path(
         Ok(p) => p,
         Err(e) => return CommandResponse::failure(map_db_err(e)),
     };
-    match db.with_conn(|conn| {
+    let result = db.with_conn(|conn| {
         let mut report = ielts_db::import_backup(conn, &package, dry_run)?;
         if report.ok && report.secret_refs_imported > 0 {
             report.warnings.push(
@@ -281,8 +281,11 @@ pub fn import_backup_path(
                     .into(),
             );
         }
+        Ok(report)
+    });
+    let result = result.and_then(|mut report| {
         if report.ok && !dry_run {
-            match crate::commands::ai::list_ai_configs_with_vault(conn, vault.inner()) {
+            match crate::ai::list_ai_configs_with_vault(db.inner(), vault.inner()) {
                 Ok(configs) => {
                     let unavailable = configs.iter().filter(|config| !config.has_secret).count();
                     if unavailable > 0 {
@@ -295,7 +298,7 @@ pub fn import_backup_path(
                     // `import_backup` has already committed its validated
                     // snapshot. Never turn that into a false failed restore;
                     // instead disable AI until the user repairs the metadata.
-                    ielts_db::set_default_ai_config(conn, None)?;
+                    db.with_conn(|conn| ielts_db::set_default_ai_config(conn, None))?;
                     report.warnings.push(
                         "恢复后的 AI 配置无法在本机验证，已取消默认状态；请在设置中检查并重新填写 API Key。"
                             .into(),
@@ -304,7 +307,8 @@ pub fn import_backup_path(
             }
         }
         Ok(report)
-    }) {
+    });
+    match result {
         Ok(report) => CommandResponse::success(report),
         Err(e) => CommandResponse::failure(map_db_err(e)),
     }

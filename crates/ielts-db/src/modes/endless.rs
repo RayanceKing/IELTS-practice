@@ -11,13 +11,13 @@ use crate::history::prune_terminal_attempts_in_transaction;
 use crate::modes::suite::{
     frequency_matches, list_answerable_reading_assets, normalize_category, FrequencyScope,
 };
-use crate::reading::attempt::{
-    save_reading_draft_in_scope, submit_reading_attempt_in_scope, ReadingDraftCommand,
-    ReadingQuestionProgress, ReadingSubmitCommand, ReadingSubmitResult,
-};
 use crate::modes::timer::{
     delete_reading_timer_state, load_reading_timer_state, save_reading_timer_state,
     TimerOwnerScope, TimerState,
+};
+use crate::reading::attempt::{
+    save_reading_draft_in_scope, submit_reading_attempt_in_scope, ReadingDraftCommand,
+    ReadingQuestionProgress, ReadingSubmitCommand, ReadingSubmitResult,
 };
 use crate::sqlite::{DbError, DbResult};
 
@@ -270,12 +270,7 @@ pub fn save_endless_passage_draft(
         Some(&session.id),
     )?;
     if let Some(snapshot) = cmd.timer_snapshot.as_ref() {
-        let timer = save_reading_timer_state(
-            &tx,
-            TimerOwnerScope::Endless,
-            &session.id,
-            snapshot,
-        )?;
+        let timer = save_reading_timer_state(&tx, TimerOwnerScope::Endless, &session.id, snapshot)?;
         session.timer = Some(timer);
     }
     session.current_attempt_id = Some(attempt_id);
@@ -400,12 +395,8 @@ fn submit_endless_passage_in_transaction(
     let mut session = load(conn, &cmd.session_id)?;
     ensure_current_endless_asset(&session, &cmd.asset_id)?;
     if let Some(snapshot) = cmd.timer_snapshot.as_ref() {
-        let timer = save_reading_timer_state(
-            conn,
-            TimerOwnerScope::Endless,
-            &session.id,
-            snapshot,
-        )?;
+        let timer =
+            save_reading_timer_state(conn, TimerOwnerScope::Endless, &session.id, snapshot)?;
         session.timer = Some(timer);
     }
 
@@ -453,12 +444,7 @@ fn submit_endless_passage_in_transaction(
         delete_reading_timer_state(conn, TimerOwnerScope::Endless, &session.id)?;
     } else {
         let timer = new_endless_timer(chrono::Utc::now().timestamp_millis());
-        let timer = save_reading_timer_state(
-            conn,
-            TimerOwnerScope::Endless,
-            &session.id,
-            &timer,
-        )?;
+        let timer = save_reading_timer_state(conn, TimerOwnerScope::Endless, &session.id, &timer)?;
         session.timer = Some(timer);
     }
     session.updated_at = chrono::Utc::now().to_rfc3339();
@@ -522,30 +508,30 @@ fn persist(conn: &Connection, session: &EndlessSession) -> DbResult<()> {
 fn load(conn: &Connection, id: &str) -> DbResult<EndlessSession> {
     let mut session = conn
         .query_row(
-        "SELECT id, status, pool_policy_json, pool_json, current_asset_id, current_attempt_id,
+            "SELECT id, status, pool_policy_json, pool_json, current_asset_id, current_attempt_id,
                 completed_asset_ids_json, created_at, updated_at
          FROM endless_sessions WHERE id = ?1",
-        params![id],
-        |r| {
-            let policy_json: String = r.get(2)?;
-            let pool_json: String = r.get(3)?;
-            let completed_json: String = r.get(6)?;
-            Ok(EndlessSession {
-                id: r.get(0)?,
-                status: parse_status(&r.get::<_, String>(1)?),
-                pool_policy: serde_json::from_str(&policy_json).unwrap_or(EndlessPoolPolicy {
-                    categories: vec![],
-                    frequency_scope: None,
-                }),
-                pool: serde_json::from_str(&pool_json).unwrap_or_default(),
-                current_asset_id: r.get(4)?,
-                current_attempt_id: r.get(5)?,
-                timer: None,
-                completed_asset_ids: serde_json::from_str(&completed_json).unwrap_or_default(),
-                created_at: r.get(7)?,
-                updated_at: r.get(8)?,
-            })
-        },
+            params![id],
+            |r| {
+                let policy_json: String = r.get(2)?;
+                let pool_json: String = r.get(3)?;
+                let completed_json: String = r.get(6)?;
+                Ok(EndlessSession {
+                    id: r.get(0)?,
+                    status: parse_status(&r.get::<_, String>(1)?),
+                    pool_policy: serde_json::from_str(&policy_json).unwrap_or(EndlessPoolPolicy {
+                        categories: vec![],
+                        frequency_scope: None,
+                    }),
+                    pool: serde_json::from_str(&pool_json).unwrap_or_default(),
+                    current_asset_id: r.get(4)?,
+                    current_attempt_id: r.get(5)?,
+                    timer: None,
+                    completed_asset_ids: serde_json::from_str(&completed_json).unwrap_or_default(),
+                    created_at: r.get(7)?,
+                    updated_at: r.get(8)?,
+                })
+            },
         )
         .map_err(|_| DbError::Message(format!("endless not found: {id}")))?;
     session.timer = load_reading_timer_state(conn, TimerOwnerScope::Endless, id)?;

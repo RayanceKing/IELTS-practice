@@ -1,17 +1,19 @@
 //! Annotations, dictionary, vocab, coach Tauri commands (Phase 8).
 
+use ielts_application::{ApplicationError, CoachService};
 use ielts_domain::dto::CommandResponse;
 use ielts_domain::ErrorEnvelope;
 use tauri::State;
 
+use crate::ai::load_runtime;
+use crate::app::application_store::ApplicationStore;
 use crate::app::state::{AppDb, AppVault};
-use crate::commands::{ai::load_runtime, coach_provider};
 use ielts_db::{
-    append_coach_message, complete_coach_run, delete_annotation, delete_vocab, ensure_coach_thread,
-    import_dictionary, list_annotations, list_coach_messages, list_vocab, lookup_term,
-    record_coach_failure, revalidate_annotations, review_vocab, upsert_annotation, upsert_vocab,
-    AnnotationRecord, AppendCoachMessageCommand, CoachMessage, CoachRunResult, CoachThread,
-    DictionaryEntry, EnsureCoachThreadCommand, ImportDictionaryCommand, RecordCoachFailureCommand,
+    append_coach_message, delete_annotation, delete_vocab, ensure_coach_thread, import_dictionary,
+    list_annotations, list_coach_messages, list_vocab, lookup_term, record_coach_failure,
+    revalidate_annotations, review_vocab, upsert_annotation, upsert_vocab, AnnotationRecord,
+    AppendCoachMessageCommand, CoachMessage, CoachRunResult, CoachThread, DictionaryEntry,
+    EnsureCoachThreadCommand, ImportDictionaryCommand, RecordCoachFailureCommand,
     ReviewVocabCommand, RunCoachCommand, UpsertAnnotationCommand, UpsertVocabCommand,
     VocabularyItem,
 };
@@ -24,6 +26,10 @@ fn map_err(err: ielts_db::DbError) -> ErrorEnvelope {
         context: None,
         cause_id: None,
     }
+}
+
+fn map_application_error(error: ApplicationError) -> ErrorEnvelope {
+    ErrorEnvelope::new(error.code, error.message, error.retryable)
 }
 
 #[tauri::command]
@@ -193,68 +199,14 @@ pub async fn coach_run(
     vault: State<'_, AppVault>,
     cmd: RunCoachCommand,
 ) -> Result<CommandResponse<CoachRunResult>, ErrorEnvelope> {
-    let user_message = match db.with_conn(|conn| {
-        append_coach_message(
-            conn,
-            &AppendCoachMessageCommand {
-                thread_id: cmd.thread_id.clone(),
-                role: "user".into(),
-                content: cmd.content.clone(),
-                structured_payload: cmd.question_context.clone(),
-                status: "completed".into(),
-            },
-        )
-    }) {
-        Ok(message) => message,
-        Err(error) => return Ok(CommandResponse::failure(map_err(error))),
-    };
-    let history = match db.with_conn(|conn| list_coach_messages(conn, &cmd.thread_id, None, 100)) {
-        Ok(history) => history,
-        Err(error) => return Ok(CommandResponse::failure(map_err(error))),
-    };
-    let runtime = match load_runtime(&db, &vault) {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            let envelope = map_err(error);
-            let _ = db.with_conn(|conn| {
-                record_coach_failure(
-                    conn,
-                    &RecordCoachFailureCommand {
-                        thread_id: cmd.thread_id.clone(),
-                        error: serde_json::to_value(&envelope).unwrap_or_default(),
-                        preserve_scores: true,
-                    },
-                )
-            });
-            return Ok(CommandResponse::failure(envelope));
-        }
-    };
-
-    // The database lock is not held across this network future.
-    match coach_provider::answer(&runtime, &history, cmd.question_context.as_ref()).await {
-        Ok((answer, payload)) => match db
-            .with_conn(|conn| complete_coach_run(conn, &cmd.thread_id, &answer, Some(payload)))
-        {
-            Ok(assistant_message) => Ok(CommandResponse::success(CoachRunResult {
-                user_message,
-                assistant_message,
-            })),
-            Err(error) => Ok(CommandResponse::failure(map_err(error))),
-        },
-        Err(error) => {
-            let envelope =
-                ErrorEnvelope::new("coach.provider_failed", error.message, error.retryable);
-            let _ = db.with_conn(|conn| {
-                record_coach_failure(
-                    conn,
-                    &RecordCoachFailureCommand {
-                        thread_id: cmd.thread_id,
-                        error: serde_json::to_value(&envelope).unwrap_or_default(),
-                        preserve_scores: true,
-                    },
-                )
-            });
-            Ok(CommandResponse::failure(envelope))
-        }
+    let store = ApplicationStore::new(&db);
+    let result = CoachService::run(&store, cmd, || {
+        load_runtime(&db, &vault)
+            .map_err(|error| ApplicationError::new("enrichment.error", error.to_string(), false))
+    })
+    .await;
+    match result {
+        Ok(result) => Ok(CommandResponse::success(result)),
+        Err(error) => Ok(CommandResponse::failure(map_application_error(error))),
     }
 }

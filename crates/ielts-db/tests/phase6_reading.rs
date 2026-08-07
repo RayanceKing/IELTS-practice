@@ -5,9 +5,9 @@ use tempfile::tempdir;
 
 use ielts_db::{
     compare_answer, get_open_reading_draft_with_timer, import_asset_payload_file,
-    load_pdf_data_url, load_practice_asset_payload, migrate, open_connection,
-    patch_reading_answer, save_reading_draft, score_attempt, submit_reading_attempt, DbOpenOptions,
-    MatchMode, ReadingDraftCommand, ReadingQuestionProgress, ReadingSubmitCommand, TimerState,
+    load_pdf_data_url, load_practice_asset_payload, migrate, open_connection, patch_reading_answer,
+    save_reading_draft, score_attempt, submit_reading_attempt, DbOpenOptions, MatchMode,
+    ReadingDraftCommand, ReadingQuestionProgress, ReadingSubmitCommand, TimerState,
 };
 
 fn open_db() -> (tempfile::TempDir, rusqlite::Connection) {
@@ -231,7 +231,16 @@ fn draft_marks_and_timeline_restore_from_canonical_answers() {
             asset_revision: Some(asset.schema_version),
             asset_fingerprint: Some(asset.fingerprint),
             title_snapshot: None,
-            timer_snapshot: None,
+            timer_snapshot: Some(TimerState {
+                source: "local".into(),
+                anchor_ms: 1_000,
+                effective_start_time_ms: 1_000,
+                mode: ielts_db::TimerMode::Elapsed,
+                limit_seconds: None,
+                paused_offset_ms: 500,
+                paused_at_ms: Some(6_000),
+                running: false,
+            }),
             idempotency_key: "draft-restore-1".into(),
         },
     )

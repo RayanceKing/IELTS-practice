@@ -29,7 +29,7 @@ fn migration_applies_and_is_idempotent() {
             r.get(0)
         })
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 11);
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn migrate_function_transactional_versions() {
     let path = dir.path().join("m.db");
     let mut conn = open_connection(&DbOpenOptions::create(path)).unwrap();
     let applied = migrate(&mut conn).unwrap();
-    assert_eq!(applied, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq!(applied, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     let applied_again = migrate(&mut conn).unwrap();
     assert!(applied_again.is_empty());
 }

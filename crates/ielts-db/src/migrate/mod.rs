@@ -65,6 +65,11 @@ fn migrations() -> &'static [Migration] {
                 name: "reading_timer_states",
                 sql: include_str!("../../migrations/0010_reading_timer_states.sql"),
             },
+            Migration {
+                version: 11,
+                name: "agent_runs_tool_calls",
+                sql: include_str!("../../migrations/0011_agent_runs_tool_calls.sql"),
+            },
         ]
     })
 }

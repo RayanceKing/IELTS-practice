@@ -1,5 +1,9 @@
 //! Writing draft + evaluation Tauri commands (Phase 5).
 
+use ielts_application::{
+    ApplicationError, EvaluationBackend, ModelError, WritingEvaluationService,
+    WritingEvaluationStore,
+};
 use ielts_domain::domain::WritingTaskType;
 use ielts_domain::dto::{
     CloneWritingDraftCommand, CommandResponse, ImportWritingPromptsCommand,
@@ -12,20 +16,17 @@ use ielts_domain::ErrorEnvelope;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
+use crate::ai::{load_provider_config, load_runtime_from_provider_config};
+use crate::app::application_store::{ApplicationStore, ChannelEventSink};
 use crate::app::state::{AppDb, AppVault};
-use crate::commands::ai::{load_provider_config, load_runtime};
 use ielts_db::{
     activate_writing_prompt, clone_writing_draft, delete_writing_prompt, delete_writing_topic,
-    finish_evaluation, get_writing_draft, get_writing_prompt, get_writing_topic,
-    import_writing_prompts, import_writing_topics, list_events, list_writing_prompts,
-    list_writing_topics, load_evaluation_for_attempt, prepare_evaluation, request_cancel,
+    get_writing_draft, get_writing_prompt, get_writing_topic, import_writing_prompts,
+    import_writing_topics, list_writing_prompts, list_writing_topics, load_evaluation_for_attempt,
     save_writing_draft, submit_writing_attempt, upsert_writing_prompt, upsert_writing_topic,
-    writing_topic_statistics as load_writing_topic_statistics, DeterministicProvider,
-    EvaluationEvent, EvaluationHandle, EvaluationRunResult, StartEvaluationCommand, WritingDraft,
-    WritingProvider,
+    writing_topic_statistics as load_writing_topic_statistics, EvaluationEvent, EvaluationHandle,
+    StartEvaluationCommand, WritingDraft,
 };
-
-mod openai_provider;
 
 fn map_err(err: ielts_db::DbError) -> ErrorEnvelope {
     ErrorEnvelope {
@@ -35,6 +36,10 @@ fn map_err(err: ielts_db::DbError) -> ErrorEnvelope {
         context: None,
         cause_id: None,
     }
+}
+
+fn map_application_error(error: ApplicationError) -> ErrorEnvelope {
+    ErrorEnvelope::new(error.code, error.message, error.retryable)
 }
 
 fn map_ai_not_configured(_: ielts_db::DbError) -> ErrorEnvelope {
@@ -120,125 +125,57 @@ pub async fn writing_start_evaluation(
     }
 
     let deterministic = config.provider == "deterministic";
-    let prepared = match db
-        .with_conn(|conn| prepare_evaluation(conn, &cmd, &config.provider, &config.model))
-    {
-        Ok(prepared) => prepared,
-        Err(error) => return Ok(CommandResponse::failure(map_err(error))),
+    // The evaluation record and the provider request must use the same
+    // configuration snapshot. Re-reading the default in the background task
+    // would allow a settings change between prepare and execution to mix two
+    // providers in one evaluation.
+    let provider_config = config.clone();
+    let store = ApplicationStore::new(&db);
+    let events = ChannelEventSink::new(on_event);
+    let outcome = match WritingEvaluationService::start(
+        &store,
+        &cmd,
+        &config.provider,
+        &config.model,
+        &events,
+    ) {
+        Ok(outcome) => outcome,
+        Err(error) => return Ok(CommandResponse::failure(map_application_error(error))),
     };
-    let handle = prepared.handle.clone();
-    if let Some(existing) = prepared.existing.as_ref() {
-        send_events(&on_event, &existing.events);
+    let handle = outcome.handle;
+    let Some(prepared) = outcome.pending else {
         return Ok(CommandResponse::success(handle));
-    }
-
-    if let Ok(initial_events) = db.with_conn(|conn| list_events(conn, &handle.evaluation_id, 0)) {
-        send_events(&on_event, &initial_events);
-    }
+    };
 
     // The command returns the durable handle now. The task owns only request
     // data and never carries a SQLite guard across provider I/O.
-    let task_handle = handle.clone();
+    let evaluation_id = handle.evaluation_id.clone();
     tauri::async_runtime::spawn(async move {
         let db = app.state::<AppDb>();
-        let result = if deterministic {
-            run_deterministic(&db, &prepared)
+        let store = ApplicationStore::new(&db);
+        let backend = if deterministic {
+            EvaluationBackend::Deterministic
         } else {
             let vault = app.state::<AppVault>();
-            match load_runtime(&db, &vault) {
-                Ok(runtime) => {
-                    let provider_result = openai_provider::evaluate(&runtime, &prepared).await;
-                    match provider_result {
-                        Ok(output) => {
-                            let (feedback, review_error) = match output.feedback {
-                                Ok(feedback) => (Some(feedback), None),
-                                Err(error) => (None, Some(error)),
-                            };
-                            db.with_conn(|conn| {
-                                finish_evaluation(
-                                    conn,
-                                    &prepared,
-                                    Ok(output.score),
-                                    feedback,
-                                    review_error,
-                                )
-                            })
-                        }
-                        Err(error) => db.with_conn(|conn| {
-                            finish_evaluation(conn, &prepared, Err(error), None, None)
-                        }),
-                    }
+            match load_runtime_from_provider_config(&db, &vault, provider_config) {
+                Ok(runtime) => EvaluationBackend::Language(runtime),
+                Err(error) => {
+                    EvaluationBackend::Unavailable(ModelError::new(error.to_string(), false))
                 }
-                Err(error) => db.with_conn(|conn| {
-                    finish_evaluation(
-                        conn,
-                        &prepared,
-                        Err(ielts_db::ProviderError {
-                            message: error.to_string(),
-                            retryable: false,
-                        }),
-                        None,
-                        None,
-                    )
-                }),
             }
         };
-        match result {
-            Ok(result) => send_events_after(&on_event, &result, task_handle.sequence),
-            Err(error) => {
-                tracing::error!(
-                    evaluation_id = %task_handle.evaluation_id,
-                    error = %error,
-                    "background writing evaluation failed"
-                );
-            }
+        if let Err(error) =
+            WritingEvaluationService::execute(&store, prepared, backend, &events).await
+        {
+            tracing::error!(
+                evaluation_id = %evaluation_id,
+                error = %error,
+                "background writing evaluation failed"
+            );
         }
     });
 
     Ok(CommandResponse::success(handle))
-}
-
-fn run_deterministic(
-    db: &AppDb,
-    prepared: &ielts_db::PreparedEvaluation,
-) -> ielts_db::DbResult<EvaluationRunResult> {
-    let provider = DeterministicProvider;
-    let score = provider.score(
-        &prepared.essay,
-        prepared.prompt.as_deref(),
-        prepared.task_type,
-    );
-    let (feedback, review_error) = match score.as_ref() {
-        Ok(score) => match provider.review(&prepared.essay, score) {
-            Ok(feedback) => (Some(feedback), None),
-            Err(error) => (None, Some(error)),
-        },
-        Err(_) => (None, None),
-    };
-    db.with_conn(|conn| finish_evaluation(conn, prepared, score, feedback, review_error))
-}
-
-fn send_events(channel: &Channel<EvaluationEvent>, events: &[EvaluationEvent]) {
-    for event in events {
-        if let Err(error) = channel.send(event.clone()) {
-            tracing::debug!(error = %error, "writing evaluation channel closed");
-            break;
-        }
-    }
-}
-
-fn send_events_after(
-    channel: &Channel<EvaluationEvent>,
-    result: &EvaluationRunResult,
-    after_sequence: u32,
-) {
-    let events = result
-        .events
-        .iter()
-        .filter(|event| event.sequence > after_sequence)
-        .cloned()
-        .collect::<Vec<_>>();
-    send_events(channel, &events);
 }
 
 #[tauri::command]
@@ -247,10 +184,10 @@ pub fn writing_list_evaluation_events(
     evaluation_id: String,
     after_sequence: Option<u32>,
 ) -> CommandResponse<Vec<EvaluationEvent>> {
-    let after = after_sequence.unwrap_or(0);
-    match db.with_conn(|conn| list_events(conn, &evaluation_id, after)) {
+    let store = ApplicationStore::new(&db);
+    match store.list_events(&evaluation_id, after_sequence.unwrap_or(0)) {
         Ok(events) => CommandResponse::success(events),
-        Err(e) => CommandResponse::failure(map_err(e)),
+        Err(error) => CommandResponse::failure(map_application_error(error)),
     }
 }
 
@@ -259,9 +196,10 @@ pub fn writing_cancel_evaluation(
     db: State<'_, AppDb>,
     evaluation_id: String,
 ) -> CommandResponse<bool> {
-    match db.with_conn(|conn| request_cancel(conn, &evaluation_id)) {
-        Ok(ok) => CommandResponse::success(ok),
-        Err(e) => CommandResponse::failure(map_err(e)),
+    let store = ApplicationStore::new(&db);
+    match store.request_cancel(&evaluation_id) {
+        Ok(cancelled) => CommandResponse::success(cancelled),
+        Err(error) => CommandResponse::failure(map_application_error(error)),
     }
 }
 

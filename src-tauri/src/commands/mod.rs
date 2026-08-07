@@ -1,6 +1,6 @@
+pub mod agent;
 pub mod ai;
 pub mod backup;
-mod coach_provider;
 pub mod diagnostics;
 pub mod enrichment;
 pub mod history;

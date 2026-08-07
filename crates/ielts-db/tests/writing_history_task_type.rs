@@ -1,8 +1,8 @@
 //! Writing task type is an attempt fact, not a frontend display default.
 
 use ielts_db::{
-    list_history, migrate, open_connection, save_writing_draft, submit_writing_attempt,
-    DbOpenOptions,
+    list_history, migrate, open_connection, save_writing_draft, start_evaluation,
+    submit_writing_attempt, DbOpenOptions, DeterministicProvider, StartEvaluationCommand,
 };
 use ielts_domain::domain::{Activity, AttemptMode, WritingTaskType};
 use ielts_domain::dto::{ListHistoryQuery, SaveDraftCommand, SubmitAttemptCommand};
@@ -77,6 +77,21 @@ fn writing_task_type_is_persisted_projected_and_filterable() {
         )
         .unwrap();
     assert_eq!(stored, "task2");
+
+    let submitted = list_history(&conn, &list_query(Some(WritingTaskType::Task2))).unwrap();
+    assert!(submitted.items.is_empty());
+
+    start_evaluation(
+        &conn,
+        &StartEvaluationCommand {
+            attempt_id: "attempt-task".into(),
+            idempotency_key: "evaluate-task".into(),
+            task_type: Some("task2".into()),
+            retry_of: None,
+        },
+        &DeterministicProvider,
+    )
+    .unwrap();
 
     let task1 = list_history(&conn, &list_query(Some(WritingTaskType::Task1))).unwrap();
     assert!(task1.items.is_empty());

@@ -3,6 +3,8 @@
 //! Phase 2: boot Vue UI without Fastify; diagnostics / paths / routes.
 //! Phase 4: unified history, settings, backup, secret-ref commands.
 
+pub(crate) mod agent;
+pub(crate) mod ai;
 pub mod app;
 pub mod commands;
 
@@ -44,6 +46,7 @@ pub fn run() {
         .manage(paths)
         .manage(db)
         .manage(vault)
+        .manage(agent::WorkspaceGrants::default())
         .manage(commands::backup::BackupImportGrants::default())
         .manage(commands::diagnostics::UpdaterRuntimeState::default())
         .invoke_handler(tauri::generate_handler![
@@ -52,6 +55,9 @@ pub fn run() {
             commands::ai::ai_upsert_config,
             commands::ai::ai_delete_config,
             commands::ai::ai_set_default_config,
+            commands::agent::agent_pick_workspace,
+            commands::agent::agent_run,
+            commands::agent::agent_get_run,
             commands::diagnostics::get_app_info,
             commands::diagnostics::check_for_updates,
             commands::diagnostics::install_update,
@@ -176,6 +182,15 @@ pub fn run() {
                 }
                 Ok(_) => {}
                 Err(err) => tracing::error!(error = %err, "failed to recover evaluation sessions"),
+            }
+            match db.with_conn(ielts_db::recover_interrupted_agent_runs) {
+                Ok(report) if report.runs > 0 || report.tool_calls > 0 => tracing::warn!(
+                    runs = report.runs,
+                    tool_calls = report.tool_calls,
+                    "marked interrupted Agent work"
+                ),
+                Ok(_) => {}
+                Err(err) => tracing::error!(error = %err, "failed to recover Agent work"),
             }
             tracing::info!(
                 app_data = %paths.app_data.display(),

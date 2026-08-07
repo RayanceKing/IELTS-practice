@@ -178,12 +178,7 @@ pub(crate) fn save_reading_draft_in_scope(
     upsert_attempt(conn, &attempt)?;
     if mode == AttemptMode::Single {
         if let Some(timer) = cmd.timer_snapshot.as_ref() {
-            save_reading_timer_state(
-                conn,
-                TimerOwnerScope::Attempt,
-                &cmd.attempt_id,
-                timer,
-            )?;
+            save_reading_timer_state(conn, TimerOwnerScope::Attempt, &cmd.attempt_id, timer)?;
         }
     }
     conn.execute(
@@ -474,11 +469,9 @@ pub fn get_open_reading_draft_with_timer(
         return Ok(None);
     };
     let timer = match mode {
-        AttemptMode::Single => load_reading_timer_state(
-            conn,
-            TimerOwnerScope::Attempt,
-            &attempt.id,
-        )?,
+        AttemptMode::Single => {
+            load_reading_timer_state(conn, TimerOwnerScope::Attempt, &attempt.id)?
+        }
         AttemptMode::Endless => load_reading_timer_state(
             conn,
             TimerOwnerScope::Endless,

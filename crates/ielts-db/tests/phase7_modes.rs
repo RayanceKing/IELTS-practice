@@ -140,6 +140,7 @@ fn endless_submit_command(
         question_timeline: vec![],
         duration_ms: Some(5_000),
         title_snapshot: None,
+        timer_snapshot: None,
         idempotency_key: idempotency_key.into(),
     }
 }
@@ -629,6 +630,7 @@ fn endless_pool_and_advance() {
             question_timeline: vec![],
             duration_ms: Some(5_000),
             title_snapshot: None,
+            timer_snapshot: None,
             idempotency_key: "e-sub-1".into(),
         },
     )
@@ -656,6 +658,7 @@ fn endless_pool_and_advance() {
             question_timeline: vec![],
             duration_ms: Some(1),
             title_snapshot: None,
+            timer_snapshot: None,
             idempotency_key: "e-sub-1".into(),
         },
     )
@@ -686,6 +689,7 @@ fn endless_pool_and_advance() {
             question_timeline: vec![],
             duration_ms: Some(1),
             title_snapshot: None,
+            timer_snapshot: None,
             idempotency_key: "e-sub-1".into(),
         },
     )

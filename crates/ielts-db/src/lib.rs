@@ -3,6 +3,7 @@
 //! Product hot path: history, settings, writing, reading, modes, enrichment, attempts.
 //! Cold path only: `import` (optional legacy one-shot migration).
 
+pub mod agent;
 pub mod annotations;
 pub mod attempts;
 pub mod backup;
@@ -21,6 +22,7 @@ pub mod sqlite;
 pub mod vocab;
 pub mod writing;
 
+pub use agent::*;
 pub use annotations::*;
 pub use attempts::{count_attempts, ensure_asset_stub, upsert_attempt};
 pub use backup::*;
