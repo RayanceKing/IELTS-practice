@@ -380,3 +380,22 @@
 - error 没有 `role=alert`，loading 没有 `role=status`/`aria-busy`，empty/filter-empty 没有 status 语义；重试和 reset 动作逻辑本身清晰，可原样保留。
 - `opensource` 仅在 `index.html:760-769` 提供 clipboard + 主文案 + 次级说明空态；没有 loading/error/filter-empty 或 1440/1024/390/360 证据，不能搬迁旧 JS 或臆造状态合同。
 - 最小结构是四种状态共用 `.history-list-state`，通过 modifier 表达 loading/error/empty；统一稳定高度、内容层级和 44px action，保持请求 gate/重试/reset 不变。
+
+## 2026-08-10 CI 门禁审计
+
+- GitHub Actions run `31369965578` 在 job setup 阶段失败：`.github/workflows/tauri-ci.yml` 引用不存在的 `browser-actions/setup-edgedriver`，因此 checkout/build/test 均未执行。
+- 当前 DAG 为 `shipping-gate -> rust-test -> tauri-build`；`shipping-gate` 的外围安装错误让 Rust 和跨平台 build 全部 skipped，门禁拓扑不可诊断。
+- 当前 `rust-test` 只执行 domain + DB，漏掉 workspace member `ielts-application` 的 24 个测试和 Tauri host 的 21 个单元测试；最小修复是 Windows 上执行 `cargo test --workspace --locked`。
+- migration 11、Agent audit、backup/restore 已有 DB 测试；不需要为 CI 重写 schema 测试。Application Agent 循环、文件工具、workspace grant 和 OpenAI-compatible tool protocol 也已有 Rust 单测，只是未被 workflow 执行。
+- packaged flow 需要 `tauri-driver` 与匹配 WebView2 Runtime 精确版本的 `msedgedriver`；本地曾实证 driver 150 / WebView2 151 会在 route screenshot 阶段断开 session。
+- 16 个 U1-U24 定向脚本默认连接 `127.0.0.1:4175` 且不会自行启动 server；必须由一个 CI runner 统一 build、启动 server、串行分组执行并上传本轮日志/截图，不能直接堆入 workflow。
+- `packaged_tauri_flow.py` 当前把 driver stdout 接到无人读取的 PIPE，失败证据只上传 JSON 而漏掉 7 张截图；修改时应落盘 driver 日志并让 artifact 包含本轮报告和截图。
+- `.github/workflows/release.yml` 也引用同一失效 EdgeDriver action；若只修 `tauri-ci`，tag release 仍会在 setup 阶段死亡。
+- 当前本机验证工具版本为 `tauri-cli 2.11.4`、`tauri-driver 2.0.6`、Playwright `1.61.0`；CI 应精确固定这些版本，避免 `^2` 与无版本安装漂移。
+- 16 个定向视觉脚本都可作为无参数 Python 程序运行，共享固定 preview endpoint；最小可维护实现是新增一个 runner，统一启动 `dist/writing` server、串行执行脚本、记录每项 stdout/stderr/时长，并把本轮新截图复制到独立 evidence 目录。
+- packaged runner 的 WebDriver HTTP 单次 timeout 当前为 30 秒，readiness 又循环 30 次；应把 status 探测收敛为 1 秒请求、30 秒总期限，并在 `tauri-driver` 过早退出时立即报告日志。
+- 新安装器在本机定位 WebView2 `151.0.4129.72`，从微软官方 endpoint 获取同版本 EdgeDriver，并通过版本与 Authenticode 校验；这直接覆盖了此前 150/151 漂移故障。
+- 新视觉 runner 本地实际执行 16/16 通过，耗时 348.3 秒，按四组生成逐项日志和 86 张本轮截图 evidence；统一 server/串行运行模式可行。
+- packaged Tauri 新路径本地通过，`agent_get_run` 不存在 ID 返回空、`agent_run` 空 prompt 返回 `agent.invalid_request`，证明 Agent commands 在真实 WebView IPC 中注册且最外层错误协议有效，无需真实模型配置。
+- 第二轮视觉矩阵唯一失败是 History tablet/empty 在 `domcontentloaded` 后、route CSS chunk 生效前读取几何；测试原先只等 DOM selector。应等待共享 owner 的 computed `display:grid`，但不降低 180px/160px 高度合同。
+- readiness 修复后定位到另一独立假红：computed min-height 精确为 160px，而 Chromium rect 为 `159.999938px`。CSS 合同仍需硬比较，渲染 rect 应允许 0.5px 子像素误差。

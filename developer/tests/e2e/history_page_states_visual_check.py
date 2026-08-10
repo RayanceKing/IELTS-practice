@@ -59,17 +59,26 @@ def install_tauri_mock(page, initial_mode):
 def prepare_state(page, state):
     if state == "loading":
         page.wait_for_selector(".history-page > .loading")
-        return
-    if state == "error":
+    elif state == "error":
         page.wait_for_selector(".history-page > .error-state")
-        return
-    page.wait_for_selector(".history-page > .empty-state")
-    if state == "filtered":
-        page.evaluate("() => { window.__historyPageStateMode = 'filtered'; }")
-        page.locator("#history-search").fill("no matching practice")
-        page.wait_for_function(
-            "() => document.querySelector('.history-page > .empty-state')?.textContent.includes('当前筛选条件无结果')"
-        )
+    else:
+        page.wait_for_selector(".history-page > .empty-state")
+        if state == "filtered":
+            page.evaluate("() => { window.__historyPageStateMode = 'filtered'; }")
+            page.locator("#history-search").fill("no matching practice")
+            page.wait_for_function(
+                "() => document.querySelector('.history-page > .empty-state')?.textContent.includes('当前筛选条件无结果')"
+            )
+    page.wait_for_function(
+        """
+        () => {
+          const state = document.querySelector(
+            '.history-page > :is(.loading, .error-state, .empty-state)'
+          );
+          return state && getComputedStyle(state).display === 'grid';
+        }
+        """
+    )
 
 
 def read_geometry(page):
@@ -113,8 +122,14 @@ def assert_geometry(name, state, data):
     if data["stateDisplay"] != "grid":
         raise AssertionError(f"{name}/{state}: state surface is not a stable grid")
     minimum_height = 160 if width <= 640 else 180
-    if data["stateMinHeight"] < minimum_height or data["stateRect"]["height"] < minimum_height:
-        raise AssertionError(f"{name}/{state}: state surface collapses below {minimum_height}px")
+    if (
+        data["stateMinHeight"] < minimum_height
+        or data["stateRect"]["height"] + 0.5 < minimum_height
+    ):
+        raise AssertionError(
+            f"{name}/{state}: state surface collapses below {minimum_height}px: "
+            f"min-height={data['stateMinHeight']}, height={data['stateRect']['height']}"
+        )
     if data["stateRect"]["left"] < -1 or data["stateRect"]["right"] > width + 1:
         raise AssertionError(f"{name}/{state}: state surface escapes viewport")
     expected_role = "alert" if state == "error" else "status"

@@ -14,6 +14,7 @@ import json
 import math
 import os
 import shutil
+import socket
 import subprocess
 import time
 import urllib.error
@@ -31,6 +32,7 @@ HISTORY_SCREENSHOT = ROOT / "developer/tests/e2e/reports/history-current.png"
 COMPOSE_SCREENSHOT = ROOT / "developer/tests/e2e/reports/compose-current.png"
 TOPICS_SCREENSHOT = ROOT / "developer/tests/e2e/reports/topics-current.png"
 AGENT_SCREENSHOT = ROOT / "developer/tests/e2e/reports/agent-current.png"
+DRIVER_LOG = ROOT / "developer/tests/e2e/reports/tauri-driver.log"
 READING_P95_BUDGET_MS = 3000
 
 
@@ -147,7 +149,7 @@ def blocked(reason: str, missing: list[str]) -> int:
               "status": "blocked", "exitCode": 2, "target": "packaged-tauri-2",
               "reason": reason, "missingDependencies": missing,
               "checks": {"launch": "blocked", "vueRoutes": "blocked", "readingIpc": "blocked",
-                         "uiRouteVisuals": "blocked",
+                         "uiRouteVisuals": "blocked", "agentIpcBoundary": "blocked",
                          "bundledResources": "blocked", "readingView": "blocked",
                          "readingPerformance": "blocked", "notesDialog": "blocked",
                          "readingSubmitBoundary": "blocked",
@@ -162,12 +164,12 @@ def blocked(reason: str, missing: list[str]) -> int:
 
 class Driver:
     def __init__(self, base: str): self.base, self.sid = base.rstrip("/"), None
-    def call(self, method: str, path: str, body=None):
+    def call(self, method: str, path: str, body=None, timeout_seconds: int = 30):
         req = urllib.request.Request(self.base + path, method=method,
                                       data=None if body is None else json.dumps(body).encode(),
                                       headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
                 return json.loads(response.read() or b"{}")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -222,6 +224,30 @@ def wait_for_value(driver: Driver, source: str, timeout_seconds: int = 15):
             return last
         time.sleep(0.1)
     raise RuntimeError(f"WebDriver condition timed out: {last}")
+
+
+def log_tail(path: Path, limit: int = 4000) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")[-limit:]
+    except OSError:
+        return ""
+
+
+def stop_process(process: subprocess.Popen | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def free_tcp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
 
 
 def wait_for_reading_view(driver: Driver, timeout_seconds: int = 30):
@@ -328,17 +354,65 @@ def main() -> int:
                                      f"native driver version: {executable_version(native) or 'unknown'}"]))
         return blocked("packaged WebView dependencies are unavailable; no fallback is permitted", missing)
 
-    proc = subprocess.Popen([tauri, "--native-driver", native], cwd=ROOT,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    driver = Driver(os.environ.get("TAURI_WEBDRIVER_URL", "http://127.0.0.1:4444"))
+    configured_url = os.environ.get("TAURI_WEBDRIVER_URL")
+    driver_port = free_tcp_port()
+    if configured_url:
+        parsed_url = urllib.parse.urlparse(configured_url)
+        if parsed_url.hostname not in {"127.0.0.1", "localhost"} or parsed_url.port is None:
+            return blocked("TAURI_WEBDRIVER_URL must use a local host and explicit port", [configured_url])
+        driver_port = parsed_url.port
+    native_port = free_tcp_port()
+    while native_port == driver_port:
+        native_port = free_tcp_port()
+    driver_url = configured_url or f"http://127.0.0.1:{driver_port}"
+    driver = Driver(driver_url)
     checks = {}
     metadata = binary_metadata(app, tauri, native, build_performed)
+    metadata["driverLog"] = str(DRIVER_LOG.resolve())
+    metadata["driverUrl"] = driver_url
+    metadata["nativeDriverPort"] = native_port
     if build_detail:
         metadata["buildDetail"] = build_detail
+    proc = None
+    driver_log = None
     try:
-        for _ in range(30):
-            try: driver.call("GET", "/status"); break
-            except Exception: time.sleep(1)
+        DRIVER_LOG.parent.mkdir(parents=True, exist_ok=True)
+        driver_log = DRIVER_LOG.open("w", encoding="utf-8", errors="replace")
+        proc = subprocess.Popen(
+            [
+                tauri,
+                "--port",
+                str(driver_port),
+                "--native-port",
+                str(native_port),
+                "--native-driver",
+                native,
+            ],
+            cwd=ROOT,
+            stdout=driver_log,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        status = None
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                driver_log.flush()
+                raise RuntimeError(
+                    f"tauri-driver exited with code {proc.returncode}: {log_tail(DRIVER_LOG)}"
+                )
+            try:
+                status = driver.call("GET", "/status", timeout_seconds=1)
+                if proc.poll() is not None:
+                    raise RuntimeError(
+                        f"tauri-driver exited with code {proc.returncode}: {log_tail(DRIVER_LOG)}"
+                    )
+                break
+            except Exception:
+                time.sleep(0.25)
+        if status is None:
+            driver_log.flush()
+            raise RuntimeError(f"tauri-driver was not ready after 30s: {log_tail(DRIVER_LOG)}")
         driver.create(str(app.resolve()))
         checks["launch"] = "passed"
         wait_for_vue(driver)
@@ -371,6 +445,24 @@ def main() -> int:
         assets = (result or {}).get("data") if isinstance(result, dict) else None
         if not assets: raise RuntimeError("Tauri IPC bridge unavailable or reading_list_assets returned empty")
         checks["readingIpc"] = "passed"
+        missing_agent_run = driver.script(
+            "return window.__TAURI_INTERNALS__.invoke('agent_get_run', {runId: 'e2e-missing-agent-run'})"
+        )
+        if (not isinstance(missing_agent_run, dict) or not missing_agent_run.get("ok")
+                or missing_agent_run.get("data") is not None):
+            raise RuntimeError(f"agent_get_run command contract failed: {missing_agent_run}")
+        invalid_agent_request = driver.script("""
+            return window.__TAURI_INTERNALS__.invoke('agent_run', {
+              request: {grantId: 'unused-for-empty-prompt', prompt: '', configId: null}
+            })
+        """)
+        invalid_agent_error = (
+            invalid_agent_request.get("error") if isinstance(invalid_agent_request, dict) else None
+        ) or {}
+        if (not isinstance(invalid_agent_request, dict) or invalid_agent_request.get("ok")
+                or invalid_agent_error.get("code") != "agent.invalid_request"):
+            raise RuntimeError(f"agent_run empty-prompt boundary failed: {invalid_agent_request}")
+        checks["agentIpcBoundary"] = "passed"
         archive = driver.script(
             "return window.__TAURI_INTERNALS__.invoke('reading_export_archive')"
         )
@@ -574,11 +666,17 @@ def main() -> int:
                   "status": status, "exitCode": 0 if status == "passed" else 1,
                   "target": "packaged-tauri-2", "metadata": metadata, "checks": checks}
     except Exception as exc:
+        if driver_log:
+            driver_log.flush()
         report = {"schemaVersion": 2, "generatedAt": datetime.now(timezone.utc).isoformat(),
                   "status": "failed", "exitCode": 1, "target": "packaged-tauri-2",
-                  "metadata": metadata, "checks": checks, "error": str(exc)}
+                  "metadata": metadata, "checks": checks, "error": str(exc),
+                  "driverLogTail": log_tail(DRIVER_LOG)}
     finally:
-        driver.close(); proc.terminate()
+        driver.close()
+        stop_process(proc)
+        if driver_log:
+            driver_log.close()
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))

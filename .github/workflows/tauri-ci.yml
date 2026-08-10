@@ -8,9 +8,19 @@ on:
   pull_request:
     branches: [main, master]
 
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TAURI_CLI_VERSION: 2.11.4
+  TAURI_DRIVER_VERSION: 2.0.6
+  PY_PLAYWRIGHT_VERSION: 1.61.0
+
 jobs:
-  shipping-gate:
-    runs-on: windows-latest
+  static-gate:
+    name: Vue and static gate
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -22,10 +32,10 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: apps/writing-vue/package-lock.json
-      - name: Install frontend deps
+      - name: Install frontend dependencies
         run: npm --prefix apps/writing-vue ci --no-fund --no-audit
       - uses: Swatinem/rust-cache@v2
-      - name: Tauri + Vue static gate
+      - name: Run static gate
         run: python developer/tests/ci/run_static_suite.py
       - name: Upload static gate report
         if: always()
@@ -33,45 +43,113 @@ jobs:
         with:
           name: static-ci-report
           path: developer/tests/e2e/reports/static-ci-report.json
-      - name: Install Tauri tooling
-        run: |
-          cargo install tauri-cli --version "^2" --locked
-          cargo install tauri-driver --locked
-      - uses: browser-actions/setup-edge@v1
-      - uses: browser-actions/setup-edgedriver@v1
-      - name: Build packaged Tauri application
-        run: cargo tauri build --no-bundle
-      - name: Packaged Tauri WebView gate
-        shell: pwsh
-        run: |
-          $env:TAURI_APP_BINARY = (Resolve-Path target/release/ielts-practice-tauri.exe)
-          $env:TAURI_NATIVE_DRIVER = (Get-Command msedgedriver).Source
-          python developer/tests/e2e/suite_practice_flow.py
-      - name: Upload packaged E2E report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: packaged-tauri-e2e-report
-          path: developer/tests/e2e/reports/suite-practice-flow-report.json
+          if-no-files-found: error
 
   rust-test:
-    needs: shipping-gate
-    runs-on: windows-latest
+    name: Rust workspace tests
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-      - name: Domain + DB tests
-        run: cargo test -p ielts-domain -p ielts-db
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/writing-vue/package-lock.json
+      - name: Install frontend dependencies
+        run: npm --prefix apps/writing-vue ci --no-fund --no-audit
+      - name: Build frontend required by the Tauri test crate
+        run: npm --prefix apps/writing-vue run build
+      - uses: Swatinem/rust-cache@v2
+      - name: Run all Rust workspace tests
+        run: cargo test --workspace --locked
+
+  visual-regression:
+    name: Vue U1-U24 visual and state regressions
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/writing-vue/package-lock.json
+      - name: Install frontend dependencies
+        run: npm --prefix apps/writing-vue ci --no-fund --no-audit
+      - name: Build Vue production assets
+        run: npm --prefix apps/writing-vue run build
+      - name: Install pinned Playwright
+        run: |
+          python -m pip install --disable-pip-version-check "playwright==$env:PY_PLAYWRIGHT_VERSION"
+          python -m playwright install chromium
+      - name: Run visual regression matrix
+        run: python developer/tests/e2e/run_visual_regressions.py
+      - name: Upload visual regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vue-visual-regression-evidence
+          path: developer/tests/e2e/reports/visual-ci-evidence
+          if-no-files-found: error
+
+  packaged-e2e:
+    name: Packaged Tauri WebView and IPC gate
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/writing-vue/package-lock.json
+      - name: Install frontend dependencies
+        run: npm --prefix apps/writing-vue ci --no-fund --no-audit
+      - uses: Swatinem/rust-cache@v2
+      - name: Install pinned Tauri tooling
+        shell: pwsh
+        run: |
+          cargo install tauri-cli --version $env:TAURI_CLI_VERSION --locked
+          cargo install tauri-driver --version $env:TAURI_DRIVER_VERSION --locked
+      - name: Install matching WebView2 EdgeDriver
+        id: edge-driver
+        shell: pwsh
+        run: ./developer/tests/ci/install_edge_webdriver.ps1
+      - name: Build packaged Tauri application
+        run: cargo tauri build --no-bundle
+      - name: Run packaged Tauri gate
+        shell: pwsh
+        env:
+          TAURI_APP_BINARY: ${{ github.workspace }}\target\release\ielts-practice-tauri.exe
+          TAURI_NATIVE_DRIVER: ${{ steps.edge-driver.outputs.driver-path }}
+        run: |
+          $env:TAURI_DRIVER = (Get-Command tauri-driver).Source
+          python developer/tests/e2e/suite_practice_flow.py
+      - name: Upload packaged E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-tauri-e2e-evidence
+          path: |
+            developer/tests/e2e/reports/suite-practice-flow-report.json
+            developer/tests/e2e/reports/tauri-driver.log
+            developer/tests/e2e/reports/*-current.png
+          if-no-files-found: error
 
   tauri-build:
-    needs: rust-test
+    name: Tauri bundle (${{ matrix.platformKey }})
+    runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: windows-latest
+          - platform: windows-2022
             platformKey: windows
             args: ''
           - platform: macos-latest
@@ -80,14 +158,13 @@ jobs:
           - platform: ubuntu-22.04
             platformKey: linux
             args: ''
-    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
-      - name: Linux deps
-        if: matrix.platform == 'ubuntu-22.04'
+          targets: ${{ matrix.platformKey == 'macos' && 'aarch64-apple-darwin' || '' }}
+      - name: Linux dependencies
+        if: matrix.platformKey == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -96,24 +173,43 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: apps/writing-vue/package-lock.json
-      - name: Install frontend deps
+      - name: Install frontend dependencies
         run: npm --prefix apps/writing-vue ci --no-fund --no-audit
-      - name: Build frontend
-        run: npm --prefix apps/writing-vue run build
       - uses: Swatinem/rust-cache@v2
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --version "^2" --locked
-      - name: Tauri build
+      - name: Install pinned Tauri CLI
+        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
+      - name: Build Tauri bundle
         run: cargo tauri build ${{ matrix.args }}
         env:
-          # Signing keys intentionally unset until release secrets configured.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Verify non-empty Tauri bundle
-        run: python developer/tests/ci/verify_tauri_bundle.py --platform ${{ matrix.platformKey }} --report developer/tests/e2e/reports/tauri-bundle-${{ matrix.platform }}.json
+        if: always()
+        run: python developer/tests/ci/verify_tauri_bundle.py --platform ${{ matrix.platformKey }} --report developer/tests/e2e/reports/tauri-bundle-${{ matrix.platformKey }}.json
       - name: Upload bundle manifest
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-bundle-manifest-${{ matrix.platform }}
-          path: developer/tests/e2e/reports/tauri-bundle-${{ matrix.platform }}.json
+          name: tauri-bundle-manifest-${{ matrix.platformKey }}
+          path: developer/tests/e2e/reports/tauri-bundle-${{ matrix.platformKey }}.json
+          if-no-files-found: error
+
+  ci-result:
+    name: CI result
+    if: always()
+    needs: [static-gate, rust-test, visual-regression, packaged-e2e, tauri-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every gate to pass
+        env:
+          STATIC_RESULT: ${{ needs.static-gate.result }}
+          RUST_RESULT: ${{ needs.rust-test.result }}
+          VISUAL_RESULT: ${{ needs.visual-regression.result }}
+          PACKAGED_RESULT: ${{ needs.packaged-e2e.result }}
+          BUILD_RESULT: ${{ needs.tauri-build.result }}
+        run: |
+          set -eu
+          printf 'static=%s rust=%s visual=%s packaged=%s build=%s\n' "$STATIC_RESULT" "$RUST_RESULT" "$VISUAL_RESULT" "$PACKAGED_RESULT" "$BUILD_RESULT"
+          for result in "$STATIC_RESULT" "$RUST_RESULT" "$VISUAL_RESULT" "$PACKAGED_RESULT" "$BUILD_RESULT"; do
+            test "$result" = success
+          done

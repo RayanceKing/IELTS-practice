@@ -295,3 +295,37 @@
 | U23 packaged flow 在 route screenshot 阶段丢失 WebDriver session | 1 | 定位为本地 EdgeDriver 150 与 WebView2 151 版本漂移；使用独立的官方 151 driver 复验，不修改产品代码 |
 | U24 误在 `functions.exec` 内调用 collaboration spawn | 1 | collaboration 工具不能嵌套；改为直接 `spawn_agent` 调用 |
 | 发布前 `git ls-remote` 遭遇 Schannel TLS handshake failure | 1 | 不重复同一探测；先完成本地原子提交，再通过 GitHub CLI/推送路径复验远端连接 |
+| CI 修复阶段 session-catchup 在 Windows GBK 输出 Unicode 失败 | 1 | 设置 `PYTHONIOENCODING=utf-8` 后成功恢复 |
+| `rg.exe` 从 Codex WindowsApps 路径启动被拒绝 | 1 | 改用 PowerShell `Get-ChildItem`/`Select-String` 继续只读检索 |
+| 驱动安装器测试命令包含递归临时目录清理，被命令策略拒绝 | 1 | 不重试清理；改用 GUID 唯一临时目录执行验证 |
+| packaged runner 动态端口补丁把 helper 插入 `try/except` 中间 | 1 | Python compile 立即捕获；恢复完整 `except` 后再定义 helper |
+| EdgeUpdate client 枚举在 StrictMode 下遇到无 `name` 的无关 key | 1 | 先检查 `name`/`pv` registry values 存在，再筛选 WebView2 registration |
+| 动态端口视觉复跑中 History tablet/empty 在 CSS 生效前读取几何 | 1 | 保持 180px 断言不变，先等待共享 state owner 的 computed `display:grid` |
+| History mobile/filtered rect 为 `159.999938px`，严格 `<160` 假红 | 1 | CSS min-height 保持硬阈值；仅对浏览器 rect 使用 0.5px 子像素容差 |
+| History 单项 PowerShell server 包装被 `Stop-Process -Force` 策略拦截 | 1 | 改用标准 `importlib` 限定统一 runner 的脚本集合，由 runner 自行清理进程 |
+| 首次 `runpy` 单项注入未改变函数 globals，意外复跑全矩阵 | 1 | 不重复；改用 `importlib.util.module_from_spec` 后单项 16 状态全部通过 |
+| 视觉 runner timeout 输出在部分 Python 版本可能为 bytes | 1 | 增加统一 UTF-8 `output_text` 转换，保证失败日志写入不二次报错 |
+
+## 2026-08-10 CI 门禁重构
+
+### 目标
+
+修复 force push 后 `tauri-ci` 的三个失败/跳过门禁，并让 CI 按当前 Vue/Tauri/Application/Agent 架构提供互相独立、可诊断的证据。UI 搬迁保持停止，不修改产品行为。
+
+### 阶段
+
+- [completed] C1. 读取远端 Actions 日志，确认失败发生在 checkout 前的失效 EdgeDriver action 解析
+- [completed] C2. 并行审计 workflow DAG、Rust/Vue/Agent/DB 覆盖和 packaged/视觉脚本运行条件
+- [completed] C3. 拆分 static、Rust workspace、packaged Tauri、视觉回归和跨平台 bundle jobs
+- [completed] C4. 增加仓库自有 WebView2/EdgeDriver 精确版本安装器与统一视觉回归 runner
+- [completed] C5. 本地执行 workflow 相关门禁并修复真实失败
+- [in_progress] C6. 提交、推送并等待远端全部门禁给出最终结果
+
+### 固定决策
+
+- `rust-test` 必须执行 `cargo test --workspace --locked`，纳入 `ielts-application`、Agent 文件工具、AI runtime 和 Tauri adapter 测试。
+- static、Rust、packaged Tauri 与跨平台 bundle 不再串成单点失败链；环境故障不能把无关证据全部标成 skipped。
+- EdgeDriver 必须匹配 WebView2 Runtime 的精确版本，只从微软官方地址下载；不再依赖不存在或漂移的第三方 setup action。
+- 不恢复随机 CDP 端口、90 秒等待、三次重试或吞掉原生日志的旧补丁。
+- U1-U24 定向视觉脚本由一个 runner 启动一次 preview server 后串行执行；不为每组重复安装浏览器、构建前端或启动服务。
+- CI 不调用真实 AI provider，不新增 crate、通用测试框架或产品层抽象。

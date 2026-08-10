@@ -361,3 +361,23 @@
 - U24 编译与 History 回归矩阵通过：Vue typecheck/build、`history_detail_visual_check.py`、`history_batch_visual_check.py`、`history_filter_analytics_visual_check.py`、`history_record_pagination_visual_check.py`、`history_page_states_visual_check.py` 全绿。
 - U24 全量门禁通过：Rust workspace tests、static suite `18/18`、packaged Tauri flow 和 `git diff --check` 全绿；U24 标记 completed，长期视觉搬迁目标继续，U25 进入只读审计与冻结。
 - 用户要求停止 UI 搬迁并发布当前状态；U25 只完成了只读候选审计，没有产品代码或测试实现，现标记 cancelled。当前交付边界冻结在已完整验收的 U24。
+
+## 2026-08-10 CI 门禁修复
+
+- 用户要求修复 force push 后全部失败的三个 CI 门禁，并更新旧测试基线以覆盖当前 Application/Agent/Vue/Tauri 实现。
+- 按 `github:gh-fix-ci` 读取 run `31369965578` 日志：唯一实际失败为 `browser-actions/setup-edgedriver` 仓库不存在；Rust 与 Tauri jobs 因 `needs` 链全部 skipped，没有产品测试结论。
+- 按 `planning-with-files` 恢复持久上下文；首次 catch-up 因 GBK 无法输出 Unicode 标记失败，设置 `PYTHONIOENCODING=utf-8` 后成功。
+- 三路只读审计完成：workflow 拓扑、后端/前端覆盖、packaged/16 个定向视觉脚本；结论已写入 `findings.md`。
+- C1/C2 完成，C3 进入 in progress；下一步完整读取并修改 workflow、EdgeDriver 安装、视觉 runner 与 packaged driver 日志。
+- 已完整读取将修改的 workflow、static gate、packaged runner，并核验 16 个视觉脚本的 endpoint/入口；冻结四文件族最小实现，不修改产品 Vue/Rust 业务代码。
+- C3/C4 实施完成：`.github/workflows/tauri-ci.yml` 拆成独立 jobs，`release.yml` 去除失效 action；新增 `install_edge_webdriver.ps1` 和 `run_visual_regressions.py`；packaged gate 增加 Agent IPC 负向契约与 `tauri-driver.log`。
+- 本地 static suite `18/18` 通过；`cargo test --workspace --locked` 全绿，实际覆盖 Application 24 项、Tauri host 21 项以及 DB migration/Agent audit/backup 测试。
+- EdgeDriver 安装器本地通过：WebView2/driver 均为 `151.0.4129.72`，官方二进制签名有效。
+- 统一视觉 runner 本地 16/16 通过，四组共生成 86 张本轮截图 evidence。
+- `cargo tauri build --no-bundle` 通过；packaged Tauri E2E 全绿，新增 `agentIpcBoundary` 实际通过，driver 日志正常落盘。
+- 独立实现复核发现干净 Rust job 缺 `dist/writing`、固定端口归属和活动 WebView2 识别缺口；已补前端 build、动态端口和 EdgeUpdate 注册解析，并删除 release 重复 build。动态端口首个补丁的 Python 函数边界错误被 compile 检查捕获，正在重验。
+- 第二轮动态端口矩阵 15/16 通过，History state 测试暴露 CSS readiness 与 `159.999938px` 子像素假红；已保持 CSS 硬阈值并修正测试时序/rect 容差，History 16 状态单项复验通过。
+- 动态端口 packaged Tauri gate 全绿，报告记录独立 WebDriver/native ports，新增 Agent IPC 边界继续通过。
+- 最终动态端口视觉矩阵同一次运行 `16/16` 全绿；History page states 在 CSS readiness 与 0.5px rect 容差修复后通过。release bundle Windows runner 同步固定为 `windows-2022`，timeout evidence 做 bytes 兼容收口。
+- 最终 `cargo test --workspace --locked` 复验全绿：Application 24 项、Tauri host 21 项及全部 DB/迁移/Agent audit/backup 集成测试通过；C5 完成，C6 进入提交与远端验证。
+- 本轮 `rg` 因 Codex WindowsApps 打包路径拒绝访问而无法启动；已改用 PowerShell `Select-String` 完成同一只读定位，没有影响实现或验证结论。
