@@ -8,6 +8,7 @@ workspace, plus source reading-data integrity while that migration is active.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -26,10 +27,14 @@ for stream in (sys.stdout, sys.stderr):
 
 
 def run_command(name: str, command: list[str], cwd: Path = ROOT) -> dict[str, Any]:
+    environment = os.environ.copy()
+    environment["PYTHONUTF8"] = "1"
+    environment["PYTHONIOENCODING"] = "utf-8"
     try:
         completed = subprocess.run(
             command,
             cwd=cwd,
+            env=environment,
             capture_output=True,
             text=True,
             encoding="utf-8",

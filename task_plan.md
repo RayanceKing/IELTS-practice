@@ -305,6 +305,8 @@
 | History 单项 PowerShell server 包装被 `Stop-Process -Force` 策略拦截 | 1 | 改用标准 `importlib` 限定统一 runner 的脚本集合，由 runner 自行清理进程 |
 | 首次 `runpy` 单项注入未改变函数 globals，意外复跑全矩阵 | 1 | 不重复；改用 `importlib.util.module_from_spec` 后单项 16 状态全部通过 |
 | 视觉 runner timeout 输出在部分 Python 版本可能为 bytes | 1 | 增加统一 UTF-8 `output_text` 转换，保证失败日志写入不二次报错 |
+| GitHub Windows static gate 的 Python 子进程继承 cp1252 | 1 | 在 `run_static_suite.py` 的统一 subprocess 边界固定 `PYTHONUTF8=1` 与 `PYTHONIOENCODING=utf-8` |
+| 首次 `gh run watch` 遭遇 GitHub API `unexpected EOF` | 1 | 不重复实时 watch，改用 `gh run view --json jobs` 快照和 job logs API |
 
 ## 2026-08-10 CI 门禁重构
 

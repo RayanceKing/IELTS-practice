@@ -381,3 +381,6 @@
 - 最终动态端口视觉矩阵同一次运行 `16/16` 全绿；History page states 在 CSS readiness 与 0.5px rect 容差修复后通过。release bundle Windows runner 同步固定为 `windows-2022`，timeout evidence 做 bytes 兼容收口。
 - 最终 `cargo test --workspace --locked` 复验全绿：Application 24 项、Tauri host 21 项及全部 DB/迁移/Agent audit/backup 集成测试通过；C5 完成，C6 进入提交与远端验证。
 - 本轮 `rg` 因 Codex WindowsApps 打包路径拒绝访问而无法启动；已改用 PowerShell `Select-String` 完成同一只读定位，没有影响实现或验证结论。
+- 远端 run `31376576871` 的视觉矩阵首先通过；static gate 的 17 项产品/Rust检查通过，唯一失败是 `check_reading_data_integrity.py` 在 Windows runner 的 cp1252 stdout 打印中文 JSON 时触发 `UnicodeEncodeError`。
+- 将 UTF-8 固定在 `run_static_suite.py` 的统一子进程边界，避免只给单个数据脚本增加特殊情况；其余远端 jobs 保持运行以继续收集独立证据。
+- 在显式 `PYTHONIOENCODING=cp1252`、`PYTHONUTF8=0` 的父环境下重跑 static suite，18/18 全绿；Reading source data integrity 成功输出含中文的完整 JSON，确认修复命中远端根因。
