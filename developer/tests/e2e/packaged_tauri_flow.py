@@ -16,6 +16,7 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -250,6 +251,36 @@ def free_tcp_port() -> int:
         return int(probe.getsockname()[1])
 
 
+def stage_test_runtime(app: Path) -> tuple[tempfile.TemporaryDirectory[str], Path]:
+    config_path = ROOT / "src-tauri/tauri.conf.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    resources = ((config.get("bundle") or {}).get("resources") or {})
+    if not isinstance(resources, dict) or not resources:
+        raise RuntimeError("tauri.conf.json does not declare packaged runtime resources")
+
+    temporary = tempfile.TemporaryDirectory(prefix="ielts-tauri-e2e-")
+    runtime_root = Path(temporary.name).resolve()
+    runtime_app = runtime_root / app.name
+    try:
+        shutil.copy2(app, runtime_app)
+        for source_name, target_name in resources.items():
+            source = (config_path.parent / str(source_name)).resolve()
+            destination = (runtime_root / str(target_name)).resolve()
+            if destination != runtime_root and runtime_root not in destination.parents:
+                raise RuntimeError(f"Tauri resource target escapes runtime directory: {target_name}")
+            if source.is_dir():
+                shutil.copytree(source, destination)
+            elif source.is_file():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+            else:
+                raise RuntimeError(f"Tauri resource source is missing: {source}")
+    except Exception:
+        temporary.cleanup()
+        raise
+    return temporary, runtime_app
+
+
 def wait_for_reading_view(driver: Driver, timeout_seconds: int = 30):
     deadline = time.time() + timeout_seconds
     last = None
@@ -375,7 +406,10 @@ def main() -> int:
         metadata["buildDetail"] = build_detail
     proc = None
     driver_log = None
+    staged_runtime = None
     try:
+        staged_runtime, runtime_app = stage_test_runtime(app)
+        metadata["stagedRuntimePath"] = str(runtime_app)
         DRIVER_LOG.parent.mkdir(parents=True, exist_ok=True)
         driver_log = DRIVER_LOG.open("w", encoding="utf-8", errors="replace")
         proc = subprocess.Popen(
@@ -413,7 +447,7 @@ def main() -> int:
         if status is None:
             driver_log.flush()
             raise RuntimeError(f"tauri-driver was not ready after 30s: {log_tail(DRIVER_LOG)}")
-        driver.create(str(app.resolve()))
+        driver.create(str(runtime_app))
         checks["launch"] = "passed"
         wait_for_vue(driver)
         for route in ("#/writing", "#/topics", "#/settings", "#/history", "#/agent", "#/"):
@@ -677,6 +711,8 @@ def main() -> int:
         stop_process(proc)
         if driver_log:
             driver_log.close()
+        if staged_runtime:
+            staged_runtime.cleanup()
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))

@@ -307,6 +307,8 @@
 | 视觉 runner timeout 输出在部分 Python 版本可能为 bytes | 1 | 增加统一 UTF-8 `output_text` 转换，保证失败日志写入不二次报错 |
 | GitHub Windows static gate 的 Python 子进程继承 cp1252 | 1 | 在 `run_static_suite.py` 的统一 subprocess 边界固定 `PYTHONUTF8=1` 与 `PYTHONIOENCODING=utf-8` |
 | 首次 `gh run watch` 遭遇 GitHub API `unexpected EOF` | 1 | 不重复实时 watch，改用 `gh run view --json jobs` 快照和 job logs API |
+| Linux bundle verifier 把 RPM staging 的零字节 `empty` 文件当发布产物 | 1 | 区分完整证据清单与可发布产物；只对 installer/updater 执行非空门禁，并增加正反 characterization tests |
+| packaged gate 在本地依赖旧 bundle 留下的 `target/release` 资源目录 | 1 | 每次按 Tauri resource map 把 exe 与资源放进全新临时 runtime，再启动 WebDriver；消除残留假绿 |
 
 ## 2026-08-10 CI 门禁重构
 

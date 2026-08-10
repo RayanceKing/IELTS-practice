@@ -71,6 +71,35 @@ class ReleaseConfigTests(unittest.TestCase):
 
 
 class BundleVerificationTests(unittest.TestCase):
+    def test_linux_staging_placeholder_does_not_fail_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installer = root / "IELTS Practice_0.1.0_amd64.AppImage"
+            placeholder = root / "rpm" / "IELTS Practice-0.1.0-1.x86_64" / "empty"
+            placeholder.parent.mkdir(parents=True)
+            installer.write_bytes(b"artifact")
+            placeholder.write_bytes(b"")
+            result = verify_tauri_bundle.verify_artifacts(
+                [installer, placeholder],
+                "linux",
+                require_updater=False,
+                require_signatures=False,
+            )
+            self.assertEqual(result["status"], "passed")
+
+    def test_zero_byte_installable_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            installer = Path(directory) / "IELTS Practice_0.1.0_amd64.AppImage"
+            installer.write_bytes(b"")
+            result = verify_tauri_bundle.verify_artifacts(
+                [installer],
+                "linux",
+                require_updater=False,
+                require_signatures=False,
+            )
+            self.assertEqual(result["status"], "failed")
+            self.assertIn("zero-byte publishable artifacts", result["errors"][0])
+
     def test_windows_signed_updater_bundle_passes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

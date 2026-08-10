@@ -384,3 +384,8 @@
 - 远端 run `31376576871` 的视觉矩阵首先通过；static gate 的 17 项产品/Rust检查通过，唯一失败是 `check_reading_data_integrity.py` 在 Windows runner 的 cp1252 stdout 打印中文 JSON 时触发 `UnicodeEncodeError`。
 - 将 UTF-8 固定在 `run_static_suite.py` 的统一子进程边界，避免只给单个数据脚本增加特殊情况；其余远端 jobs 保持运行以继续收集独立证据。
 - 在显式 `PYTHONIOENCODING=cp1252`、`PYTHONUTF8=0` 的父环境下重跑 static suite，18/18 全绿；Reading source data integrity 成功输出含中文的完整 JSON，确认修复命中远端根因。
+- 远端 Linux Tauri 构建实际生成了非空 AppImage、deb、rpm，verifier 仅因 RPM staging 的标准零字节 `empty` 占位文件失败；macOS bundle 同时已通过。
+- 收窄 bundle 非空合同到真正可发布的 installer/updater 文件，完整 staging 文件仍保留在 manifest 证据中；新增零字节 placeholder 允许和零字节 installer 拒绝测试。
+- packaged run 在 session 创建后窗口关闭；核验发现干净 runner 的 `--no-bundle` 产物旁没有 `reading`/`writing-topics`，而本机恰有三天前完整 bundle 的残留目录，导致先前本地 packaged 假绿。
+- packaged runner 改为从 `tauri.conf.json` 读取结构化 resource map，每次把 exe 与声明资源复制到全新临时 runtime 目录再启动，并在结束后清理；不再依赖 `target/release` 残留。
+- 新临时 runtime packaged E2E 全绿：Vue routes、reading IPC、Agent IPC、bundled resources、性能、提交、备份、更新与 SQLite restart 全部通过；metadata 明确记录独立 staged runtime 路径。

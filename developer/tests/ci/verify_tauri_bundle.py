@@ -48,9 +48,7 @@ def is_installable(path: Path, platform_name: str) -> bool:
         return lower_name.endswith((".exe", ".msi"))
     if platform_name == "linux":
         return lower_name.endswith((".appimage", ".deb", ".rpm"))
-    return lower_name.endswith(".dmg") or any(
-        parent.name.lower().endswith(".app") for parent in path.parents
-    )
+    return lower_name.endswith(".dmg")
 
 
 def is_updater_archive(path: Path, platform_name: str) -> bool:
@@ -72,11 +70,8 @@ def verify_artifacts(
     require_signatures: bool,
 ) -> dict[str, object]:
     errors: list[str] = []
-    empty_files = [str(path) for path in files if path.stat().st_size == 0]
     if not files:
         errors.append("no Tauri bundle artifacts found")
-    if empty_files:
-        errors.append(f"zero-byte bundle artifacts: {empty_files}")
 
     installables = [path for path in files if is_installable(path, platform_name)]
     if not installables:
@@ -85,6 +80,11 @@ def verify_artifacts(
     updater_archives = [path for path in files if is_updater_archive(path, platform_name)]
     if require_updater and not updater_archives:
         errors.append(f"no {platform_name} updater archive found")
+
+    publishable_artifacts = [*installables, *updater_archives]
+    empty_artifacts = [str(path) for path in publishable_artifacts if path.stat().st_size == 0]
+    if empty_artifacts:
+        errors.append(f"zero-byte publishable artifacts: {empty_artifacts}")
 
     signatures: list[Path] = []
     missing_signatures: list[str] = []
