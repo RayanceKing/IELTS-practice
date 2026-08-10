@@ -1,0 +1,49 @@
+name: Auto Sync Upstream Fork
+# 触发：每日定时 + 手动运行
+on:
+  schedule:
+    # UTC 02:00 = 北京时间 10:00 每日同步一次，按需修改cron
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync-fork:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. 拉取你仓库完整代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SYNC_PAT }}
+          fetch-depth: 0
+
+      # 2. 设置Git提交者信息（替换为你的GitHub账号信息）
+      - name: Configure git identity
+        run: |
+          git config --global user.name "RayanceKing"
+          git config --global user.email "88320297+RayanceKing@users.noreply.github.com"
+
+      # 3. 添加上游原始仓库远程地址
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/celina0503qq-lab/IELTS-Reading-Library.git
+
+      # 4. 拉取上游全部分支代码
+      - name: Fetch upstream latest
+        run: git fetch upstream
+
+      # 5. 切换主分支并合并上游main更新
+      - name: Merge upstream into local main
+        run: |
+          git checkout main
+          # 合并上游更新，自动生成合并提交
+          git merge upstream/main --no-edit
+
+      # 关键保护步骤：强制恢复自定义域名CNAME，防止上游覆盖丢失
+      - name: Restore custom domain CNAME file
+        run: |
+          echo "ielts.czumc.cn" > CNAME
+          git add CNAME
+
+      # 6. 推送更新到你的仓库
+      - name: Push synced code to origin
+        run: git push origin main
