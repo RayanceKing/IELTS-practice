@@ -1,49 +1,111 @@
-name: Auto Sync Upstream Fork
-# 触发：每日定时 + 手动运行
+name: Sync Upstream
+
 on:
   schedule:
-    # UTC 02:00 = 北京时间 10:00 每日同步一次，按需修改cron
-    - cron: "0 2 * * *"
-  workflow_dispatch:
+    # 每天 UTC 0 点同步一次（北京时间 8 点）
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 支持手动触发
 
 jobs:
-  sync-fork:
+  sync:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      # 1. 拉取你仓库完整代码
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout fork
+        uses: actions/checkout@v6
         with:
-          token: ${{ secrets.SYNC_PAT }}
-          fetch-depth: 0
+          token: ${{ secrets.FORK_SYNC_TOKEN }}
+          fetch-depth: 0  # 必须，否则拿不到所有 tag
 
-      # 2. 设置Git提交者信息（替换为你的GitHub账号信息）
-      - name: Configure git identity
+      - name: Configure git
         run: |
-          git config --global user.name "RayanceKing"
-          git config --global user.email "88320297+RayanceKing@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # 3. 添加上游原始仓库远程地址
       - name: Add upstream remote
-        run: git remote add upstream https://github.com/celina0503qq-lab/IELTS-Reading-Library.git
+        run: |
+          git remote add upstream https://github.com/sallowayma-git/IELTS-practice.git || true
+          git fetch upstream --tags --force
 
-      # 4. 拉取上游全部分支代码
-      - name: Fetch upstream latest
-        run: git fetch upstream
-
-      # 5. 切换主分支并合并上游main更新
-      - name: Merge upstream into local main
+      - name: Sync default branch (keep sync-upstream.yml)
         run: |
           git checkout main
-          # 合并上游更新，自动生成合并提交
-          git merge upstream/main --no-edit
 
-      # 关键保护步骤：强制恢复自定义域名CNAME，防止上游覆盖丢失
-      - name: Restore custom domain CNAME file
+          # 备份 sync-upstream.yml
+          mkdir -p /tmp/keep
+          if [ -f .github/workflows/sync-upstream.yml ]; then
+            cp .github/workflows/sync-upstream.yml /tmp/keep/
+          fi
+
+          # 对齐上游 main
+          git reset --hard upstream/main
+
+          # 把 sync-upstream.yml 放回去
+          mkdir -p .github/workflows
+          if [ -f /tmp/keep/sync-upstream.yml ]; then
+            cp /tmp/keep/sync-upstream.yml .github/workflows/
+          fi
+
+          git add .github/workflows/sync-upstream.yml
+          git commit -m "chore: keep sync-upstream workflow" || echo "no changes to commit"
+
+          git push origin main --force
+
+      - name: Sync all branches (可选)
         run: |
-          echo "ielts.czumc.cn" > CNAME
-          git add CNAME
+          # 同步所有分支（除 main 外）
+          for branch in $(git branch -r | grep 'upstream/' | grep -v 'upstream/main' | sed 's|upstream/||'); do
+            git checkout -B $branch upstream/$branch
+            git push origin $branch --force
+          done
+          git checkout main
 
-      # 6. 推送更新到你的仓库
-      - name: Push synced code to origin
-        run: git push origin main
+      - name: Sync tags
+        run: |
+          # 把上游所有 tag 推到 fork
+          git push origin --tags --force
+
+      - name: Sync releases via gh CLI
+        env:
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+        run: |
+          UPSTREAM_REPO="sallowayma-git/IELTS-practice"
+          MY_REPO="${{ github.repository }}"
+
+          # 第一步：只拿 tagName（list 只支持这些字段）
+          gh release list --repo "$UPSTREAM_REPO" --limit 200 \
+            --json tagName > /tmp/tags.json
+
+          # 第二步：逐个 tag 用 view 取详情（含 body）
+          jq -r '.[].tagName' /tmp/tags.json | while read -r TAG; do
+            [ -z "$TAG" ] && continue
+
+            # 检查 fork 里是否已有该 release
+            if gh release view "$TAG" --repo "$MY_REPO" > /dev/null 2>&1; then
+              echo "Release $TAG 已存在，跳过"
+              continue
+            fi
+
+            echo "获取上游 release 详情: $TAG"
+            if ! gh release view "$TAG" --repo "$UPSTREAM_REPO" \
+              --json name,body,isDraft,isPrerelease > /tmp/detail.json; then
+              echo "获取 $TAG 详情失败，跳过"
+              continue
+            fi
+
+            NAME=$(jq -r '.name // ""' /tmp/detail.json)
+            BODY=$(jq -r '.body // ""' /tmp/detail.json)
+            DRAFT=$(jq -r '.isDraft' /tmp/detail.json)
+            PRE=$(jq -r '.isPrerelease' /tmp/detail.json)
+
+            echo "创建 release: $TAG"
+            gh release create "$TAG" \
+              --repo "$MY_REPO" \
+              --title "${NAME:-$TAG}" \
+              --notes "$BODY" \
+              --draft="$DRAFT" \
+              --prerelease="$PRE" \
+              || echo "创建 $TAG 失败（可能 tag 不存在）"
+          done
