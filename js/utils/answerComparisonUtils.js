@@ -8,20 +8,20 @@
         'volume-slider',
         'volumeslider',
         'audio-volume',
-        'audioCurrentTime',
+        'audiocurrenttime',
         'audio-duration',
-        'audioDuration',
+        'audioduration',
         'settings',
-        'lastFocusElement',
+        'lastfocuselement',
         'sessionid',
         'examid',
-        'nextExamId',
-        'previousExamId',
+        'nextexamid',
+        'previousexamid',
         'folder',
         'source',
         'result',
         'metadata',
-        'practiceSettings'
+        'practicesettings'
     ]);
     const NOISE_PATTERNS = [
         /playback/i,
@@ -227,7 +227,7 @@
         }
 
         if (correctInfo.normalized == null) {
-            return false;
+            return null;
         }
 
         const core = getAnswerMatchCore();
@@ -306,6 +306,29 @@
         return null;
     }
 
+    function matchesAnswerSnapshot(value, answerInfo) {
+        const snapshot = normalizeForComparison(value);
+        const tokens = info => info.normalized == null
+            ? []
+            : [].concat(info.normalized).map(token => String(token).toLowerCase()).sort();
+        // Compare complete snapshots, not grading equivalence (which can accept
+        // one token from an array of alternatives). Selection order is irrelevant.
+        return JSON.stringify(tokens(snapshot)) === JSON.stringify(tokens(answerInfo));
+    }
+
+    function resolveStoredCorrect(entry) {
+        if (!entry.hasCorrectAnswer) {
+            return null;
+        }
+        for (const candidate of entry.correctnessCandidates) {
+            if (matchesAnswerSnapshot(candidate.userAnswer ?? candidate.user ?? candidate.answer, entry.userInfo)
+                && matchesAnswerSnapshot(candidate.correctAnswer ?? candidate.correct, entry.correctInfo)) {
+                return candidate.isCorrect;
+            }
+        }
+        return null;
+    }
+
     function alignLetterKeys(entryMap) {
         const letterKeys = Object.keys(entryMap).filter(key => /^q[a-z]+$/.test(key) && entryMap[key]);
         if (letterKeys.length === 0) {
@@ -357,6 +380,8 @@
                     numericEntry.correctInfo = letterEntry.correctInfo;
                     numericEntry.hasCorrectAnswer = true;
                 }
+
+                numericEntry.correctnessCandidates.push(...letterEntry.correctnessCandidates);
             }
 
             sortedLetterKeys.forEach(letterKey => {
@@ -375,7 +400,13 @@
 
         const userDisplay = entry.hasUserAnswer ? entry.userAnswer : 'No Answer';
         const correctDisplay = entry.hasCorrectAnswer ? entry.correctAnswer : 'N/A';
-        const isCorrect = answersMatch(entry.userInfo, entry.correctInfo);
+        // Preserve submission grading only for the final displayed answer snapshot,
+        // including any letter-to-number alignment. Legacy rows still recompute.
+        const storedCorrect = resolveStoredCorrect(entry);
+        const recomputedCorrect = answersMatch(entry.userInfo, entry.correctInfo);
+        const isCorrect = typeof storedCorrect === 'boolean'
+            ? storedCorrect
+            : recomputedCorrect;
 
         return {
             canonicalKey: entry.canonicalKey,
@@ -418,6 +449,44 @@
         const comparisonMap = mergeSourceMaps(comparisonSources);
         const userMap = mergeSourceMaps(userSources);
 
+        // Keep candidates in source order so missing or stale verdicts cannot hide
+        // a valid boolean in a later source. Display-generated flags are not grades.
+        const correctnessSources = [
+            { entries: record.answerComparison },
+            { entries: record.realData && record.realData.answerComparison },
+            { entries: record.scoreInfo && record.scoreInfo.details, producer: record.scoreInfo && record.scoreInfo.source },
+            { entries: record.realData && record.realData.scoreInfo && record.realData.scoreInfo.details,
+                producer: record.realData && record.realData.scoreInfo && record.realData.scoreInfo.source },
+            { entries: record.answerDetails },
+            { entries: record.realData && record.realData.answerDetails }
+        ];
+        const correctnessMap = new Map();
+        correctnessSources.forEach(({ entries: source, producer }) => {
+            if (!isPlainObject(source)) {
+                return;
+            }
+            Object.entries(source).forEach(([rawKey, candidate]) => {
+                if (!isPlainObject(candidate) || typeof candidate.isCorrect !== 'boolean'
+                    || candidate.isCorrectSource === 'display') {
+                    return;
+                }
+                // Older display enrichment also stored unmarked booleans. Only
+                // weighted grades or details from a submission producer can
+                // override matching; a questionId alone is normalization metadata.
+                const hasGradingEvidence = (Number.isFinite(candidate.weight) && candidate.weight > 0)
+                    || producer === 'unified_reading_page'
+                    || producer === 'listening_record_bridge';
+                if (!hasGradingEvidence) {
+                    return;
+                }
+                const { canonicalKey } = normalizeKey(rawKey);
+                if (!correctnessMap.has(canonicalKey)) {
+                    correctnessMap.set(canonicalKey, []);
+                }
+                correctnessMap.get(canonicalKey).push(candidate);
+            });
+        });
+
         const allKeys = new Set([
             ...Object.keys(comparisonMap),
             ...Object.keys(userMap),
@@ -445,6 +514,7 @@
                     correctAnswer: null,
                     hasUserAnswer: false,
                     hasCorrectAnswer: false,
+                    correctnessCandidates: (correctnessMap.get(keyInfo.canonicalKey) || []).slice(),
                     userInfo: { display: null, normalized: null },
                     correctInfo: { display: null, normalized: null }
                 };
@@ -541,13 +611,15 @@
                 total: 0,
                 correct: 0,
                 incorrect: 0,
-                unanswered: 0
+                unanswered: 0,
+                unknown: 0
             };
         }
 
         let correct = 0;
         let incorrect = 0;
         let unanswered = 0;
+        let unknown = 0;
 
         entries.forEach(entry => {
             if (!entry) {
@@ -559,8 +631,10 @@
             }
             if (entry.isCorrect === true) {
                 correct += 1;
-            } else {
+            } else if (entry.isCorrect === false) {
                 incorrect += 1;
+            } else {
+                unknown += 1;
             }
         });
 
@@ -568,7 +642,8 @@
             total: entries.length,
             correct,
             incorrect,
-            unanswered
+            unanswered,
+            unknown
         };
     }
 

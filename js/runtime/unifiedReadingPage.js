@@ -12,6 +12,11 @@
     const MEMORIZE_STYLE_ID = 'reading-memorize-style';
     const READING_NOTE_STYLE_ID = 'reading-note-style';
     const READING_DISPLAY_CONTROL_STYLE_ID = 'reading-display-control-style';
+    const OPTION_CONSUMED_STYLE_ID = 'reading-option-consumed-style';
+    // 候选池容器/选项 class 不统一，统一选择器覆盖所有变体。
+    // .headings-pool 当前都包裹 .pool-items 但作为防御一并纳入。
+    const POOL_ITEM_SELECTOR = '.drag-item, .draggable-word, .card';
+    const POOL_CONTAINER_SELECTOR = '.pool-items, #word-options, .options-pool, .option-pool, .cardpool, .headings-pool, .pool';
     const PRACTICE_TIMER_BRIDGE_KEY = '__IELTS_PRACTICE_TIMER__';
     const PRACTICE_TIMER_EVENT = 'practiceTimerStateChange';
     const READING_CANDIDATE_CODE_PATTERN = /^\d{6}$/;
@@ -74,6 +79,7 @@
 
     const state = {
         examId: null,
+        libraryConfigurationId: undefined,
         dataKey: null,
         sessionId: null,
         suiteSessionId: null,
@@ -122,7 +128,8 @@
             currentIndex: 0,
             activeStartedAtMs: null,
             slotsByExamId: new Map(),
-            activating: false
+            activating: false,
+            activationGeneration: 0
         },
         simulationDraftSyncTimer: null,
         simulationDraftFingerprint: '',
@@ -138,6 +145,8 @@
         noteDrawerDirty: true,
         noteHighlightMetaDirty: true,
         noteEditorPendingSync: false,
+        optionsReturnFocus: null,
+        optionsInertSiblings: [],
         reviewRecordId: '',
         // 单篇阅读 final-submit 成功后，宿主通过 PRACTICE_RECORD_SAVED 回传的已存档
         // practice record id。持有该 id 时，笔记编辑在只读提交页仍然可写，并且
@@ -162,6 +171,49 @@
         windowSessionGeneration: 0
     };
 
+    let diagnosticTransport = null;
+    let diagnosticBinding = null;
+    let handshakeDeadline = null;
+    let pendingSubmission = null; // Business-owned snapshot; never given to diagnostics.
+    try { diagnosticTransport = global.AppDiagnosticChannel?.createChild({
+        reporter: global.AppDiagnostics, store: global.AppDiagnosticStore
+    }); } catch (_) { }
+
+    function readingCorrelation(submission = pendingSubmission) {
+        const raw = { session: state.sessionId, suite: state.suiteSessionId,
+            submission: submission?.id || state.submissionId,
+            operation: submission?.operationId };
+        try {
+            const local = global.AppDiagnostics?.correlate(raw);
+            if (local && diagnosticBinding?.sessionId === state.sessionId
+                && diagnosticBinding?.suiteSessionId === state.suiteSessionId) {
+                return { ...local, scopeId: diagnosticBinding.aliases.scopeId,
+                    session: diagnosticBinding.aliases.session, suite: diagnosticBinding.aliases.suite };
+            }
+            return local || raw;
+        } catch (_) { return raw; }
+    }
+
+    function readingStep(action, outcome, correlation = readingCorrelation()) {
+        try { global.AppOperationDiagnostics?.breadcrumb(state.suiteSessionId ? 'suite' : 'reading', action, outcome, correlation); } catch (_) { }
+    }
+
+    function readingFailure(code, action, error, operation = 'unconfirmed', retry, resource, correlation = readingCorrelation()) {
+        try { return global.AppOperationDiagnostics?.failure({ code, module: state.suiteSessionId ? 'suite' : 'reading',
+            action, error, operation, correlation, resource }, retry); } catch (_) { return null; }
+    }
+
+    function connectReadingDiagnostics(data) {
+        try {
+            const aliases = global.AppDiagnostics?.correlate(undefined, data.diagnosticCorrelation);
+            diagnosticBinding = aliases && aliases.scopeId !== 'unknown' && aliases.session !== 'unknown'
+                ? { sessionId: state.sessionId, suiteSessionId: state.suiteSessionId, aliases } : null;
+            diagnosticTransport?.connect({ window: state.parentWindow, origin: state.parentOrigin,
+                allowOpaqueOrigin: state.parentOriginIsOpaque, sessionId: state.sessionId,
+                windowSessionToken: state.windowSessionToken });
+        } catch (_) { }
+    }
+
     const dom = {
         title: null,
         subtitle: null,
@@ -179,6 +231,7 @@
 
     const interaction = {
         timerRunning: true,
+        timerInteractionRevision: 0,
         timerInterval: null,
         lastRange: null,
         currentHighlightNode: null,
@@ -190,6 +243,24 @@
     const testOverrides = {
         renderExplanations: null
     };
+    let readingTimingController = null;
+    function readingTimingContext() {
+        return {
+            sessionId: state.sessionId, parentAttemptId: state.suiteSessionId || null,
+            sequenceIndex: state.suite?.inline ? state.suite.currentIndex : state.simulationCtx?.currentIndex,
+            examId: state.examId, libraryConfigurationId: state.libraryConfigurationId,
+            dataset: state.dataset, running: interaction.timerRunning && !state.timerLocked,
+            timerInteractionRevision: interaction.timerInteractionRevision,
+            editable: !state.reviewMode && !state.memorizeMode && !state.readOnly && !state.submitted && !isSubmissionUnconfirmed()
+                && state.submissionStatus === 'draft' && !state.suite.activating,
+            restorePause: () => setTimerRunning(false)
+        };
+    }
+    async function activateReadingTiming(draft = null) {
+        if (!global.ReadingTimingController) return;
+        if (!readingTimingController) readingTimingController = new global.ReadingTimingController(readingTimingContext);
+        await readingTimingController.activate(draft);
+    }
 
     function parseOptionalNumber(value) {
         if (value === null || value === undefined) {
@@ -289,6 +360,43 @@
         }
     }
 
+    function readSuiteSlotDurationMs(slot) {
+        if (slot && slot.durationMs !== null && slot.durationMs !== undefined) {
+            const durationMs = Number(slot.durationMs);
+            if (Number.isFinite(durationMs)) return Math.max(0, durationMs);
+        }
+        return Math.max(0, Number(slot?.durationSeconds) || 0) * 1000;
+    }
+
+    function checkpointActiveSuiteDuration(nowMs = Date.now(), keepRunning = interaction.timerRunning) {
+        if (!state.suite?.inline) {
+            return 0;
+        }
+        const slot = getActiveSuiteSlot();
+        const startedAtMs = Number(state.suite.activeStartedAtMs);
+        const checkpointMs = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+        if (slot && Number.isFinite(startedAtMs) && startedAtMs > 0) {
+            const elapsedMs = Math.max(0, checkpointMs - startedAtMs);
+            slot.durationMs = readSuiteSlotDurationMs(slot) + elapsedMs;
+            // Retain this compatibility projection for callers that still inspect
+            // the old field, but round only after the millisecond accumulator is
+            // updated so frequent draft snapshots cannot lose fractional seconds.
+            slot.durationSeconds = Math.max(0, Math.round(slot.durationMs / 1000));
+        }
+        state.suite.activeStartedAtMs = keepRunning && slot ? checkpointMs : null;
+        return readSuiteSlotDurationMs(slot);
+    }
+
+    function syncActiveSuiteTimer(nextRunning, nowMs = Date.now()) {
+        const running = nextRunning !== false;
+        const wasRunning = interaction.timerRunning !== false;
+        if (wasRunning && !running) {
+            checkpointActiveSuiteDuration(nowMs, false);
+        } else if (!wasRunning && running && state.suite?.inline && getActiveSuiteSlot()) {
+            state.suite.activeStartedAtMs = Number(nowMs) || Date.now();
+        }
+    }
+
     function resolvePracticeTiming(minDurationSeconds = 0, timerSnapshot = null) {
         const snapshot = timerSnapshot && typeof timerSnapshot === 'object'
             ? timerSnapshot
@@ -347,14 +455,16 @@
 
     function setTimerLockMode(enabled) {
         const locked = Boolean(enabled);
+        if (locked) readingTimingController?.stop();
         state.timerLocked = locked;
         document.body.classList.toggle('timer-locked-mode', locked);
-        document.querySelectorAll('input, textarea, select').forEach((control) => {
+        getPracticeFormControls().forEach((control) => {
             if (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement) {
-                control.disabled = locked || state.readOnly;
+                control.disabled = locked || state.readOnly || isSubmissionUnconfirmed();
             }
         });
-        if (dom.resetBtn) dom.resetBtn.disabled = locked || state.readOnly;
+        if (dom.resetBtn) dom.resetBtn.disabled = locked || state.readOnly || isSubmissionUnconfirmed();
+        syncOptionsClearAnswersAction();
         document.querySelectorAll('#reading-note-drawer [data-note-outline-add], #reading-note-drawer [data-note-outline-toggle], #reading-note-drawer [data-note-outline-title], #reading-note-drawer [data-note-outline-delete], #reading-note-drawer [data-note-drag-handle], #reading-note-drawer [data-note-delete]').forEach((control) => {
             if ('disabled' in control) control.disabled = locked;
         });
@@ -510,6 +620,8 @@
     }
 
     function setTimerRunning(nextRunning) {
+        const nowMs = Date.now();
+        syncActiveSuiteTimer(Boolean(nextRunning), nowMs);
         interaction.timerRunning = !!nextRunning;
         syncPagePauseState(interaction.timerRunning);
         renderTimer();
@@ -533,7 +645,10 @@
         ensurePracticeTimerBridge();
         const timer = document.getElementById('timer');
         if (timer) {
-            timer.addEventListener('click', () => setTimerRunning(!interaction.timerRunning));
+            timer.addEventListener('click', event => {
+                if (event.isTrusted) interaction.timerInteractionRevision++;
+                setTimerRunning(!interaction.timerRunning);
+            });
         }
         if (!interaction.timerInterval) {
             interaction.timerInterval = global.setInterval(() => {
@@ -545,13 +660,106 @@
         renderTimer();
     }
 
+    function isSettingsPanelOpen() {
+        return Boolean(document.getElementById('settings-panel')?.classList.contains('is-open'));
+    }
+
+    function setSettingsBackgroundInert(enabled) {
+        const settingsPanel = document.getElementById('settings-panel');
+        if (!settingsPanel || !document.body) return;
+        if (enabled) {
+            if (state.optionsInertSiblings.length) return;
+            state.optionsInertSiblings = Array.from(document.body.children || [])
+                .filter((node) => node !== settingsPanel)
+                .map((node) => ({
+                    node,
+                    hadAttribute: node.hasAttribute('inert'),
+                    inertValue: Boolean(node.inert)
+                }));
+            state.optionsInertSiblings.forEach(({ node }) => {
+                node.inert = true;
+                node.setAttribute('inert', '');
+            });
+            return;
+        }
+        state.optionsInertSiblings.forEach(({ node, hadAttribute, inertValue }) => {
+            node.inert = inertValue;
+            if (hadAttribute) node.setAttribute('inert', '');
+            else node.removeAttribute('inert');
+        });
+        state.optionsInertSiblings = [];
+    }
+
+    function getSettingsFocusableElements(settingsPanel) {
+        if (!settingsPanel) return [];
+        return Array.from(settingsPanel.querySelectorAll([
+            'button:not([disabled])',
+            'a[href]',
+            'input:not([disabled])',
+            'select:not([disabled])',
+            'textarea:not([disabled])',
+            '[tabindex]:not([tabindex="-1"])'
+        ].join(','))).filter((node) => (
+            node.getAttribute('aria-hidden') !== 'true'
+            && !node.hidden
+            && node.getClientRects().length > 0
+        ));
+    }
+
+    function trapSettingsFocus(event) {
+        if (event.key !== 'Tab' || !isSettingsPanelOpen()) return;
+        const settingsPanel = document.getElementById('settings-panel');
+        const focusable = getSettingsFocusableElements(settingsPanel);
+        if (!settingsPanel || !focusable.length) {
+            event.preventDefault();
+            settingsPanel?.focus?.();
+            return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (event.shiftKey && (active === first || !focusable.includes(active))) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && (active === last || !focusable.includes(active))) {
+            event.preventDefault();
+            first.focus();
+        }
+    }
+
     function closeFloatingPanels() {
         const settingsPanel = document.getElementById('settings-panel');
         const notesPanel = document.getElementById('notes-panel');
         const overlay = document.querySelector('.overlay');
-        if (settingsPanel) settingsPanel.style.display = 'none';
+        const settingsWereOpen = isSettingsPanelOpen();
+        // Options is a full-screen menu: drive it by class + `hidden` so it stays
+        // out of the a11y tree while closed.
+        if (settingsPanel) {
+            settingsPanel.classList.remove('is-open');
+            settingsPanel.hidden = true;
+        }
+        setSettingsBackgroundInert(false);
+        document.getElementById('settings-btn')?.setAttribute('aria-expanded', 'false');
         if (notesPanel) notesPanel.style.display = 'none';
         if (overlay) overlay.style.display = 'none';
+        if (settingsWereOpen) {
+            const returnFocus = state.optionsReturnFocus;
+            state.optionsReturnFocus = null;
+            returnFocus?.focus?.();
+        }
+    }
+
+    function openSettingsPanel() {
+        const settingsPanel = document.getElementById('settings-panel');
+        if (!settingsPanel) return;
+        closeFloatingPanels();
+        syncOptionsClearAnswersAction();
+        state.optionsReturnFocus = document.activeElement;
+        settingsPanel.hidden = false;
+        settingsPanel.classList.add('is-open');
+        setSettingsBackgroundInert(true);
+        document.getElementById('settings-btn')?.setAttribute('aria-expanded', 'true');
+        document.getElementById('options-title')?.focus?.();
     }
 
     function attachUnifiedPanels() {
@@ -562,12 +770,31 @@
         const noteBtn = document.getElementById('note-btn');
         const closeNoteBtn = document.getElementById('close-note');
 
+        const optionsCloseBtn = document.getElementById('options-close-btn');
+
         settingsBtn?.addEventListener('click', (event) => {
             event.stopPropagation();
-            const nextVisible = settingsPanel?.style.display !== 'block';
+            if (isSettingsPanelOpen()) {
+                closeFloatingPanels();
+            } else {
+                openSettingsPanel();
+            }
+        });
+        optionsCloseBtn?.addEventListener('click', (event) => {
+            event.stopPropagation();
             closeFloatingPanels();
-            if (settingsPanel && nextVisible) {
-                settingsPanel.style.display = 'block';
+            settingsBtn?.focus?.();
+        });
+        settingsPanel?.addEventListener('click', (event) => {
+            // The menu is full-screen; keep clicks inside it from bubbling to the
+            // document-level dismiss handler.
+            event.stopPropagation();
+        });
+        settingsPanel?.addEventListener('keydown', trapSettingsFocus);
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && isSettingsPanelOpen()) {
+                closeFloatingPanels();
+                settingsBtn?.focus?.();
             }
         });
         noteBtn?.addEventListener('click', () => {
@@ -593,16 +820,117 @@
         });
     }
 
+    // The bar sits below the selected word or sentence, which is what its arrow
+    // (pointing up at the text) is drawn for. It only flips above when there is
+    // no room below, and the arrow flips with it via `.is-above`.
     function positionSelectionToolbar(rect) {
         const toolbar = document.getElementById('selbar');
         if (!toolbar) return;
         toolbar.style.display = 'flex';
         global.requestAnimationFrame(() => {
-            const top = global.scrollY + rect.top - toolbar.offsetHeight - 8;
-            const left = global.scrollX + rect.left + (rect.width / 2) - (toolbar.offsetWidth / 2);
-            toolbar.style.top = `${top > 0 ? top : global.scrollY + rect.bottom + 8}px`;
-            toolbar.style.left = `${Math.max(8, left)}px`;
+            const margin = 8;
+            const width = toolbar.offsetWidth || 0;
+            const height = toolbar.offsetHeight || 0;
+            const viewportWidth = global.innerWidth || document.documentElement.clientWidth || 0;
+            const viewportHeight = global.innerHeight || document.documentElement.clientHeight || 0;
+
+            const below = rect.bottom + margin;
+            const above = rect.top - height - margin;
+            const fitsBelow = below + height <= viewportHeight - margin;
+            const isAbove = !fitsBelow && above >= margin;
+            let top = isAbove ? above : below;
+            top = Math.max(margin, Math.min(Math.max(margin, viewportHeight - height - margin), top));
+
+            let left = rect.left + (rect.width / 2) - (width / 2);
+            left = Math.max(margin, Math.min(Math.max(margin, viewportWidth - width - margin), left));
+
+            toolbar.classList.toggle('is-above', isAbove);
+            toolbar.style.top = `${Math.round(top)}px`;
+            toolbar.style.left = `${Math.round(left)}px`;
         });
+    }
+
+    function getNonEmptyTextNodes(root) {
+        const textNodes = [];
+        if (!(root instanceof Node)) {
+            return textNodes;
+        }
+        const ownerDocument = root.ownerDocument || document;
+        const nodeFilter = ownerDocument.defaultView?.NodeFilter || global.NodeFilter;
+        if (!nodeFilter) {
+            return textNodes;
+        }
+        const walker = ownerDocument.createTreeWalker(root, nodeFilter.SHOW_TEXT);
+        let textNode = walker.nextNode();
+        while (textNode) {
+            if ((textNode.data || '').length > 0) {
+                textNodes.push(textNode);
+            }
+            textNode = walker.nextNode();
+        }
+        return textNodes;
+    }
+
+    function rangeHasPositiveTextOverlap(range, node) {
+        if (!range || range.collapsed || !(node instanceof Node)) {
+            return false;
+        }
+        const textNodes = getNonEmptyTextNodes(node);
+        if (!textNodes.length) {
+            return false;
+        }
+        const ownerDocument = node.ownerDocument || document;
+        const rangeType = ownerDocument.defaultView?.Range || global.Range;
+        if (!rangeType || typeof range.compareBoundaryPoints !== 'function') {
+            return false;
+        }
+        try {
+            const nodeTextRange = ownerDocument.createRange();
+            nodeTextRange.setStart(textNodes[0], 0);
+            const lastTextNode = textNodes[textNodes.length - 1];
+            nodeTextRange.setEnd(lastTextNode, lastTextNode.data.length);
+            return range.compareBoundaryPoints(rangeType.START_TO_END, nodeTextRange) > 0
+                && range.compareBoundaryPoints(rangeType.END_TO_START, nodeTextRange) < 0;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function isAtomicPrimaryHighlightSelection(range, highlightNode) {
+        if (
+            !range
+            || range.collapsed
+            || !(highlightNode instanceof HTMLElement)
+            || !highlightNode.matches('.hl')
+            || !highlightNode.isConnected
+            || highlightNode.dataset.hlLevel === 'secondary'
+            || typeof range.comparePoint !== 'function'
+        ) {
+            return false;
+        }
+
+        const textNodes = getNonEmptyTextNodes(highlightNode);
+        if (!textNodes.length) {
+            return false;
+        }
+
+        try {
+            const ownerDocument = highlightNode.ownerDocument || document;
+            const scope = highlightNode.closest('#left, #right') || ownerDocument;
+            const intersectedHighlights = Array.from(scope.querySelectorAll('.hl'))
+                .filter((node) => rangeHasPositiveTextOverlap(range, node));
+            if (intersectedHighlights.length !== 1 || intersectedHighlights[0] !== highlightNode) {
+                return false;
+            }
+
+            const firstTextNode = textNodes[0];
+            const lastTextNode = textNodes[textNodes.length - 1];
+            return range.comparePoint(firstTextNode, 0) === 0
+                && range.comparePoint(lastTextNode, lastTextNode.data.length) === 0
+                && range.toString() === String(highlightNode.textContent || '');
+        } catch (_) {
+            return false;
+        }
     }
 
     function updateSelectionToolbar() {
@@ -641,13 +969,7 @@
                 const hls = containerElement.querySelectorAll('.hl');
                 for (let i = 0; i < hls.length; i++) {
                     const hl = hls[i];
-                    let intersects = false;
-                    if (typeof range.intersectsNode === 'function') {
-                        intersects = range.intersectsNode(hl);
-                    } else if (selection && typeof selection.containsNode === 'function') {
-                        intersects = selection.containsNode(hl, true);
-                    }
-                    if (intersects) {
+                    if (rangeHasPositiveTextOverlap(range, hl)) {
                         hasHighlight = true;
                         finalHighlightNode = hl;
                         break;
@@ -678,7 +1000,27 @@
             return;
         }
         const selection = global.getSelection();
-        if (!interaction.lastRange || interaction.lastRange.collapsed || interaction.currentHighlightNode) {
+        if (!interaction.lastRange || interaction.lastRange.collapsed) {
+            return;
+        }
+        if (kind === 'highlight' && interaction.currentHighlightNode instanceof HTMLElement) {
+            const shouldPromote = isAtomicPrimaryHighlightSelection(
+                interaction.lastRange,
+                interaction.currentHighlightNode
+            );
+            if (shouldPromote) {
+                interaction.currentHighlightNode.dataset.hlLevel = 'secondary';
+            }
+            selection?.removeAllRanges();
+            if (toolbar) toolbar.style.display = 'none';
+            interaction.lastRange = null;
+            interaction.currentHighlightNode = null;
+            if (shouldPromote) {
+                syncReadingAnnotation('highlight');
+            }
+            return;
+        }
+        if (interaction.currentHighlightNode) {
             return;
         }
         const span = document.createElement('span');
@@ -697,7 +1039,7 @@
         interaction.currentHighlightNode = null;
         if (kind === 'note') {
             const note = ensureNoteForHighlight(span, normalizeNoteText(span.textContent), { sync: false });
-            if (note) openNoteEditor(note.id, { anchorNode: span, focusBody: true });
+            if (note) openNoteEditor(note.id, { anchorNode: span });
         }
         syncReadingAnnotation('highlight');
     }
@@ -780,7 +1122,7 @@
             if (targetNode && text) {
                 const note = ensureNoteForHighlight(targetNode, text);
                 closeFloatingPanels();
-                if (note) openNoteEditor(note.id, { anchorNode: targetNode, focusBody: true });
+                if (note) openNoteEditor(note.id, { anchorNode: targetNode });
             }
         });
         document.getElementById('btnUH')?.addEventListener('click', removeSelectionHighlight);
@@ -793,6 +1135,7 @@
     function getReviewDictionaryContext() {
         return {
             examId: state.examId,
+            libraryConfigurationId: state.libraryConfigurationId,
             dataKey: state.dataKey,
             title: state.dataset?.meta?.title || '',
             category: state.dataset?.meta?.category || '',
@@ -976,11 +1319,25 @@
         }
         const promise = new Promise((resolve, reject) => {
             const script = document.createElement('script');
+            try { global.AppDiagnostics?.declareResource(script, { url: new URL(requestUrl, document.baseURI).href, optional: false }); } catch (_) { }
             script.src = requestUrl;
             script.defer = true;
-            script.onload = () => resolve(true);
-            script.onerror = () => reject(new Error(`reading_exam_script_failed:${requestUrl}`));
-            document.head.appendChild(script);
+            let settled = false;
+            const finish = (failed) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(deadline);
+                if (!failed) { readingStep('load-resource', 'succeeded'); resolve(true); return; }
+                let error = new Error('Reading resource unavailable');
+                try { error = global.AppDiagnostics?.resourceFailure(script, error) || error; } catch (_) { }
+                readingFailure('RESOURCE_LOAD_FAILED', 'load-resource', error, 'not-committed', undefined,
+                    { url: script.src, optional: false });
+                reject(error);
+            };
+            const deadline = setTimeout(() => finish(true), 15000);
+            script.onload = () => finish(false);
+            script.onerror = () => finish(true);
+            try { document.head.appendChild(script); } catch (_) { finish(true); }
         });
         scriptCache.set(requestUrl, promise);
         return promise;
@@ -1202,7 +1559,7 @@
 
     function formatNotesForLegacyText(notes = state.notes) {
         return normalizeNotes(notes).map((note) => {
-            const parts = [`# ${String(note.title || '').trim() || 'Untitled note'}`];
+            const parts = [`# ${String(note.title || '').trim() || buildDefaultNoteTitle(note.quote)}`];
             if (note.quote) parts.push(`> ${normalizeNoteText(note.quote)}`);
             if (note.body) parts.push(note.body);
             return parts.join('\n');
@@ -1260,6 +1617,7 @@
     function cloneDraftRecord(draft) {
         const source = draft && typeof draft === 'object' ? draft : {};
         return {
+            readingTiming: global.ReadingTiming?.normalize(source.readingTiming) || null,
             answers: source.answers && typeof source.answers === 'object'
                 ? { ...source.answers }
                 : {},
@@ -1301,6 +1659,7 @@
             ? Number(next.updatedAt)
             : (Number.isFinite(Number(base.updatedAt)) ? Number(base.updatedAt) : Date.now());
         const merged = Object.assign(buildEmptyDraft(), base, next, {
+            readingTiming: nextDraft?.readingTiming ? next.readingTiming : base.readingTiming,
             answers: next.answers && typeof next.answers === 'object'
                 ? { ...next.answers }
                 : { ...base.answers },
@@ -1421,6 +1780,7 @@
             return null;
         }
         const draft = mergeDraft(slot.draft, {
+            readingTiming: readingTimingController?.snapshot() || slot.draft?.readingTiming || null,
             answers: collectAnswers(),
             highlights: collectHighlights(),
             noteText: getNotesText(),
@@ -1428,21 +1788,16 @@
             noteOutlines: collectNoteOutlines(),
             markedQuestions: getCurrentMarkedQuestions(),
             scrollY: global.scrollY || 0,
-            updatedAt: Date.now()
+            // The host and mergeDraft reject equal timestamps. Preserve a new
+            // local capture even when acquisition and a timer event share a tick.
+            updatedAt: Math.max(Date.now(), (Number(slot.draft?.updatedAt) || 0) + 1)
         });
         slot.draft = draft;
         slot.navStatus = new Map(navStatus);
         slot.lastResults = state.lastResults || slot.lastResults || null;
-        if (Number.isFinite(Number(state.suite.activeStartedAtMs)) && state.suite.activeStartedAtMs > 0) {
-            const elapsedSeconds = Math.max(0, Math.round((Date.now() - state.suite.activeStartedAtMs) / 1000));
-            if (elapsedSeconds > 0) {
-                slot.durationSeconds = Math.max(0, Number(slot.durationSeconds) || 0) + elapsedSeconds;
-                state.suite.activeStartedAtMs = Date.now();
-            }
-        }
-        state.simulationDraftFingerprint = reason === 'activate'
-            ? state.simulationDraftFingerprint
-            : buildDraftFingerprint(draft);
+        checkpointActiveSuiteDuration(Date.now(), interaction.timerRunning);
+        // Local capture is not publication. The sync path owns the fingerprint
+        // so a later periodic sync can still deliver newly acquired timing.
         return draft;
     }
 
@@ -1524,21 +1879,30 @@
                 draft: mergeDraft(existing?.draft, inheritedDraft),
                 navStatus: existing?.navStatus instanceof Map ? existing.navStatus : new Map(),
                 lastResults: existing?.lastResults || null,
-                durationSeconds: Number.isFinite(Number(existing?.durationSeconds)) ? Number(existing.durationSeconds) : 0
+                durationMs: existing?.durationMs !== null
+                    && existing?.durationMs !== undefined
+                    && Number.isFinite(Number(existing.durationMs))
+                    ? Math.max(0, Number(existing.durationMs))
+                    : Math.max(0, Number(existing?.durationSeconds) || 0) * 1000,
+                durationSeconds: existing?.durationMs !== null
+                    && existing?.durationMs !== undefined
+                    && Number.isFinite(Number(existing.durationMs))
+                    ? Math.max(0, Math.round(Number(existing.durationMs) / 1000))
+                    : (Number.isFinite(Number(existing?.durationSeconds)) ? Number(existing.durationSeconds) : 0)
             }));
         }));
         return true;
     }
 
     function initDragPools() {
-        document.querySelectorAll('.pool-items').forEach((pool, index) => {
+        document.querySelectorAll(POOL_CONTAINER_SELECTOR).forEach((pool, index) => {
             if (!pool.id) {
                 pool.id = `practice-pool-${index}`;
             }
         });
-        document.querySelectorAll('.pool-items .drag-item').forEach((item) => {
+        document.querySelectorAll(`${POOL_CONTAINER_SELECTOR} ${POOL_ITEM_SELECTOR}`).forEach((item) => {
             if (!item.dataset.originPool) {
-                const pool = item.closest('.pool-items');
+                const pool = item.closest(POOL_CONTAINER_SELECTOR);
                 if (pool?.id) {
                     item.dataset.originPool = pool.id;
                 }
@@ -1562,6 +1926,52 @@
         initDragPools();
     }
 
+    function isCurrentSuiteActivation(examId, activationGeneration) {
+        return Boolean(
+            state.suite?.inline
+            && state.suite.activationGeneration === activationGeneration
+            && state.suite.activeExamId === examId
+            && state.examId === examId
+        );
+    }
+
+    async function restoreActiveSuiteSlotPresentation(slot, activationGeneration, ownsPresentation = () => true) {
+        const targetExamId = String(slot?.examId || '').trim();
+        const isCurrentActivation = () => ownsPresentation() && isCurrentSuiteActivation(targetExamId, activationGeneration);
+        if (!isCurrentActivation()) {
+            return false;
+        }
+        const shouldShowResults = Boolean(
+            slot?.lastResults
+            && (state.readOnly || state.reviewMode || state.submitted)
+        );
+        if (shouldShowResults) {
+            renderResults(slot.lastResults);
+            await renderExplanations({
+                dataKey: slot.dataKey || targetExamId,
+                examId: targetExamId,
+                isCurrent: isCurrentActivation
+            });
+            if (!isCurrentActivation()) {
+                return false;
+            }
+            applyHighlights(Array.isArray(slot.draft?.highlights) ? slot.draft.highlights : []);
+            refreshNoteHighlightAttributes();
+            restoreMissingNoteAnchors();
+            applyMemorizeLocatorHighlights();
+            enhanceReviewHighlights();
+        }
+        updateNavStatuses(shouldShowResults ? slot.lastResults : null);
+        setReadOnlyMode(state.readOnly, state.readOnlyReason);
+        if (state.timerLocked) {
+            setTimerLockMode(true);
+        } else {
+            disableDragInteractions();
+        }
+        syncPrimaryActionButtons();
+        return true;
+    }
+
     async function activateSuiteSlot(examId, options = {}) {
         if (!state.suite?.inline) {
             return false;
@@ -1571,12 +1981,15 @@
         if (!slot || !slot.dataset) {
             return false;
         }
+        readingTimingController?.stop();
+        const activationGeneration = (Number(state.suite.activationGeneration) || 0) + 1;
+        state.suite.activationGeneration = activationGeneration;
         if (!options.skipSave) {
             updateActiveSlotFromCurrentDom('deactivate');
         }
         state.suite.activating = true;
         state.suite.activeExamId = targetExamId;
-        state.suite.activeStartedAtMs = Date.now();
+        state.suite.activeStartedAtMs = interaction.timerRunning ? Date.now() : null;
         state.examId = targetExamId;
         state.dataKey = slot.dataKey || targetExamId;
         state.dataset = slot.dataset;
@@ -1594,21 +2007,30 @@
         syncInlineSuiteIdentity();
         state.simulationMode = true;
         state.simulationContextReady = true;
-        updateNavStatuses(slot.lastResults || null);
-        syncPrimaryActionButtons();
-        state.suite.activating = false;
+        try {
+            await restoreActiveSuiteSlotPresentation(slot, activationGeneration);
+        } finally {
+            if (isCurrentSuiteActivation(targetExamId, activationGeneration)) {
+                state.suite.activating = false;
+            }
+        }
+        if (!isCurrentSuiteActivation(targetExamId, activationGeneration)) {
+            return false;
+        }
         if (Number.isFinite(Number(slot.draft?.scrollY))) {
             global.scrollTo(0, Number(slot.draft.scrollY) || 0);
         }
         if (!options.skipDraftSync) {
             syncSimulationDraftSnapshot('activate');
         }
+        if (state.sessionReadySent) await activateReadingTiming(slot.draft);
         if (!options.silent) {
             postMessage('SIMULATION_ACTIVE_EXAM_CHANGE', {
                 examId: targetExamId,
                 currentIndex: state.suite.currentIndex,
                 suiteSequence: state.suite.sequence.map((entry) => ({ ...entry }))
             });
+            readingStep('suite-navigation', 'succeeded');
         }
         return true;
     }
@@ -1636,6 +2058,25 @@
             body.hide-reading-highlights .hl:not([data-hl-type="note"]):not([data-note-id]){background:transparent!important;color:inherit!important;box-shadow:none!important;outline:none!important}
             body.reading-question-nav-collapsed .practice-nav{display:none}
             body.dark-mode .reading-display-toggle-group{background:#1e293b;border-color:#475569;color:#cbd5e1}
+        `;
+        document.head.appendChild(style);
+    }
+
+    function ensureOptionConsumedStyles() {
+        if (document.getElementById(OPTION_CONSUMED_STYLE_ID)) return;
+        const style = document.createElement('style');
+        style.id = OPTION_CONSUMED_STYLE_ID;
+        style.textContent = `
+            .drag-item.option-consumed,
+            .draggable-word.option-consumed,
+            .card.option-consumed {
+                opacity: 0.45 !important;
+                cursor: not-allowed !important;
+                background: #f1f5f9 !important;
+                border-color: #cbd5e1 !important;
+                color: #94a3b8 !important;
+                pointer-events: none !important;
+            }
         `;
         document.head.appendChild(style);
     }
@@ -1692,8 +2133,11 @@
             if (node.closest?.('.reading-display-toggle-group')) return;
             node.remove();
         });
-        const headerRight = document.querySelector('.header-right');
-        if (headerRight && !document.getElementById('reading-display-toggle-group')) {
+        // The paper UI keeps the header to status + Options only, so these display
+        // toggles live inside the Options menu. Fall back to the header if an older
+        // shell without #options-tools is in use.
+        const toolsHost = document.getElementById('options-tools') || document.querySelector('.header-right');
+        if (toolsHost && !document.getElementById('reading-display-toggle-group')) {
             const group = document.createElement('div');
             group.id = 'reading-display-toggle-group';
             group.className = 'reading-display-toggle-group';
@@ -1704,8 +2148,12 @@
                 '<button type="button" class="reading-display-toggle" data-highlight-toggle="highlights" title="显示/隐藏普通高亮">H</button>',
                 '<button type="button" class="reading-display-toggle" id="reading-question-nav-toggle" data-question-nav-toggle title="隐藏题卡" aria-pressed="true">Q</button>'
             ].join('');
-            const settingsButton = document.getElementById('settings-btn');
-            headerRight.insertBefore(group, settingsButton?.parentNode === headerRight ? settingsButton : null);
+            if (toolsHost.id === 'options-tools') {
+                toolsHost.appendChild(group);
+            } else {
+                const settingsButton = document.getElementById('settings-btn');
+                toolsHost.insertBefore(group, settingsButton?.parentNode === toolsHost ? settingsButton : null);
+            }
             group.addEventListener('click', (event) => {
                 const target = event.target instanceof HTMLElement ? event.target : null;
                 if (!target) return;
@@ -1753,7 +2201,10 @@
         const style = document.createElement('style');
         style.id = READING_NOTE_STYLE_ID;
         style.textContent = `
-            .hl[data-note-id]{position:relative;cursor:pointer;background:rgba(191,219,254,.78)!important;box-shadow:inset 0 -.52em rgba(147,197,253,.34)}
+            /* Noted text uses the reference's .note-anchor blue on white. The
+               page stylesheet sets the same pair; keeping it here too means a
+               note reads correctly before that sheet's rule wins the cascade. */
+            .hl[data-note-id]{position:relative;cursor:pointer;background:rgb(32,76,207)!important;color:#fff!important}
             .hl[data-note-id].reading-note-flash{outline:2px solid #60a5fa;outline-offset:2px}.reading-notes-btn{position:relative}
             .reading-note-count{position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;padding:0 4px;border-radius:99px;background:#16a34a;color:#fff;font-size:10px;line-height:16px;text-align:center;font-weight:700;display:none}
             #reading-note-drawer{position:fixed;inset:0 0 0 auto;width:min(360px,92vw);background:#fff;border-left:1px solid #dbe4ef;box-shadow:-18px 0 36px rgba(15,23,42,.16);z-index:3600;transform:translateX(105%);transition:transform 180ms ease;display:flex;flex-direction:column}
@@ -1765,26 +2216,37 @@
             .reading-note-close,.reading-note-delete,.reading-note-outline-toggle,.reading-note-outline-delete,.reading-note-drag-handle,.reading-note-outline-add{border:0;background:transparent;color:#64748b;cursor:pointer;width:30px;height:30px;border-radius:6px}.reading-note-outline-add{background:#eff6ff;color:#1d4ed8;font-size:18px}.reading-note-outline-title-input{min-width:0;border:1px solid #93c5fd;border-radius:5px;padding:6px}
             #reading-note-editor{position:fixed;z-index:3700;width:min(620px,calc(100vw - 24px));height:min(520px,calc(100vh - 24px));min-width:320px;min-height:320px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 22px 50px rgba(15,23,42,.22);display:none;flex-direction:column;overflow:hidden;resize:both}
             .reading-note-editor-head{cursor:move;background:#f8fafc;user-select:none}.reading-note-editor-body{display:flex;flex-direction:column;gap:10px;padding:14px;flex:1;min-height:0}.reading-note-quote{margin:0;color:#475569;background:#eff6ff;border-left:3px solid #60a5fa;padding:8px 10px;max-height:74px;overflow:auto}
-            .reading-note-title,.reading-note-body{width:100%;border:1px solid #cbd5e1;border-radius:6px;padding:9px 10px;box-sizing:border-box}.reading-note-title{font-weight:700}.reading-note-body{min-height:190px;resize:vertical;flex:1}
+            .reading-note-body{width:100%;border:1px solid #cbd5e1;border-radius:6px;padding:9px 10px;box-sizing:border-box;min-height:190px;resize:vertical;flex:1}
             body.dark-mode #reading-note-drawer,body.dark-mode #reading-note-editor{background:#1e293b;border-color:#475569;color:#e2e8f0}body.dark-mode .reading-note-open,body.dark-mode .reading-note-outline-title{color:#f8fafc}
             @media(max-width:520px){#reading-note-editor{inset:12px!important;width:calc(100vw - 24px);height:calc(100vh - 24px);min-width:0;min-height:0;resize:none}}
         `;
         document.head.appendChild(style);
     }
 
+    // Notes live in the header as an icon button, declared in the page markup.
+    // The fallback build is only for hosts that predate that markup.
     function ensureReadingNotesButton() {
         let button = document.getElementById('notes-drawer-btn');
-        if (button) return button;
-        const headerRight = document.querySelector('.header-right');
-        if (!headerRight) return null;
-        button = document.createElement('button');
-        button.id = 'notes-drawer-btn';
-        button.type = 'button';
-        button.className = 'header-btn reading-notes-btn';
-        button.title = 'Notes';
-        button.innerHTML = 'Notes<span class="reading-note-count" aria-hidden="true">0</span>';
-        headerRight.insertBefore(button, headerRight.firstChild);
-        button.addEventListener('click', (event) => { event.stopPropagation(); toggleNotesDrawer(); });
+        if (!button) {
+            const host = document.querySelector('.header-right') || document.getElementById('options-tools');
+            if (!host) return null;
+            button = document.createElement('button');
+            button.id = 'notes-drawer-btn';
+            button.type = 'button';
+            button.className = 'header-btn reading-notes-btn';
+            button.title = 'Notes';
+            button.setAttribute('aria-label', 'Notes');
+            button.innerHTML = 'Notes<span class="reading-note-count" aria-hidden="true">0</span>';
+            host.insertBefore(button, host.lastElementChild || null);
+        }
+        if (button.dataset.notesBound === '1') return button;
+        button.dataset.notesBound = '1';
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            // Dismiss the Options overlay if it happens to be open.
+            closeFloatingPanels();
+            toggleNotesDrawer();
+        });
         return button;
     }
 
@@ -1815,12 +2277,10 @@
             editor = document.createElement('section');
             editor.id = 'reading-note-editor';
             editor.setAttribute('aria-hidden', 'true');
-            editor.innerHTML = '<div class="reading-note-editor-head" data-note-drag-handle><h3>Note</h3><button class="reading-note-close" type="button" data-note-editor-close>×</button></div><div class="reading-note-editor-body"><p class="reading-note-quote" data-note-quote></p><input class="reading-note-title" data-note-title type="text" placeholder="Title"><textarea class="reading-note-body" data-note-body placeholder="Write your note"></textarea></div>';
+            editor.innerHTML = '<div class="reading-note-editor-head" data-note-drag-handle><h3>Note</h3><button class="reading-note-close" type="button" data-note-editor-close aria-label="关闭笔记">×</button></div><div class="reading-note-editor-body"><p class="reading-note-quote" data-note-quote></p><textarea class="reading-note-body" data-note-body placeholder="Write your note" aria-label="Note body"></textarea></div>';
             document.body.appendChild(editor);
             editor.addEventListener('click', (event) => { if (event.target.closest?.('[data-note-editor-close]')) closeNoteEditor(); });
-            editor.querySelector('[data-note-title]')?.addEventListener('input', saveActiveNoteFromEditor);
             editor.querySelector('[data-note-body]')?.addEventListener('input', saveActiveNoteFromEditor);
-            editor.querySelector('[data-note-title]')?.addEventListener('change', flushActiveNoteFromEditor);
             editor.querySelector('[data-note-body]')?.addEventListener('change', flushActiveNoteFromEditor);
             attachNoteEditorDrag(editor);
         }
@@ -1859,7 +2319,7 @@
     }
 
     function renderNoteRow(note) {
-        const title = String(note.title || '').trim() || 'Untitled note';
+        const title = String(note.title || '').trim() || buildDefaultNoteTitle(note.quote);
         const editable = canEditReadingNotes();
         const disabled = editable ? '' : ' disabled';
         return `<div class="reading-note-row" draggable="${editable}" data-note-row="${escapeHtml(note.id)}"><button class="reading-note-open" type="button" data-note-open="${escapeHtml(note.id)}" title="${escapeHtml(title)}">${escapeHtml(title)}</button><button class="reading-note-drag-handle" type="button" data-note-drag-handle="${escapeHtml(note.id)}" aria-label="Move note"${disabled}>⋮⋮</button><button class="reading-note-delete" type="button" data-note-delete="${escapeHtml(note.id)}" aria-label="Delete note"${disabled}>×</button></div>`;
@@ -2118,6 +2578,7 @@
 
     function canEditReadingNotes() {
         if (state.timerLocked) return false;
+        if (isSubmissionUnconfirmed()) return false;
         const activePracticeCanEdit = Boolean(
             !state.readOnly
             && !state.memorizeMode
@@ -2138,19 +2599,17 @@
         if (!note) return;
         state.activeNoteId = note.id;
         const editor = document.getElementById('reading-note-editor');
-        const title = editor?.querySelector('[data-note-title]');
         const body = editor?.querySelector('[data-note-body]');
         const quote = editor?.querySelector('[data-note-quote]');
         if (!editor) return;
         const canEditNotes = canEditReadingNotes();
-        if (title) { title.value = note.title || ''; title.disabled = !canEditNotes; }
         if (body) { body.value = note.body || ''; body.disabled = !canEditNotes; }
         if (quote) { quote.textContent = note.quote || ''; quote.style.display = note.quote ? '' : 'none'; }
         editor.style.display = 'flex';
         editor.setAttribute('aria-hidden', 'false');
         global.requestAnimationFrame(() => {
             positionNoteEditor(options.anchorNode || findNoteHighlight(note.id));
-            (options.focusBody ? body : title)?.focus();
+            body?.focus();
         });
     }
 
@@ -2199,10 +2658,9 @@
         const note = getNoteById(state.activeNoteId);
         if (!note) return;
         const editor = document.getElementById('reading-note-editor');
-        const title = String(editor?.querySelector('[data-note-title]')?.value || '').trim();
         const body = String(editor?.querySelector('[data-note-body]')?.value || '');
-        if (title === note.title && body === note.body) return;
-        Object.assign(note, { title, body, updatedAt: Date.now() });
+        if (body === note.body) return;
+        Object.assign(note, { body, updatedAt: Date.now() });
         state.noteDrawerDirty = true;
         state.noteHighlightMetaDirty = true;
         state.noteEditorPendingSync = true;
@@ -2216,12 +2674,11 @@
         const note = getNoteById(state.activeNoteId);
         if (!note) return;
         const editor = document.getElementById('reading-note-editor');
-        const title = String(editor?.querySelector('[data-note-title]')?.value || '').trim();
         const body = String(editor?.querySelector('[data-note-body]')?.value || '');
-        if (title === note.title && body === note.body && !state.noteEditorPendingSync) return;
+        if (body === note.body && !state.noteEditorPendingSync) return;
         clearNoteEditorSaveTimer();
         state.noteEditorPendingSync = false;
-        upsertNote({ ...note, title, body, updatedAt: Date.now() }, { forceUi: true, reason: 'note-edit' });
+        upsertNote({ ...note, body, updatedAt: Date.now() }, { forceUi: true, reason: 'note-edit' });
     }
 
     function createNoteAnchorSpan(note) {
@@ -2482,7 +2939,10 @@
         }
     }
 
-    async function ensureExplanationDataset() {
+    async function ensureExplanationDataset(options = {}) {
+        const targetDataKey = String(options.dataKey || state.dataKey || '').trim();
+        const targetExamId = String(options.examId || state.examId || '').trim();
+        const isCurrent = typeof options.isCurrent === 'function' ? options.isCurrent : null;
         const registry = global.__READING_EXPLANATION_DATA__;
         if (!registry || typeof registry.get !== 'function') {
             return null;
@@ -2493,7 +2953,10 @@
         } catch (_) {
             return null;
         }
-        const entry = manifest[state.dataKey] || manifest[state.examId];
+        if (isCurrent && !isCurrent()) {
+            return null;
+        }
+        const entry = manifest[targetDataKey] || manifest[targetExamId];
         if (!entry || !entry.dataKey || !entry.script) {
             return null;
         }
@@ -2503,6 +2966,9 @@
             } catch (_) {
                 return null;
             }
+        }
+        if (isCurrent && !isCurrent()) {
+            return null;
         }
         const payload = registry.get(entry.dataKey);
         state.explanation = payload || null;
@@ -2874,6 +3340,19 @@
         return index >= 0 ? (state.suite.sequence[index] || null) : null;
     }
 
+    function resolveComparisonNavStatus(comparison, answered = false) {
+        if (!comparison || typeof comparison !== 'object') {
+            return answered ? 'answered' : '';
+        }
+        if (comparison.isCorrect === true) {
+            return 'correct';
+        }
+        if (comparison.isCorrect === false) {
+            return 'incorrect';
+        }
+        return answered ? 'answered' : '';
+    }
+
     function getPassageQuestionStates() {
         if (state.suite?.inline && state.suite.sequence.length) {
             const info = {
@@ -2907,7 +3386,7 @@
                     }
                     const comparison = slot?.lastResults?.answerComparison?.[qId];
                     if (comparison) {
-                        status = comparison.isCorrect ? 'correct' : 'incorrect';
+                        status = resolveComparisonNavStatus(comparison, answered);
                     }
                     return { qId, label, status, examId: entry.examId };
                 });
@@ -2969,7 +3448,7 @@
                     status = 'answered';
                 }
                 if (comparison[qId]) {
-                    status = comparison[qId].isCorrect ? 'correct' : 'incorrect';
+                    status = resolveComparisonNavStatus(comparison[qId], answered);
                 }
                 return { qId, label, status };
             });
@@ -3001,7 +3480,7 @@
                     status = 'answered';
                 }
                 if (comparison[qId]) {
-                    status = comparison[qId].isCorrect ? 'correct' : 'incorrect';
+                    status = resolveComparisonNavStatus(comparison[qId], answered);
                 }
                 return { qId, label, status };
             });
@@ -3033,7 +3512,7 @@
                     status = 'answered';
                 }
                 if (comparison[qId]) {
-                    status = comparison[qId].isCorrect ? 'correct' : 'incorrect';
+                    status = resolveComparisonNavStatus(comparison[qId], answered);
                 }
                 return { qId, label, status };
             });
@@ -3501,7 +3980,7 @@
                 navStatus.set(questionId, hasAnswer(questionId) ? 'answered' : '');
                 return;
             }
-            navStatus.set(questionId, entry.isCorrect ? 'correct' : 'incorrect');
+            navStatus.set(questionId, resolveComparisonNavStatus(entry, hasAnswer(questionId)));
         });
         buildQuestionNav();
         syncPrimaryActionButtons();
@@ -3527,6 +4006,7 @@
         if (targetPartKey === currentPartKey) {
             if (questionId) {
                 scrollToQuestion(questionId);
+                readingTimingController?.select(questionId);
             }
             return;
         }
@@ -3537,6 +4017,7 @@
                 activateSuiteSlot(targetExamId).then((activated) => {
                     if (activated && questionId) {
                         scrollToQuestion(questionId);
+                        readingTimingController?.select(questionId);
                     }
                 }).catch((error) => {
                     console.warn('[UnifiedReadingPage] inline suite navigate failed:', error);
@@ -3803,18 +4284,32 @@
         });
     }
 
-    async function renderExplanations() {
+    async function renderExplanations(options = {}) {
+        const isCurrent = typeof options.isCurrent === 'function' ? options.isCurrent : null;
+        if (isCurrent && !isCurrent()) {
+            return false;
+        }
         if (typeof testOverrides.renderExplanations === 'function') {
-            await testOverrides.renderExplanations();
-            return;
+            const commitOverride = await testOverrides.renderExplanations(options);
+            if (isCurrent && !isCurrent()) {
+                return false;
+            }
+            if (typeof commitOverride === 'function') {
+                commitOverride();
+            }
+            return true;
         }
         clearExplanations();
-        const explanation = await ensureExplanationDataset();
+        const explanation = await ensureExplanationDataset(options);
+        if (isCurrent && !isCurrent()) {
+            return false;
+        }
         if (!explanation) {
-            return;
+            return false;
         }
         renderPassageExplanations();
         renderQuestionExplanations();
+        return true;
     }
 
     function createAnswerKeyCard(questionId, answerValue) {
@@ -4136,6 +4631,7 @@
 
     function clearDropzone(dropzone) {
         if (!dropzone) return;
+        const previousPayload = getDropzonePayload(dropzone);
         dropzone.dataset.answerValue = '';
         dropzone.dataset.answerLabel = '';
         // 清除判卷残留的标记，避免重置后旧颜色残留
@@ -4147,6 +4643,10 @@
             if (holder) {
                 holder.innerHTML = '';
             }
+        }
+        // 清空后恢复 pool 中对应选项的显示（不允许复用的题组）
+        if (previousPayload) {
+            restorePoolOption(dropzone, previousPayload);
         }
         updateDropzoneState(dropzone);
     }
@@ -4165,10 +4665,12 @@
     function buildDragPayload(item) {
         if (!item) return null;
         const sourceDropzone = item.closest('.paragraph-dropzone, .match-dropzone, .drop-target-summary');
+        const sourcePool = item.closest(POOL_CONTAINER_SELECTOR);
         return {
             value: item.dataset.heading || item.dataset.option || item.dataset.key || item.dataset.word || item.dataset.value || item.dataset.answerValue || item.textContent.trim(),
             label: item.dataset.answerLabel || item.dataset.word || item.dataset.value || item.textContent.trim(),
-            sourceDropzoneId: sourceDropzone?.dataset?.dropzoneId || ''
+            sourceDropzoneId: sourceDropzone?.dataset?.dropzoneId || '',
+            sourcePoolId: sourcePool?.id || item.dataset.originPool || ''
         };
     }
 
@@ -4182,7 +4684,8 @@
             return {
                 value: String(payload.value || payload.label || '').trim(),
                 label: String(payload.label || payload.value || '').trim(),
-                sourceDropzoneId: String(payload.sourceDropzoneId || '').trim()
+                sourceDropzoneId: String(payload.sourceDropzoneId || '').trim(),
+                sourcePoolId: String(payload.sourcePoolId || '').trim()
             };
         } catch (_) {
             const fallback = String(rawValue).trim();
@@ -4203,6 +4706,15 @@
         }
         item.dataset.dragBound = '1';
         item.addEventListener('dragstart', (event) => {
+            if (isSubmissionUnconfirmed()) {
+                event.preventDefault();
+                return;
+            }
+            // 已被使用的选项不可拖拽
+            if (item.classList.contains('option-consumed') || item.dataset.consumed === '1') {
+                event.preventDefault();
+                return;
+            }
             const payload = buildDragPayload(item);
             if (!payload || !payload.value) {
                 event.preventDefault();
@@ -4238,6 +4750,7 @@
             item.dataset.answerLabel = normalizedLabel;
             item.setAttribute('draggable', 'true');
             item.addEventListener('click', () => {
+                if (isSubmissionUnconfirmed()) return;
                 clearDropzone(dropzone);
                 updateNavStatuses();
             });
@@ -4253,6 +4766,140 @@
         updateDropzoneState(dropzone);
     }
 
+    function resolvePoolContainer(group) {
+        // 候选池容器 class 不统一：.pool-items / #word-options / .options-pool /
+        // .option-pool / .cardpool 均可能是（.option-pool 与 .options-pool 是不同 class，
+        // .cardpool 用于卡片匹配题，二者都必须覆盖）
+        if (!group) return null;
+        return group.querySelector(POOL_CONTAINER_SELECTOR);
+    }
+
+    function resolveOptionGroupAndPool(dropzone, payload) {
+        // 辅助函数：在左右分栏布局下也能找到正确的题组容器和选项池。
+        // 优先用 dropzone 定位所属组（consume/restore 针对放置/清空的答案区所属组，
+        // 跨组交换时不能用 payload 来源定位，否则会误伤源组），sourcePoolId 作兜底。
+        let group = null;
+        let pool = null;
+
+        // 1. 优先从 dropzone 向上查找 group（目标/源答案区所属组）
+        if (dropzone) {
+            group = dropzone.closest('.unified-group');
+            if (group) {
+                pool = resolvePoolContainer(group);
+            }
+        }
+
+        // 2. 尝试通过 payload.sourcePoolId 查找 pool（兼容分栏下 closest 失效）
+        if (!group && payload && payload.sourcePoolId) {
+            pool = document.getElementById(payload.sourcePoolId);
+            if (pool) {
+                group = pool.closest('.unified-group');
+            }
+        }
+
+        // 3. 如果还没找到，找到页面上 allowOptionReuse=false 的 group
+        if (!group) {
+            group = document.querySelector('.unified-group[data-allow-option-reuse="false"]');
+            if (group) {
+                pool = resolvePoolContainer(group);
+            }
+        }
+
+        // 4. 最后兜底：直接找第一个 pool
+        if (!pool) {
+            pool = document.querySelector(POOL_CONTAINER_SELECTOR);
+            if (pool) {
+                group = group || pool.closest('.unified-group');
+            }
+        }
+
+        return { group, pool };
+    }
+
+    function findPoolItemByValue(pool, consumedValue) {
+        // 统一候选 item 类型：.drag-item（段落/匹配）、.draggable-word（选词填空）
+        if (!pool) return null;
+        const items = pool.querySelectorAll(POOL_ITEM_SELECTOR);
+        for (const item of items) {
+            const itemValue = canonicalizeAnswerToken(
+                item.dataset.heading || item.dataset.option || item.dataset.key
+                || item.dataset.word || item.dataset.value || item.textContent
+            );
+            if (itemValue && itemValue === consumedValue) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    function consumePoolOption(dropzone, payload) {
+        // 段落匹配等不允许复用的题组：选项拖走后在候选池标记为已使用（禁用+标灰），
+        // 便于用户直观看到哪些选项已被使用，且不可再次选择。
+        if (!dropzone || !payload || !payload.value) {
+            return;
+        }
+        const { group, pool } = resolveOptionGroupAndPool(dropzone, payload);
+        if (!group || !pool || group.dataset.allowOptionReuse !== 'false') {
+            return;
+        }
+        const consumedValue = canonicalizeAnswerToken(payload.value);
+        const item = findPoolItemByValue(pool, consumedValue);
+        if (item && !item.dataset.consumed) {
+            item.dataset.consumed = '1';
+            item.classList.add('option-consumed');
+            item.setAttribute('draggable', 'false');
+        }
+    }
+
+    function restorePoolOption(dropzone, payload) {
+        if (!dropzone || !payload || !payload.value) {
+            return;
+        }
+        const { group, pool } = resolveOptionGroupAndPool(dropzone, payload);
+        if (!group || !pool || group.dataset.allowOptionReuse !== 'false') {
+            return;
+        }
+        // 限定到当前组的 questionIds：同一页面可能有多个不允许复用的题组
+        // 使用相同选项字母（如 p2-high-233 组2/组3 都用 A-E），
+        // 跨组扫描会误伤其他组的独立选项。
+        const groupQuestionIds = new Set(
+            String(group.dataset.questionIds || '')
+                .split(',')
+                .map((entry) => normalizeQuestionId(entry.trim()))
+                .filter(Boolean)
+        );
+        const restoredValue = canonicalizeAnswerToken(payload.value);
+        const item = findPoolItemByValue(pool, restoredValue);
+        if (item && item.dataset.consumed) {
+            // 仅当该选项未被当前组的其他 dropzone 使用时才恢复
+            // 左右分栏布局下 dropzone 不在 group 内，需按 questionId 匹配；
+            // summary 填空题的答案也存在 .drop-target-summary 中，需一并检查
+            const groupDropzones = Array.from(document.querySelectorAll('.paragraph-dropzone, .match-dropzone, .drop-target-summary'))
+                .filter((zone) => {
+                    const zoneQuestion = zone.dataset.question || zone.dataset.questionId || '';
+                    const zoneIds = expandQuestionSequence(zoneQuestion);
+                    const normalizedZoneIds = zoneIds.length
+                        ? zoneIds.map((id) => normalizeQuestionId(id)).filter(Boolean)
+                        : [normalizeQuestionId(zoneQuestion)].filter(Boolean);
+                    return normalizedZoneIds.some((id) => groupQuestionIds.has(id));
+                });
+            const stillUsed = groupDropzones.some((zone) => {
+                const zonePayload = getDropzonePayload(zone);
+                return zonePayload
+                    && canonicalizeAnswerToken(zonePayload.value) === restoredValue;
+            });
+            if (!stillUsed) {
+                delete item.dataset.consumed;
+                item.classList.remove('option-consumed');
+                // 恢复可用性时需保留当前交互锁：计时器锁定或只读状态下
+                // 不允许重新启用选项，否则可绕过锁定继续作答
+                const interactionLocked = Boolean(state.readOnly || state.timerLocked || isSubmissionUnconfirmed());
+                item.setAttribute('draggable', interactionLocked ? 'false' : 'true');
+                item.classList.toggle('drag-item-locked', interactionLocked);
+            }
+        }
+    }
+
     function handleDropOnDropzone(dropzone, payload) {
         if (!dropzone || !payload || !payload.value) {
             return;
@@ -4265,12 +4912,28 @@
             return;
         }
         const previousPayload = getDropzonePayload(dropzone);
+        const sourcePreviousPayload = getDropzonePayload(sourceDropzone);
         setDropzoneAnswer(dropzone, payload.value, payload.label);
+
+        // 目标 dropzone：消耗新值；若原来有值且被替换，恢复原值（仅当不再被使用）
+        consumePoolOption(dropzone, payload);
+        if (previousPayload && previousPayload.value
+            && canonicalizeAnswerToken(previousPayload.value) !== canonicalizeAnswerToken(payload.value)) {
+            restorePoolOption(dropzone, previousPayload);
+        }
+
         if (sourceDropzone && sourceDropzone !== dropzone) {
+            // 跨答案区拖动：先把目标旧值移入源 dropzone（消耗源组对应选项），
+            // 再恢复源旧值——此时源已更新，才能正确判断源旧值是否仍被使用
             if (previousPayload && previousPayload.value) {
                 setDropzoneAnswer(sourceDropzone, previousPayload.value, previousPayload.label);
+                consumePoolOption(sourceDropzone, previousPayload);
             } else {
                 clearDropzone(sourceDropzone);
+            }
+            // 源 dropzone 的旧值已被移走，恢复其在 pool 中的状态（仅当不再被使用）
+            if (sourcePreviousPayload && sourcePreviousPayload.value) {
+                restorePoolOption(sourceDropzone, sourcePreviousPayload);
             }
         }
         updateNavStatuses();
@@ -4284,11 +4947,17 @@
         if (!sourceDropzone) {
             return;
         }
+        // 先记录原答案，清空后恢复 pool 中的选项显示
+        const previousPayload = getDropzonePayload(sourceDropzone);
         clearDropzone(sourceDropzone);
+        if (previousPayload) {
+            restorePoolOption(sourceDropzone, previousPayload);
+        }
         updateNavStatuses();
     }
 
     function attachDragDrop() {
+        ensureOptionConsumedStyles();
         getDropzones().forEach((dropzone, index) => {
             if (!dropzone.dataset.dropzoneId) {
                 dropzone.dataset.dropzoneId = `dropzone-${index + 1}`;
@@ -4303,7 +4972,7 @@
         });
         document.addEventListener('dragover', (event) => {
             const target = event.target instanceof HTMLElement
-                ? event.target.closest('.paragraph-dropzone, .match-dropzone, .drop-target-summary, .pool-items')
+                ? event.target.closest(`.paragraph-dropzone, .match-dropzone, .drop-target-summary, ${POOL_CONTAINER_SELECTOR}`)
                 : null;
             if (!target) {
                 return;
@@ -4313,13 +4982,17 @@
         });
         document.addEventListener('dragleave', (event) => {
             const target = event.target instanceof HTMLElement
-                ? event.target.closest('.paragraph-dropzone, .match-dropzone, .drop-target-summary, .pool-items')
+                ? event.target.closest(`.paragraph-dropzone, .match-dropzone, .drop-target-summary, ${POOL_CONTAINER_SELECTOR}`)
                 : null;
             target?.classList?.remove('drag-over');
         });
         document.addEventListener('drop', (event) => {
+            if (isSubmissionUnconfirmed()) {
+                event.preventDefault();
+                return;
+            }
             const target = event.target instanceof HTMLElement
-                ? event.target.closest('.paragraph-dropzone, .match-dropzone, .drop-target-summary, .pool-items')
+                ? event.target.closest(`.paragraph-dropzone, .match-dropzone, .drop-target-summary, ${POOL_CONTAINER_SELECTOR}`)
                 : null;
             if (!target) {
                 return;
@@ -4331,7 +5004,7 @@
             if (!payload) {
                 return;
             }
-            if (target.classList.contains('pool-items')) {
+            if (target.matches(POOL_CONTAINER_SELECTOR) || target.closest(POOL_CONTAINER_SELECTOR)) {
                 handleDropBackToPool(payload);
                 return;
             }
@@ -4339,9 +5012,35 @@
         });
     }
 
+    function getPracticeAnswerRoot() {
+        // The reader and note editor share this document, but only the rendered
+        // practice questions own answer controls. Never fall back to document.
+        return dom.groups || document.getElementById('question-groups');
+    }
+
+    function getPracticeFormControls() {
+        const roots = [
+            getPracticeAnswerRoot(),
+            dom.left || document.getElementById('left'),
+            document.getElementById('notes-panel'),
+            document.getElementById('reading-note-editor'),
+            document.getElementById('reading-note-drawer')
+        ].filter(Boolean);
+        return Array.from(new Set(roots.flatMap((root) => Array.from(root.querySelectorAll('input, textarea, select')))));
+    }
+
+    function isTextualAnswerControl(field) {
+        const tagName = String(field?.tagName || '').toUpperCase();
+        return tagName === 'SELECT'
+            || tagName === 'TEXTAREA'
+            || (tagName === 'INPUT' && String(field.type || 'text').toLowerCase() === 'text');
+    }
+
     function getCheckboxAnswers() {
         const grouped = new Map();
-        document.querySelectorAll('input[type="checkbox"][name]').forEach((input) => {
+        const root = getPracticeAnswerRoot();
+        if (!root) return grouped;
+        root.querySelectorAll('input[type="checkbox"][name]').forEach((input) => {
             const name = input.name;
             if (!grouped.has(name)) {
                 grouped.set(name, []);
@@ -4375,11 +5074,13 @@
     }
 
     function getTextualAnswer(questionId) {
+        const root = getPracticeAnswerRoot();
+        if (!root) return '';
         const aliases = resolveAnswerAliases(questionId);
         const fieldMap = new Map();
         aliases.forEach((alias) => {
-            document.querySelectorAll(`[name="${alias}"]`).forEach((field) => {
-                if (!fieldMap.has(field)) {
+            root.querySelectorAll(`[name="${escapeSelector(alias)}"]`).forEach((field) => {
+                if (isTextualAnswerControl(field) && !fieldMap.has(field)) {
                     fieldMap.set(field, true);
                 }
             });
@@ -4387,14 +5088,6 @@
         const fields = Array.from(fieldMap.keys());
         const values = [];
         for (const field of fields) {
-            if (field.type === 'radio') continue;
-            if (field.tagName === 'SELECT') {
-                const value = String(field.value || '').trim();
-                if (value) {
-                    values.push(value);
-                }
-                continue;
-            }
             const value = String(field.value || '').trim();
             if (value) {
                 values.push(value);
@@ -4402,8 +5095,8 @@
         }
         if (!values.length) {
             aliases.forEach((alias) => {
-                const inputById = document.getElementById(`${alias}_input`);
-                if (!inputById || !('value' in inputById)) {
+                const inputById = root.querySelector(`[id="${escapeSelector(`${alias}_input`)}"]`);
+                if (!isTextualAnswerControl(inputById)) {
                     return;
                 }
                 const value = String(inputById.value || '').trim();
@@ -4539,6 +5232,9 @@
     }
 
     function findDropzoneByQuestionId(questionId) {
+        // Matching headings can live beside passage paragraphs in the left pane.
+        const roots = [getPracticeAnswerRoot(), dom.left || document.getElementById('left')].filter(Boolean);
+        if (!roots.length) return null;
         const aliases = resolveAnswerAliases(questionId);
         for (let index = 0; index < aliases.length; index += 1) {
             const alias = aliases[index];
@@ -4556,19 +5252,21 @@
                 `#${escaped}-dropzone`,
                 `#${escaped}-target`
             ].join(', ');
-            let direct = null;
-            try {
-                direct = document.querySelector(selector);
-            } catch (_) {
-                direct = null;
-            }
-            if (direct) {
-                return direct;
-            }
-            const anchor = document.getElementById(`${alias}-anchor`);
-            const paragraphZone = anchor?.parentElement?.querySelector?.('.paragraph-dropzone');
-            if (paragraphZone) {
-                return paragraphZone;
+            for (const root of roots) {
+                let direct = null;
+                try {
+                    direct = root.querySelector(selector);
+                } catch (_) {
+                    direct = null;
+                }
+                if (direct) {
+                    return direct;
+                }
+                const anchor = root.querySelector(`[id="${escapeSelector(`${alias}-anchor`)}"]`);
+                const paragraphZone = anchor?.parentElement?.querySelector?.('.paragraph-dropzone');
+                if (paragraphZone) {
+                    return paragraphZone;
+                }
             }
         }
         return null;
@@ -4591,6 +5289,8 @@
         }
         const label = normalizeAnswerForReplay(rawValue, 'label') || value;
         setDropzoneAnswer(dropzone, value, label);
+        // 回放答案时也需要标记选项为已使用（不允许复用的题组）
+        consumePoolOption(dropzone, { value, label });
         return true;
     }
 
@@ -4622,11 +5322,13 @@
 
     function collectAnswers() {
         const order = Array.isArray(state.dataset?.questionOrder) ? state.dataset.questionOrder : [];
+        const questionIdsInDataset = new Set(order);
+        const root = getPracticeAnswerRoot();
         const answers = {};
         const checkboxGroups = getCheckboxAnswers();
 
         checkboxGroups.forEach((values, name) => {
-            const questionIds = resolveCheckboxQuestionIds(name);
+            const questionIds = resolveCheckboxQuestionIds(name).filter((questionId) => questionIdsInDataset.has(questionId));
             if (!questionIds.length) {
                 return;
             }
@@ -4644,7 +5346,7 @@
             if (Object.prototype.hasOwnProperty.call(answers, questionId)) {
                 return;
             }
-            const radios = document.querySelectorAll(`input[type="radio"][name="${questionId}"]`);
+            const radios = root?.querySelectorAll(`input[type="radio"][name="${escapeSelector(questionId)}"]`) || [];
             if (radios.length) {
                 const checked = Array.from(radios).find((input) => input.checked);
                 answers[questionId] = checked ? String(checked.value).trim() : '';
@@ -4789,6 +5491,40 @@
         return lookup;
     }
 
+    function isCheckboxMultiChoiceGroup(questionGroup) {
+        if (
+            !questionGroup
+            || (questionGroup.kind !== 'multi_choice' && questionGroup.kind !== 'multiple_choice')
+            || !Array.isArray(questionGroup.questionIds)
+            || questionGroup.questionIds.length === 0
+        ) {
+            return false;
+        }
+
+        // Generated datasets historically used `multi_choice` for both one
+        // shared checkbox set and several independent radio questions. The
+        // input primitive in bodyHtml disambiguates those production shapes.
+        const bodyHtml = typeof questionGroup.bodyHtml === 'string' ? questionGroup.bodyHtml : '';
+        if (/\btype\s*=\s*(?:"checkbox"|'checkbox'|checkbox)(?=\s|\/?>)/i.test(bodyHtml)) {
+            return true;
+        }
+        if (/\btype\s*=\s*(?:"radio"|'radio'|radio)(?=\s|\/?>)/i.test(bodyHtml)) {
+            return false;
+        }
+
+        // Preserve compatibility for older/synthetic records that lack the
+        // source HTML: multi-choice groups were stored as checkbox sets.
+        return true;
+    }
+
+    function isSharedMultiChoiceGroup(questionGroup) {
+        return Boolean(
+            Array.isArray(questionGroup?.questionIds)
+            && questionGroup.questionIds.length > 1
+            && isCheckboxMultiChoiceGroup(questionGroup)
+        );
+    }
+
     function areAnswerTokensEquivalent(left, right) {
         const core = getAnswerMatchCore();
         if (core && typeof core.areTokensEquivalent === 'function') {
@@ -4897,12 +5633,7 @@
     function questionWeight(correctAnswer, questionGroup = null) {
         if (Array.isArray(correctAnswer)) {
             const normalized = normalizeAnswerValue(correctAnswer);
-            const isMultiChoiceGroup = Boolean(
-                questionGroup
-                && (questionGroup.kind === 'multi_choice' || questionGroup.kind === 'multiple_choice')
-                && Array.isArray(questionGroup.questionIds)
-            );
-            if (isMultiChoiceGroup && Array.isArray(normalized) && normalized.length > 0) {
+            if (isCheckboxMultiChoiceGroup(questionGroup) && Array.isArray(normalized) && normalized.length > 0) {
                 return normalized.length;
             }
             return 1;
@@ -4920,12 +5651,7 @@
         // 需按组内期望数量判断是否真正作答完毕（如 5选2 需选满 2 个）。
         const normalizedQuestionId = normalizeQuestionId(questionId) || questionId;
         const questionGroup = buildQuestionGroupLookup(dataset).get(normalizedQuestionId) || null;
-        const isSplitMultiChoiceGroup = Boolean(
-            questionGroup
-            && (questionGroup.kind === 'multi_choice' || questionGroup.kind === 'multiple_choice')
-            && Array.isArray(questionGroup.questionIds)
-            && questionGroup.questionIds.length > 1
-        );
+        const isSplitMultiChoiceGroup = isSharedMultiChoiceGroup(questionGroup);
         if (isSplitMultiChoiceGroup) {
             const answerKey = dataset?.answerKey || {};
             const expectedCount = questionGroup.questionIds
@@ -4966,16 +5692,13 @@
                 questionGroup
                 && (questionGroup.kind === 'multi_choice' || questionGroup.kind === 'multiple_choice')
             );
-            const isSplitMultiChoiceGroup = Boolean(
-                isMultiChoiceKind
-                && Array.isArray(questionGroup.questionIds)
-                && questionGroup.questionIds.length > 1
-            );
+            const isSplitMultiChoiceGroup = isSharedMultiChoiceGroup(questionGroup);
             const isSingleKeyMultiChoiceGroup = Boolean(
                 isMultiChoiceKind
                 && Array.isArray(questionGroup.questionIds)
                 && questionGroup.questionIds.length === 1
                 && Array.isArray(correctAnswer)
+                && isCheckboxMultiChoiceGroup(questionGroup)
             );
             let displayUserAnswer = userAnswer;
             let isCorrect = compareAnswers(userAnswer, correctAnswer);
@@ -5068,17 +5791,48 @@
         return buildResultsFromAnswers(state.dataset, collectAnswers());
     }
 
+    function resultEntryOrderNumber(entry) {
+        const number = questionNumberFromId(entry && entry.questionId);
+        return Number.isFinite(number) ? number : null;
+    }
+
+    // 结果表格必须按题号（显示题号，已通过 questionDisplayMap 换算）升序展示。
+    // answerComparison 的键顺序在持久化/回放等环节可能被规范化为字符串字典序
+    // （如 q1,q10,q11,…,q2），直接 Object.values 会让 q10–q13（显示 23–26）
+    // 排到 q2（显示 15）之前，因此这里在展示层统一做一次稳定的数字排序兜底。
+    function orderResultEntries(entries) {
+        return entries.slice().sort((left, right) => {
+            const leftNumber = resultEntryOrderNumber(left);
+            const rightNumber = resultEntryOrderNumber(right);
+            if (leftNumber != null && rightNumber != null) {
+                if (leftNumber !== rightNumber) {
+                    return leftNumber - rightNumber;
+                }
+            } else if (leftNumber != null) {
+                return -1;
+            } else if (rightNumber != null) {
+                return 1;
+            }
+            return String(left?.questionId || '').localeCompare(String(right?.questionId || ''), 'en');
+        });
+    }
+
     function renderResults(results) {
         if (!dom.results) return;
-        const rows = Object.values(results.answerComparison).map((entry) => {
+        const rows = orderResultEntries(Object.values(results.answerComparison || {})).map((entry) => {
             const label = escapeHtml(displayLabel(entry.questionId));
             const userAnswer = escapeHtml(displayAnswerValue(entry.userAnswer));
             const correctAnswer = escapeHtml(displayAnswerValue(entry.correctAnswer, ''));
             const partial = Number(entry.partialCorrectCount) || 0;
             const weight = Number(entry.weight) || 1;
-            const isPartial = !entry.isCorrect && partial > 0 && weight > 1;
-            const status = entry.isCorrect ? '✓' : (isPartial ? `${partial}/${weight}` : '✗');
-            const statusClass = entry.isCorrect ? 'result-correct' : (isPartial ? 'result-partial' : 'result-incorrect');
+            const correctnessKnown = entry.isCorrect === true || entry.isCorrect === false;
+            const isPartial = entry.isCorrect === false && partial > 0 && weight > 1;
+            const status = entry.isCorrect === true
+                ? '✓'
+                : (isPartial ? `${partial}/${weight}` : (correctnessKnown ? '✗' : '—'));
+            const statusClass = entry.isCorrect === true
+                ? 'result-correct'
+                : (isPartial ? 'result-partial' : (correctnessKnown ? 'result-incorrect' : 'result-unknown'));
             return `
                 <tr>
                     <td><button type="button" class="question-jump-btn" data-result-question-id="${escapeHtml(entry.questionId)}" aria-label="跳转到题号 ${label} 的原文证据">${label}</button></td>
@@ -5089,8 +5843,12 @@
             `;
         }).join('');
         dom.results.innerHTML = `
-            <h4>答题结果</h4>
-            <p>得分 ${results.scoreInfo.correct} / ${results.scoreInfo.totalQuestions} · ${results.scoreInfo.percentage}%</p>
+            <div class="results-header-bar">
+                <div class="results-header-summary">
+                    <h4>答题结果</h4>
+                    <p class="results-score-text">得分 ${results.scoreInfo.correct} / ${results.scoreInfo.totalQuestions} · ${results.scoreInfo.percentage}%</p>
+                </div>
+            </div>
             <table class="results-table">
                 <thead>
                     <tr>
@@ -5245,15 +6003,17 @@
     }
 
     function collectChoiceInputsForQuestion(questionId) {
+        const root = getPracticeAnswerRoot();
+        if (!root) return [];
         const normalizedTarget = normalizeQuestionId(questionId);
         // 直接匹配
-        let inputs = document.querySelectorAll(`input[type="checkbox"][name="${escapeSelector(questionId)}"], input[type="radio"][name="${escapeSelector(questionId)}"]`);
+        let inputs = root.querySelectorAll(`input[type="checkbox"][name="${escapeSelector(questionId)}"], input[type="radio"][name="${escapeSelector(questionId)}"]`);
         if (inputs.length) {
             return Array.from(inputs);
         }
         // 扫描所有 checkbox/radio 组，匹配 name 展开后的题目序列
         const matched = [];
-        document.querySelectorAll('input[type="checkbox"][name], input[type="radio"][name]').forEach((input) => {
+        root.querySelectorAll('input[type="checkbox"][name], input[type="radio"][name]').forEach((input) => {
             const name = input.name || '';
             const ids = expandQuestionSequence(name);
             if (ids.some((id) => normalizeQuestionId(id) === normalizedTarget)) {
@@ -5315,20 +6075,82 @@
                 : (Object.prototype.hasOwnProperty.call(normalizedAnswers, questionId) ? normalizedAnswers[questionId] : '');
         });
 
-        const hasCanonicalCorrectAnswers = Object.keys(normalizedCorrectAnswers).length > 0;
-        if (hasCanonicalCorrectAnswers) {
+        const hasUsableCorrectAnswer = (questionId) => (
+            Object.prototype.hasOwnProperty.call(normalizedCorrectAnswers, questionId)
+            && splitAnswerTokens(normalizedCorrectAnswers[questionId]).length > 0
+        );
+        const replayGroupLookup = buildQuestionGroupLookup(state.dataset);
+        const knownQuestionIds = Array.from(questionIds).filter((questionId) => {
+            if (!hasUsableCorrectAnswer(questionId)) {
+                return false;
+            }
+            const questionGroup = replayGroupLookup.get(questionId);
+            const isSplitMultiChoiceGroup = isSharedMultiChoiceGroup(questionGroup);
+            return !isSplitMultiChoiceGroup
+                || questionGroup.questionIds.every((groupQuestionId) => hasUsableCorrectAnswer(groupQuestionId));
+        });
+        if (knownQuestionIds.length > 0) {
             const replayResults = buildResultsFromAnswers(
                 Object.assign({}, state.dataset || {}, {
                     answerKey: normalizedCorrectAnswers,
-                    questionOrder: Array.from(questionIds)
+                    questionOrder: knownQuestionIds
                 }),
                 replayAnswers
             );
+            const answerComparison = {};
+            questionIds.forEach((questionId) => {
+                answerComparison[questionId] = replayResults.answerComparison[questionId] || {
+                    questionId,
+                    userAnswer: replayAnswers[questionId],
+                    correctAnswer: '',
+                    isCorrect: null
+                };
+            });
+            const persistedScoreInfo = entry.scoreInfo && typeof entry.scoreInfo === 'object'
+                ? entry.scoreInfo
+                : (entry.realData?.scoreInfo && typeof entry.realData.scoreInfo === 'object'
+                    ? entry.realData.scoreInfo
+                    : {});
+            const persistedTotalForCompleteness = Number(
+                persistedScoreInfo.total ?? persistedScoreInfo.totalQuestions
+            );
+            const replayTotalForCompleteness = Number(
+                replayResults.scoreInfo?.total ?? replayResults.scoreInfo?.totalQuestions
+            );
+            const hasCompleteCorrectAnswerMap = questionIds.size > 0
+                && Array.from(questionIds).every((questionId) => hasUsableCorrectAnswer(questionId))
+                && (
+                    !Number.isFinite(persistedTotalForCompleteness)
+                    || !Number.isFinite(replayTotalForCompleteness)
+                    || persistedTotalForCompleteness <= replayTotalForCompleteness
+                );
+            const scoreInfo = hasCompleteCorrectAnswerMap
+                ? Object.assign({}, persistedScoreInfo, replayResults.scoreInfo)
+                : Object.assign({}, replayResults.scoreInfo, persistedScoreInfo);
+            if (!hasCompleteCorrectAnswerMap) {
+                const persistedCorrect = Number(persistedScoreInfo.correct ?? persistedScoreInfo.score);
+                const persistedTotal = Number(persistedScoreInfo.total ?? persistedScoreInfo.totalQuestions);
+                if (Number.isFinite(persistedCorrect) && persistedCorrect >= 0) {
+                    scoreInfo.correct = persistedCorrect;
+                }
+                if (Number.isFinite(persistedTotal) && persistedTotal >= 0) {
+                    scoreInfo.total = persistedTotal;
+                    scoreInfo.totalQuestions = persistedTotal;
+                }
+                const persistedAccuracy = Number(persistedScoreInfo.accuracy);
+                scoreInfo.accuracy = Number.isFinite(persistedAccuracy)
+                    ? persistedAccuracy
+                    : (scoreInfo.totalQuestions > 0 ? scoreInfo.correct / scoreInfo.totalQuestions : 0);
+                const persistedPercentage = Number(persistedScoreInfo.percentage);
+                scoreInfo.percentage = Number.isFinite(persistedPercentage)
+                    ? persistedPercentage
+                    : Math.round(scoreInfo.accuracy * 100);
+            }
             return {
-                answers: normalizedAnswers,
+                answers: replayAnswers,
                 correctAnswers: normalizedCorrectAnswers,
-                answerComparison: replayResults.answerComparison,
-                scoreInfo: Object.assign({}, entry.scoreInfo || {}, replayResults.scoreInfo)
+                answerComparison,
+                scoreInfo
             };
         }
 
@@ -5343,7 +6165,11 @@
         });
 
         const totalQuestions = questionIds.size;
-        const scoreInfo = Object.assign({}, entry.scoreInfo || {});
+        const scoreInfo = Object.assign(
+            {},
+            (entry.realData?.scoreInfo && typeof entry.realData.scoreInfo === 'object') ? entry.realData.scoreInfo : {},
+            (entry.scoreInfo && typeof entry.scoreInfo === 'object') ? entry.scoreInfo : {}
+        );
         scoreInfo.correct = Number.isFinite(Number(scoreInfo.correct)) ? Number(scoreInfo.correct) : 0;
         scoreInfo.total = Number.isFinite(Number(scoreInfo.total)) ? Number(scoreInfo.total) : totalQuestions;
         scoreInfo.totalQuestions = Number.isFinite(Number(scoreInfo.totalQuestions)) ? Number(scoreInfo.totalQuestions) : scoreInfo.total;
@@ -5353,7 +6179,7 @@
             : Math.round(scoreInfo.accuracy * 100);
 
         return {
-            answers: normalizedAnswers,
+            answers: replayAnswers,
             correctAnswers: normalizedCorrectAnswers,
             answerComparison: normalizedComparison,
             scoreInfo
@@ -5374,71 +6200,148 @@
         );
     }
 
-    function applyReplayAnswersToDom(answers = {}) {
+    function applyAnswersToDom(answers = {}) {
+        if (!answers || typeof answers !== 'object') {
+            return;
+        }
+        const root = getPracticeAnswerRoot();
+        if (!root) return;
+
+        const groupedHandledQuestionIds = new Set();
+        const groupedChoiceInputs = new Map();
+        root.querySelectorAll('input[type="radio"][name], input[type="checkbox"][name]').forEach((input) => {
+            const groupName = String(input.getAttribute('name') || '').trim();
+            if (!groupName) return;
+            const expandedQuestionIds = expandQuestionSequence(groupName);
+            if (expandedQuestionIds.length <= 1) return;
+            const questionIds = resolveCheckboxQuestionIds(groupName);
+            if (!questionIds.length) return;
+            const existing = groupedChoiceInputs.get(groupName) || {
+                groupName,
+                questionIds,
+                inputs: []
+            };
+            existing.inputs.push(input);
+            groupedChoiceInputs.set(groupName, existing);
+        });
+
+        groupedChoiceInputs.forEach((group) => {
+            const mergedValues = [];
+            const appendValues = (rawValue) => {
+                splitAnswerTokens(rawValue).forEach((entry) => {
+                    const normalized = canonicalizeAnswerToken(entry);
+                    if (normalized) {
+                        mergedValues.push(normalized);
+                    }
+                });
+            };
+            group.questionIds.forEach((questionId) => {
+                groupedHandledQuestionIds.add(questionId);
+                if (Object.prototype.hasOwnProperty.call(answers, questionId)) {
+                    appendValues(answers[questionId]);
+                }
+            });
+            if (Object.prototype.hasOwnProperty.call(answers, group.groupName)) {
+                appendValues(answers[group.groupName]);
+            }
+            const normalizedValues = Array.from(new Set(mergedValues));
+            group.inputs.forEach((input) => {
+                const candidate = canonicalizeAnswerToken(
+                    input.value || input.dataset?.option || input.dataset?.value || input.id || ''
+                );
+                input.checked = normalizedValues.some((value) => areAnswerTokensEquivalent(candidate, value));
+            });
+        });
+
         Object.entries(answers).forEach(([questionId, rawValue]) => {
             const normalizedId = normalizeReplayQuestionId(questionId);
-            if (!normalizedId) return;
+            if (!normalizedId || groupedHandledQuestionIds.has(normalizedId)) return;
             if (applyDropzoneAnswer(normalizedId, rawValue)) {
                 return;
             }
-            const aliases = Array.from(new Set([
-                normalizedId,
-                normalizedId.replace(/^q/i, ''),
-                `question${normalizedId.replace(/^q/i, '')}`
-            ])).filter(Boolean);
-
-            const valueList = splitAnswerTokens(rawValue);
-            const firstValue = valueList[0] || '';
-
+            const aliases = resolveAnswerAliases(normalizedId);
+            const choiceFields = new Set();
+            const textFields = new Set();
+            const selectFields = new Set();
             aliases.forEach((alias) => {
                 const escapedAlias = escapeSelector(alias);
-                const selector = [
+                root.querySelectorAll(
+                    `input[type="radio"][name="${escapedAlias}"], input[type="checkbox"][name="${escapedAlias}"]`
+                ).forEach((field) => choiceFields.add(field));
+                root.querySelectorAll([
                     `input[name="${escapedAlias}"]`,
                     `textarea[name="${escapedAlias}"]`,
-                    `select[name="${escapedAlias}"]`,
                     `input[id="${escapedAlias}"]`,
                     `textarea[id="${escapedAlias}"]`,
-                    `select[id="${escapedAlias}"]`
-                ].join(', ');
-                const fields = Array.from(document.querySelectorAll(selector));
-                fields.forEach((field) => {
-                    if (!(field instanceof HTMLElement)) return;
-                    if (field instanceof HTMLInputElement) {
-                        if (field.type === 'radio') {
-                            const candidate = String(field.value || field.dataset?.option || '').trim();
-                            field.checked = valueList.includes(candidate) || valueList.includes(field.id || '');
-                            return;
-                        }
-                        if (field.type === 'checkbox') {
-                            const candidate = String(field.value || field.dataset?.option || '').trim();
-                            field.checked = valueList.includes(candidate) || valueList.includes(field.id || '');
-                            return;
-                        }
-                        field.value = firstValue;
-                        return;
-                    }
-                    if (field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) {
-                        field.value = firstValue;
+                    `input[data-question-id="${escapedAlias}"]`,
+                    `textarea[data-question-id="${escapedAlias}"]`
+                ].join(', ')).forEach((field) => {
+                    if (isTextualAnswerControl(field)) {
+                        textFields.add(field);
                     }
                 });
+                root.querySelectorAll([
+                    `select[name="${escapedAlias}"]`,
+                    `select[id="${escapedAlias}"]`,
+                    `select[data-question-id="${escapedAlias}"]`
+                ].join(', ')).forEach((field) => selectFields.add(field));
+            });
+
+            const normalizedValues = splitAnswerTokens(rawValue)
+                .map((entry) => canonicalizeAnswerToken(entry))
+                .filter(Boolean);
+            choiceFields.forEach((input) => {
+                const candidate = canonicalizeAnswerToken(
+                    input.value || input.dataset?.option || input.dataset?.value || input.id || ''
+                );
+                input.checked = normalizedValues.some((value) => areAnswerTokensEquivalent(candidate, value));
+            });
+
+            const textValue = displayAnswerValue(rawValue, '');
+            textFields.forEach((field) => {
+                field.value = textValue;
+            });
+            selectFields.forEach((select) => {
+                for (let index = 0; index < select.options.length; index += 1) {
+                    if (compareAnswers(select.options[index].value, rawValue)) {
+                        select.selectedIndex = index;
+                        break;
+                    }
+                }
             });
         });
     }
 
+    function applyReplayAnswersToDom(answers = {}) {
+        // 连续 replay 不同记录时，先重置所有候选池的已使用状态，
+        // 再按新记录的完整答案集重新消耗，避免新旧答案的选项都保持禁用
+        resetAllConsumedOptions();
+        applyAnswersToDom(answers);
+    }
+
     function setReadOnlyMode(enabled, reason = '') {
+        if (enabled) readingTimingController?.stop();
         state.readOnly = Boolean(enabled);
         state.readOnlyReason = state.readOnly
             ? (reason || state.readOnlyReason || 'readonly')
             : '';
         document.body.classList.toggle('review-readonly-mode', state.readOnly);
+        // Pending confirmation locks answer editing without presenting saved results.
+        const answerRoot = getPracticeAnswerRoot();
+        if (answerRoot) answerRoot.inert = isSubmissionUnconfirmed();
         if (dom.submitBtn) {
             if (!dom.submitBtn.dataset.defaultLabel) {
                 dom.submitBtn.dataset.defaultLabel = dom.submitBtn.title || 'Submit';
             }
             dom.submitBtn.disabled = state.readOnly;
             const label = state.readOnly ? '回顾模式' : dom.submitBtn.dataset.defaultLabel;
-            if (dom.submitBtn.classList.contains('nav-submit-circle-btn')) {
+            const submitIsIconOnly = Boolean(
+                dom.submitBtn.querySelector('.submit-btn-icon')
+                || dom.submitBtn.classList.contains('nav-submit-circle-btn')
+            );
+            if (submitIsIconOnly) {
                 dom.submitBtn.title = label;
+                dom.submitBtn.setAttribute('aria-label', label);
             } else {
                 dom.submitBtn.textContent = label;
             }
@@ -5446,7 +6349,7 @@
         if (dom.resetBtn) {
             dom.resetBtn.disabled = state.readOnly;
         }
-        const controls = document.querySelectorAll('input, textarea, select');
+        const controls = getPracticeFormControls();
         controls.forEach((control) => {
             if (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement) {
                 // review、普通进行中练习、以及已回传 recordId 的结果页允许编辑笔记；
@@ -5460,7 +6363,7 @@
                     control.disabled = false;
                     return;
                 }
-                control.disabled = state.readOnly || state.timerLocked;
+                control.disabled = state.readOnly || state.timerLocked || isSubmissionUnconfirmed();
             }
         });
         renderNotesDrawer();
@@ -5470,10 +6373,12 @@
     }
 
     function disableDragInteractions() {
-        const locked = Boolean(state.readOnly || state.timerLocked);
+        const locked = Boolean(state.readOnly || state.timerLocked || isSubmissionUnconfirmed());
         document.querySelectorAll('.drag-item, .draggable-word, .card').forEach((item) => {
             if (!(item instanceof HTMLElement)) return;
-            item.setAttribute('draggable', locked ? 'false' : 'true');
+            // 如果选项已被使用（option-consumed），始终保持不可拖拽
+            const isConsumed = item.classList.contains('option-consumed') || item.dataset.consumed === '1';
+            item.setAttribute('draggable', locked || isConsumed ? 'false' : 'true');
             item.classList.toggle('drag-item-locked', locked);
         });
     }
@@ -5534,31 +6439,85 @@
         if (state.submissionStatus !== 'submitting') {
             return false;
         }
-        return restoreDraftSubmissionState(submissionId || state.submissionId);
+        if (!restoreDraftSubmissionState(submissionId || state.submissionId)) return false;
+        settleSubmissionRetry('unconfirmed');
+        reportSubmissionFailure(new Error('Submission acknowledgement timed out'));
+        return true;
+    }
+
+    function ownsPendingSubmission(submission) {
+        return Boolean(submission && submission === pendingSubmission && submission.id === state.submissionId
+            && submission.sessionId === state.sessionId && submission.suiteSessionId === state.suiteSessionId
+            && submission.parentWindow === state.parentWindow && submission.token === state.windowSessionToken
+            && submission.generation === state.windowSessionGeneration);
+    }
+
+    function isSubmissionUnconfirmed() {
+        return ownsPendingSubmission(pendingSubmission) && state.submissionStatus !== 'submitted';
+    }
+
+    function settleSubmissionRetry(operation) {
+        const settle = pendingSubmission?.settle;
+        if (pendingSubmission) pendingSubmission.settle = null;
+        settle?.({ verified: operation === 'committed', operation });
+    }
+
+    function reportSubmissionFailure(error, code = 'PRACTICE_CHANNEL_TIMEOUT', operation = 'unconfirmed', submission = pendingSubmission) {
+        if (operation === 'unconfirmed' && ownsPendingSubmission(submission)) submission.hasUnconfirmedOutcome = true;
+        readingFailure(code, 'submit', error, operation, ownsPendingSubmission(submission)
+            ? () => retryPendingSubmission(submission) : undefined, undefined, readingCorrelation(submission));
+    }
+
+    function dispatchPendingSubmission(submission) {
+        if (!ownsPendingSubmission(submission) || state.submissionStatus === 'submitted') return false;
+        state.submissionStatus = 'submitting';
+        state.pendingSubmissionPresentation = submission.presentation;
+        setReadOnlyMode(state.readOnly, state.readOnlyReason);
+        disableDragInteractions();
+        readingStep('submit', 'started', readingCorrelation(submission));
+        const delivered = postMessage(submission.type, Object.assign({}, submission.payload, {
+            examId: submission.examId, sessionId: submission.sessionId, suiteSessionId: submission.suiteSessionId,
+            submissionId: submission.id
+        }));
+        if (!delivered) {
+            restoreDraftSubmissionState(submission.id);
+            settleSubmissionRetry('unconfirmed');
+            reportSubmissionFailure(new Error('Submission target unavailable'));
+            return false;
+        }
+        clearSubmissionAckTimer();
+        state.submissionAckTimer = setTimeout(() => expirePendingSubmission(submission.id), SUBMIT_ACK_TIMEOUT_MS);
+        return true;
+    }
+
+    function retryPendingSubmission(submission) {
+        if (!ownsPendingSubmission(submission)) return Promise.resolve({ verified: false, operation: 'unconfirmed' });
+        if (state.submissionStatus === 'submitted') return Promise.resolve({ verified: true, operation: 'committed' });
+        if (state.submissionStatus === 'submitting' || submission.settle) return Promise.resolve({ verified: false, operation: 'unconfirmed' });
+        // Only a user action resends this immutable business snapshot. The host's
+        // existing receipt/idempotency path reconciles it under the original ID.
+        return new Promise((resolve) => {
+            submission.settle = resolve;
+            if (!dispatchPendingSubmission(submission)) settleSubmissionRetry('unconfirmed');
+        });
     }
 
     function beginSubmission(messageType, payload, presentation = null) {
         if (state.submissionStatus === 'submitting' || state.submissionStatus === 'submitted') {
             return false;
         }
-        if (!state.submissionId) {
-            state.submissionId = createSubmissionId();
-        }
-        state.submissionStatus = 'submitting';
-        state.pendingSubmissionPresentation = presentation;
-        syncPrimaryActionButtons();
-        const delivered = postMessage(messageType, Object.assign({}, payload || {}, {
-            submissionId: state.submissionId
-        }));
-        if (!delivered) {
-            restoreDraftSubmissionState(state.submissionId);
-            return false;
-        }
-        clearSubmissionAckTimer();
-        state.submissionAckTimer = setTimeout(() => {
-            expirePendingSubmission(state.submissionId);
-        }, SUBMIT_ACK_TIMEOUT_MS);
-        return true;
+        // A timeout/NACK is not evidence of a failed write. Preserve the receipt
+        // key until the host confirms either the original commit or no commit.
+        if (ownsPendingSubmission(pendingSubmission)) return dispatchPendingSubmission(pendingSubmission);
+        settleSubmissionRetry('unconfirmed');
+        state.submissionId = createSubmissionId();
+        pendingSubmission = { id: state.submissionId, sessionId: state.sessionId, suiteSessionId: state.suiteSessionId,
+            examId: state.examId, parentWindow: state.parentWindow, token: state.windowSessionToken,
+            generation: state.windowSessionGeneration, type: messageType,
+            finalSuiteSubmission: Boolean(state.simulationMode && state.simulationCtx?.isLast && state.suiteSessionId),
+            operationId: `practice-complete:${state.examId}:${state.sessionId || 'session'}:${state.submissionId}`,
+            payload: JSON.parse(JSON.stringify(payload || {})), presentation };
+        return dispatchPendingSubmission(pendingSubmission);
     }
 
     function matchesPendingSubmission(data = {}) {
@@ -5569,7 +6528,7 @@
         const suiteSessionId = data && data.suiteSessionId != null ? String(data.suiteSessionId).trim() : '';
         if (!submissionId || submissionId !== state.submissionId) return false;
         if (!sessionId || !state.sessionId || sessionId !== String(state.sessionId)) return false;
-        if (!examId || !state.examId || examId !== String(state.examId)) return false;
+        if (!examId || examId !== String(pendingSubmission?.examId || state.examId || '')) return false;
         if (state.suiteSessionId && suiteSessionId !== String(state.suiteSessionId)) return false;
         if (!state.suiteSessionId && suiteSessionId) return false;
         return true;
@@ -5580,18 +6539,13 @@
         const generation = Number(state.windowSessionGeneration);
         return {
             parentWindow: state.parentWindow || null,
-            examId: String(state.examId || ''),
+            examId: String(pendingSubmission.examId || ''),
             sessionId: String(state.sessionId || ''),
             suiteSessionId: String(state.suiteSessionId || ''),
             windowSessionToken: normalizeWindowSessionToken(state.windowSessionToken),
             windowSessionGeneration: Number.isInteger(generation) && generation > 0 ? generation : 0,
             submissionId: String(state.submissionId || ''),
-            finalSuiteSubmission: Boolean(
-                state.simulationMode
-                && state.simulationCtx
-                && state.simulationCtx.isLast
-                && state.suiteSessionId
-            )
+            finalSuiteSubmission: pendingSubmission.finalSuiteSubmission
         };
     }
 
@@ -5601,7 +6555,7 @@
         const currentGeneration = Number.isInteger(generation) && generation > 0 ? generation : 0;
         return Boolean(
             state.parentWindow === ownership.parentWindow
-            && String(state.examId || '') === ownership.examId
+            && String(pendingSubmission?.examId || '') === ownership.examId
             && String(state.sessionId || '') === ownership.sessionId
             && String(state.suiteSessionId || '') === ownership.suiteSessionId
             && normalizeWindowSessionToken(state.windowSessionToken) === ownership.windowSessionToken
@@ -5618,10 +6572,19 @@
         const presentation = state.pendingSubmissionPresentation;
         clearSubmissionAckTimer();
         enterSubmittedReadOnlyState(state.simulationMode ? 'simulation-final-submit' : 'final-submit');
-        if (presentation && presentation.results) {
+        readingStep('acknowledgement', 'succeeded');
+        readingStep('storage-confirmed', 'succeeded');
+        settleSubmissionRetry('committed');
+        if (state.suite?.inline) {
+            // Navigation can finish before or during ACK presentation. Each slot
+            // owns its results; activation guards protect asynchronous explanations.
+            const slot = getActiveSuiteSlot();
+            if (slot) await restoreActiveSuiteSlotPresentation(slot, state.suite.activationGeneration,
+                () => retainsSubmissionOwnership(ownership));
+        } else if (presentation && presentation.results) {
             state.lastResults = presentation.results;
             renderResults(presentation.results);
-            await renderExplanations();
+            await renderExplanations({ isCurrent: () => retainsSubmissionOwnership(ownership) });
             if (!retainsSubmissionOwnership(ownership)) {
                 return false;
             }
@@ -5670,15 +6633,60 @@
                 buildInitSignature,
                 handleIncoming,
                 initializeInlineSimulationSuite,
+                activateSuiteSlot,
                 buildResultsFromAnswers,
+                collectAnswers,
+                collectCurrentDraft,
+                syncSimulationDraftSnapshot,
+                setTimerLockMode,
+                setReadOnlyMode,
+                applyAnswersToDom,
+                applyReplayAnswersToDom,
+                captureDom,
+                updateSelectionToolbar,
+                applySelectionHighlight,
+                attachUnifiedPanels,
+                ensureReadingNotesUi,
+                openNoteEditor,
+                closeNoteEditor,
+                applyReplayRecord,
+                setTimerRunning,
+                checkpointActiveSuiteDuration,
+                getSelectionHighlightTestState() {
+                    return {
+                        hasLastRange: Boolean(interaction.lastRange),
+                        hasCurrentHighlightNode: interaction.currentHighlightNode instanceof HTMLElement
+                    };
+                },
+                renderResults,
+                updateNavStatuses,
                 renderTimer,
                 handleSubmit,
                 beginSubmission,
                 acceptSubmissionAcknowledgement,
                 expirePendingSubmission,
+                retryPendingSubmission() { return retryPendingSubmission(pendingSubmission); },
+                persistSimulationDraftMirror,
+                loadScript,
+                startInitLoop,
+                stopInitLoop,
                 restoreDraftSubmissionState,
                 stopReadingDraftSync,
                 stopSimulationDraftSync,
+                attachActionListeners,
+                syncPrimaryActionButtons,
+                getReadingTimingState() {
+                    return readingTimingController && {
+                        context: { ...readingTimingContext(), dataset: null },
+                        active: readingTimingController.active?.key,
+                        entries: [...readingTimingController.entries.keys()],
+                        loading: [...readingTimingController.loading.keys()],
+                        error: readingTimingController.error
+                    };
+                },
+                retryReadingTiming() {
+                    return readingTimingController?.retry();
+                },
                 getTestState() {
                     return {
                         examId: state.examId,
@@ -5697,12 +6705,17 @@
                         activeExamId: state.suite?.activeExamId || null,
                         currentIndex: state.suite?.currentIndex || 0,
                         suiteInline: Boolean(state.suite?.inline),
+                        suiteActivating: Boolean(state.suite?.activating),
+                        activationGeneration: Number(state.suite?.activationGeneration) || 0,
                         suiteTimerLimitSeconds: state.suiteTimerLimitSeconds,
                         reviewRecordId: state.reviewRecordId,
                         submittedRecordId: state.submittedRecordId,
                         submitted: state.submitted,
                         readOnly: state.readOnly,
+                        reviewMode: state.reviewMode,
+                        timerLocked: state.timerLocked,
                         submissionStatus: state.submissionStatus,
+                        submissionEditingLocked: isSubmissionUnconfirmed(),
                         submissionId: state.submissionId,
                         parentOrigin: state.parentOrigin,
                         parentOriginIsOpaque: state.parentOriginIsOpaque,
@@ -5711,6 +6724,7 @@
                         notes: collectNotes(),
                         noteOutlines: collectNoteOutlines(),
                         markedQuestions: normalizeMarkedQuestions(state.markedQuestions),
+                        navStatus: Array.from(navStatus.entries()),
                         suiteSequence: Array.isArray(state.suite?.sequence)
                             ? state.suite.sequence.map((entry) => ({ ...entry }))
                             : [],
@@ -5778,10 +6792,39 @@
         }
     }
 
+    function canClearDraftAnswers() {
+        return Boolean(
+            state.submissionStatus === 'draft'
+            && !isSubmissionUnconfirmed()
+            && !state.readOnly
+            && !state.submitted
+            && !state.reviewMode
+            && !state.memorizeMode
+            && !state.timerLocked
+        );
+    }
+
+    function syncOptionsClearAnswersAction() {
+        const section = document.getElementById('options-clear-answers-section');
+        const button = document.getElementById('options-clear-answers');
+        const visible = canClearDraftAnswers();
+        if (section) section.hidden = !visible;
+        if (button) {
+            button.hidden = !visible;
+            button.disabled = !visible;
+        }
+    }
+
     function syncPrimaryActionButtons() {
+        syncOptionsClearAnswersAction();
+        const submitIsIconOnly = Boolean(
+            dom.submitBtn
+            && (dom.submitBtn.querySelector('.submit-btn-icon')
+                || dom.submitBtn.classList.contains('nav-submit-circle-btn'))
+        );
         if (dom.submitBtn && !dom.submitBtn.dataset.defaultLabel) {
-            dom.submitBtn.dataset.defaultLabel = dom.submitBtn.classList.contains('nav-submit-circle-btn') 
-                ? 'Submit' 
+            dom.submitBtn.dataset.defaultLabel = submitIsIconOnly
+                ? (dom.submitBtn.title || 'Submit')
                 : (dom.submitBtn.textContent || 'Submit');
         }
         if (dom.submitBtn && !dom.submitBtn.dataset.defaultType) {
@@ -5799,12 +6842,25 @@
         
         const setSubmitLabel = (label) => {
             if (!dom.submitBtn) return;
-            if (dom.submitBtn.classList.contains('nav-submit-circle-btn')) {
+            if (submitIsIconOnly) {
+                // Icon-only submit: never write textContent or the glyph is lost.
                 dom.submitBtn.title = label;
+                dom.submitBtn.setAttribute('aria-label', label);
             } else {
                 dom.submitBtn.textContent = label;
             }
         };
+
+        if (isSubmissionUnconfirmed()) {
+            if (dom.submitBtn) {
+                dom.submitBtn.style.display = '';
+                dom.submitBtn.setAttribute('type', 'button');
+                setSubmitLabel(state.submissionStatus === 'submitting' ? '正在确认保存' : '确认上次提交');
+                dom.submitBtn.disabled = state.submissionStatus === 'submitting';
+            }
+            if (dom.resetBtn) dom.resetBtn.style.display = 'none';
+            return;
+        }
 
         if (state.memorizeMode && !state.reviewMode && !simulationEnabled) {
             if (dom.submitBtn) {
@@ -5840,7 +6896,10 @@
                 dom.submitBtn.disabled = state.readOnly || state.submissionStatus === 'submitting';
             }
             if (dom.resetBtn) {
-                dom.resetBtn.style.display = '';
+                // Footer Reset is review/retake-only. Draft clearing lives in
+                // Options, and no reset path is exposed while an ACK is pending.
+                const shouldShowReset = canResetSubmittedSingle || state.reviewMode;
+                dom.resetBtn.style.display = shouldShowReset ? '' : 'none';
                 if (dom.resetBtn.dataset.defaultType) {
                     dom.resetBtn.setAttribute('type', dom.resetBtn.dataset.defaultType);
                 }
@@ -5931,6 +6990,8 @@
     }
 
     function resetToAnsweringPresentation() {
+        settleSubmissionRetry('unconfirmed');
+        pendingSubmission = null;
         clearSubmissionAckTimer();
         state.lastResults = null;
         state.submitted = false;
@@ -5959,7 +7020,7 @@
             }
         });
         enhanceReviewHighlights();
-        document.querySelectorAll('input, textarea, select').forEach((control) => {
+        getPracticeFormControls().forEach((control) => {
             if (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement) {
                 control.disabled = false;
             }
@@ -6253,8 +7314,9 @@
 
     function postMessage(type, payload) {
         const envelope = buildEnvelope(type, payload);
+        try { envelope.data.diagnosticCorrelation = readingCorrelation(); } catch (_) { }
         const target = state.parentWindow;
-        if (!target || target === global || typeof target.postMessage !== 'function') return false;
+        if (!target || target === global || target.closed || typeof target.postMessage !== 'function') return false;
         const targetOrigin = state.parentOrigin && state.parentOrigin !== 'null'
             ? state.parentOrigin
             : (state.expectedParentOrigin || (global.location.protocol === 'file:' ? '*' : ''));
@@ -6267,6 +7329,7 @@
     }
 
     function stopInitLoop() {
+        if (handshakeDeadline) { clearTimeout(handshakeDeadline); handshakeDeadline = null; }
         if (state.initTimer) {
             clearInterval(state.initTimer);
             state.initTimer = null;
@@ -6274,7 +7337,7 @@
     }
 
     function sendSessionReady() {
-        postMessage('SESSION_READY', {
+        const delivered = postMessage('SESSION_READY', {
             url: global.location.href,
             pageType: 'unified-reading',
             title: state.dataset?.meta?.title || document.title,
@@ -6288,7 +7351,9 @@
             suiteTimerMode: state.suiteTimerMode,
             suiteTimerLimitSeconds: state.suiteTimerLimitSeconds
         });
-        state.sessionReadySent = true;
+        state.sessionReadySent = delivered;
+        if (delivered) readingStep('handshake', 'succeeded');
+        else readingFailure('PRACTICE_CHANNEL_TIMEOUT', 'handshake', new Error('Reading readiness target unavailable'));
     }
 
     function buildInitSignature(data = {}) {
@@ -6332,6 +7397,8 @@
     }
 
     function restartInitHandshake() {
+        settleSubmissionRetry('unconfirmed');
+        pendingSubmission = null;
         clearSubmissionAckTimer();
         state.submissionStatus = 'draft';
         state.submissionId = '';
@@ -6378,9 +7445,15 @@
 
     function startInitLoop() {
         stopInitLoop();
+        readingStep('handshake', 'started');
+        handshakeDeadline = setTimeout(() => {
+            handshakeDeadline = null;
+            if (!state.sessionReadySent) readingFailure('PRACTICE_CHANNEL_TIMEOUT', 'handshake', new Error('Reading host handshake timed out'));
+        }, SUBMIT_ACK_TIMEOUT_MS);
         state.initTimer = setInterval(() => {
             if (state.sessionId) {
-                stopInitLoop();
+                clearInterval(state.initTimer);
+                state.initTimer = null; // Keep the readiness deadline until INIT finishes.
                 return;
             }
             dispatchReady();
@@ -6433,16 +7506,20 @@
 
     function persistSimulationDraftMirror(draft) {
         const name = getSimulationDraftSessionName();
-        if (!name || !global.AppData?.recovery?.windowSession || !draft) {
-            return;
-        }
+        if (!name || !draft) return false;
+        readingStep('save-recovery', 'started');
         try {
-            global.AppData.recovery.windowSession.save(name, {
+            if (!global.AppData?.recovery?.windowSession) throw Object.assign(new Error('Recovery backend unavailable'), { name: 'AppDataError', code: 'BACKEND_UNAVAILABLE' });
+            const saved = global.AppData.recovery.windowSession.save(name, {
                 draft,
                 updatedAt: Date.now()
             });
-        } catch (_) {
-            // AppData v2 recovery is best-effort during page teardown.
+            if (saved !== true) throw new Error('Recovery mirror was not confirmed');
+            readingStep('save-recovery', 'succeeded');
+            return true;
+        } catch (error) {
+            readingFailure('RECOVERY_SAVE_FAILED', 'save-recovery', error, 'not-committed');
+            return false;
         }
     }
 
@@ -6459,7 +7536,8 @@
             return parsed.draft && typeof parsed.draft === 'object'
                 ? parsed.draft
                 : null;
-        } catch (_) {
+        } catch (error) {
+            readingFailure('RECOVERY_SAVE_FAILED', 'save-recovery', error);
             return null;
         }
     }
@@ -6487,6 +7565,7 @@
         const answers = collectAnswers();
         const updatedAt = Date.now();
         return {
+            readingTiming: readingTimingController?.snapshot() || null,
             answers,
             highlights: collectHighlights(),
             noteText: getNotesText(),
@@ -6521,12 +7600,11 @@
         if (reason === 'periodic' && fingerprint && fingerprint === state.readingDraftFingerprint) {
             return;
         }
-        state.readingDraftFingerprint = fingerprint;
         const mirroredDraft = cloneDraftSafely(draft);
         if (!mirroredDraft) {
             return;
         }
-        postMessage('READING_DRAFT_SYNC', {
+        const delivered = postMessage('READING_DRAFT_SYNC', {
             examId: state.examId,
             sessionId: state.sessionId || null,
             windowSessionToken: state.windowSessionToken || null,
@@ -6536,6 +7614,8 @@
             timerSnapshot: getPracticeTimerSnapshot(),
             reason
         });
+        if (delivered) { state.readingDraftFingerprint = fingerprint; readingStep('save-draft', 'unconfirmed'); }
+        else readingFailure('RECOVERY_SAVE_FAILED', 'save-draft', new Error('Draft host unavailable'));
     }
 
     function stopReadingDraftSync() {
@@ -6592,15 +7672,12 @@
         if (reason === 'periodic' && fingerprint && fingerprint === state.simulationDraftFingerprint) {
             return;
         }
-        state.simulationDraftFingerprint = fingerprint;
         const mirroredDraft = cloneDraftSafely(draft);
         if (!mirroredDraft) {
             return;
         }
-        if (!state.suite?.inline) {
-            persistSimulationDraftMirror(mirroredDraft);
-        }
-        postMessage('SIMULATION_DRAFT_SYNC', {
+        const mirrored = state.suite?.inline || persistSimulationDraftMirror(mirroredDraft);
+        const delivered = postMessage('SIMULATION_DRAFT_SYNC', {
             examId: state.examId,
             draft: mirroredDraft,
             draftUpdatedAt: Number.isFinite(Number(mirroredDraft.updatedAt)) ? Number(mirroredDraft.updatedAt) : Date.now(),
@@ -6608,6 +7685,9 @@
             timerSnapshot: getPracticeTimerSnapshot(),
             reason
         });
+        if (delivered && mirrored) state.simulationDraftFingerprint = fingerprint;
+        if (delivered) readingStep('save-draft', 'unconfirmed');
+        else readingFailure('RECOVERY_SAVE_FAILED', 'save-draft', new Error('Suite draft host unavailable'));
     }
 
     function refreshSimulationDraftSyncLifecycle() {
@@ -6635,109 +7715,7 @@
             return;
         }
         if (draft.answers && typeof draft.answers === 'object') {
-            const answers = draft.answers;
-            const groupedHandledQuestionIds = new Set();
-            const groupedChoiceInputs = new Map();
-
-            document.querySelectorAll('input[type="radio"][name], input[type="checkbox"][name]').forEach((input) => {
-                const groupName = String(input.getAttribute('name') || '').trim();
-                if (!groupName) return;
-                const questionIds = expandQuestionSequence(groupName);
-                if (questionIds.length <= 1) return;
-                const existing = groupedChoiceInputs.get(groupName) || {
-                    questionIds,
-                    inputs: []
-                };
-                existing.inputs.push(input);
-                groupedChoiceInputs.set(groupName, existing);
-            });
-
-            groupedChoiceInputs.forEach((group) => {
-                const mergedValues = [];
-                group.questionIds.forEach((questionId) => {
-                    groupedHandledQuestionIds.add(questionId);
-                    if (!Object.prototype.hasOwnProperty.call(answers, questionId)) {
-                        return;
-                    }
-                    splitAnswerTokens(answers[questionId]).forEach((entry) => {
-                        const normalized = canonicalizeAnswerToken(entry);
-                        if (normalized) {
-                            mergedValues.push(normalized);
-                        }
-                    });
-                });
-                const normalizedValues = Array.from(new Set(mergedValues));
-                group.inputs.forEach((input) => {
-                    const candidate = canonicalizeAnswerToken(
-                        input.value || input.dataset?.option || input.dataset?.value || input.id || ''
-                    );
-                    input.checked = normalizedValues.includes(candidate)
-                        || normalizedValues.some((value) => compareAnswers(input.value, value));
-                });
-            });
-
-            Object.entries(answers).forEach(([qid, value]) => {
-                const normalized = normalizeQuestionId(qid);
-                if (!normalized) return;
-                if (groupedHandledQuestionIds.has(normalized)) {
-                    return;
-                }
-                if (applyDropzoneAnswer(normalized, value)) {
-                    return;
-                }
-                const escapedId = escapeSelector(normalized);
-                // Radio / checkbox
-                const choices = document.querySelectorAll(
-                    `input[type="radio"][name="${escapedId}"], input[type="checkbox"][name="${escapedId}"]`
-                );
-                if (choices.length) {
-                    const normalizedValues = splitAnswerTokens(value)
-                        .map((entry) => canonicalizeAnswerToken(entry))
-                        .filter(Boolean);
-                    choices.forEach((input) => {
-                        const candidate = canonicalizeAnswerToken(
-                            input.value || input.dataset?.option || input.dataset?.value || input.id || ''
-                        );
-                        input.checked = normalizedValues.includes(candidate) || compareAnswers(input.value, value);
-                    });
-                    return;
-                }
-                // Text input
-                const textInput = document.querySelector(`input[data-question-id="${escapedId}"], input#${escapedId}`);
-                if (textInput && textInput.type !== 'radio' && textInput.type !== 'checkbox') {
-                    textInput.value = displayAnswerValue(value, '');
-                    return;
-                }
-                const namedTextFields = Array.from(
-                    document.querySelectorAll(`input[name="${escapedId}"], textarea[name="${escapedId}"]`)
-                ).filter((field) => field.type !== 'radio' && field.type !== 'checkbox');
-                if (namedTextFields.length) {
-                    const normalizedTextValue = displayAnswerValue(value, '');
-                    namedTextFields.forEach((field) => {
-                        field.value = normalizedTextValue;
-                    });
-                    return;
-                }
-                // Select
-                const select = document.querySelector(`select[data-question-id="${escapedId}"], select#${escapedId}`);
-                if (select) {
-                    for (let i = 0; i < select.options.length; i++) {
-                        if (compareAnswers(select.options[i].value, value)) {
-                            select.selectedIndex = i;
-                            break;
-                        }
-                    }
-                }
-                const namedSelects = document.querySelectorAll(`select[name="${escapedId}"]`);
-                namedSelects.forEach((namedSelect) => {
-                    for (let i = 0; i < namedSelect.options.length; i++) {
-                        if (compareAnswers(namedSelect.options[i].value, value)) {
-                            namedSelect.selectedIndex = i;
-                            break;
-                        }
-                    }
-                });
-            });
+            applyAnswersToDom(draft.answers);
         }
         if (Array.isArray(draft.highlights)) {
             applyHighlights(draft.highlights);
@@ -6797,6 +7775,7 @@
         const results = buildResults();
         const timerSnapshot = getPracticeTimerSnapshot();
         return {
+            readingTiming: readingTimingController?.snapshot() || null,
             results,
             answers: results.answers || {},
             highlights: collectHighlights(),
@@ -6856,7 +7835,13 @@
             slot.lastResults = results;
             slot.navStatus = new Map();
             Object.entries(results.answerComparison || {}).forEach(([questionId, comparison]) => {
-                slot.navStatus.set(questionId, comparison && comparison.isCorrect ? 'correct' : 'incorrect');
+                slot.navStatus.set(
+                    questionId,
+                    resolveComparisonNavStatus(
+                        comparison,
+                        hasAnswerInDataset(questionId, draft.answers || {}, slot.dataset)
+                    )
+                );
             });
             const scoreInfo = results.scoreInfo || {};
             totalCorrect += Number(scoreInfo.correct) || 0;
@@ -6868,11 +7853,12 @@
             Object.assign(aggregatedQuestionTypeMap, prefixSuiteMap(entry.examId, results.questionTypeMap || {}));
             mergeQuestionTypePerformance(aggregatedQuestionTypePerformance, results.questionTypePerformance || {});
             suiteEntries.push({
+                readingTiming: readingTimingController?.snapshot(entry.examId) || draft.readingTiming || null,
                 examId: entry.examId,
                 title: slot.title || entry.title || slot.dataset?.meta?.title || entry.examId,
                 category: slot.category || entry.category || slot.dataset?.meta?.category || '',
                 dataKey: slot.dataKey || entry.dataKey || entry.examId,
-                duration: Math.max(0, Math.round(Number(slot.durationSeconds) || 0)),
+                duration: Math.max(0, Math.round(readSuiteSlotDurationMs(slot) / 1000)),
                 answers: results.answers || {},
                 answerComparison: results.answerComparison || {},
                 correctAnswers: results.correctAnswers || {},
@@ -6927,20 +7913,35 @@
         };
     }
 
+    function resetAllConsumedOptions() {
+        // 重置所有候选池选项的已使用状态（覆盖 .drag-item 和 .draggable-word）。
+        // 供重置和 replay 前调用，避免连续 replay 时新旧答案的选项都保持禁用。
+        document.querySelectorAll(`${POOL_ITEM_SELECTOR}`).forEach((item) => {
+            if (item.dataset.consumed || item.classList.contains('option-consumed')) {
+                delete item.dataset.consumed;
+                item.classList.remove('option-consumed');
+                const interactionLocked = Boolean(state.readOnly || state.timerLocked || isSubmissionUnconfirmed());
+                item.setAttribute('draggable', interactionLocked ? 'false' : 'true');
+            }
+        });
+    }
+
     function clearCurrentAnswers() {
-        document.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((input) => {
-            input.checked = false;
-        });
-        document.querySelectorAll('input[type="text"], textarea').forEach((input) => {
+        getPracticeFormControls().forEach((input) => {
             if (input.closest('#notes-panel, #reading-note-editor, #reading-note-drawer')) return;
-            input.value = '';
-        });
-        document.querySelectorAll('select').forEach((select) => {
-            select.selectedIndex = 0;
+            if (input.type === 'radio' || input.type === 'checkbox') {
+                input.checked = false;
+            } else if (input.tagName === 'SELECT') {
+                input.selectedIndex = 0;
+            } else if (isTextualAnswerControl(input)) {
+                input.value = '';
+            }
         });
         getDropzones().forEach((dropzone) => {
             clearDropzone(dropzone);
         });
+        // 兜底：确保所有选项池中的选项都恢复为可用状态
+        resetAllConsumedOptions();
         // 清除选择题/表格判卷残留的绿/红标记
         document.querySelectorAll('.option-correct, .option-wrong, .correct, .wrong').forEach((node) => {
             node.classList.remove('option-correct', 'option-wrong', 'correct', 'wrong');
@@ -6965,6 +7966,7 @@
             const targetEntry = state.suite.sequence[targetIndex];
             if (targetEntry && targetEntry.examId) {
                 activateSuiteSlot(targetEntry.examId, { skipSave: true }).catch((error) => {
+                    readingFailure('UNEXPECTED_RUNTIME_ERROR', 'suite-navigation', error);
                     console.warn('[UnifiedReadingPage] inline simulation navigation failed:', error);
                 });
             }
@@ -6973,6 +7975,7 @@
         const payload = {
             direction: direction === 'prev' ? 'prev' : 'next',
             draft: {
+                readingTiming: snapshot.readingTiming || null,
                 answers: snapshot.answers || {},
                 highlights: Array.isArray(snapshot.highlights) ? snapshot.highlights : [],
                 noteText: typeof snapshot.noteText === 'string' ? snapshot.noteText : '',
@@ -6983,7 +7986,7 @@
                 updatedAt: Number.isFinite(Number(snapshot.updatedAt)) ? Number(snapshot.updatedAt) : Date.now()
             },
             draftUpdatedAt: Number.isFinite(Number(snapshot.updatedAt)) ? Number(snapshot.updatedAt) : Date.now(),
-            resultSnapshot: snapshot.results,
+            resultSnapshot: { ...snapshot.results, readingTiming: snapshot.readingTiming || null },
             answers: snapshot.answers || {},
             highlights: Array.isArray(snapshot.highlights) ? snapshot.highlights : [],
             noteText: typeof snapshot.noteText === 'string' ? snapshot.noteText : '',
@@ -7000,16 +8003,36 @@
         if (typeof options.targetPartKey === 'string' && options.targetPartKey) {
             payload.targetPartKey = options.targetPartKey;
         }
-        postMessage('SIMULATION_NAVIGATE', payload);
+        if (postMessage('SIMULATION_NAVIGATE', payload)) readingStep('suite-navigation', 'started');
+        else readingFailure('PRACTICE_CHANNEL_TIMEOUT', 'suite-navigation', new Error('Suite navigation host unavailable'));
     }
     async function handleSubmit() {
         if (state.memorizeMode && !state.reviewMode && !state.simulationMode) {
             handleExitClick();
             return;
         }
-        if (state.readOnly || state.submissionStatus !== 'draft') {
+        if (state.readOnly || state.submissionStatus !== 'draft' || state.timingSubmitPending) {
             return;
         }
+        if (ownsPendingSubmission(pendingSubmission)) {
+            // Reconciliation must precede timing writes: a committed attempt's
+            // timing has already been sealed and cannot be frozen as a new save.
+            dispatchPendingSubmission(pendingSubmission);
+            return;
+        }
+        state.timingSubmitPending = true;
+        try {
+            const passages = state.suite?.inline ? state.suite.sequence.map((entry, sequenceIndex) => {
+                const slot = getSuiteSlot(entry.examId);
+                return { context: { ...readingTimingContext(), examId: entry.examId, sequenceIndex,
+                    dataset: slot?.dataset }, draft: slot?.draft };
+            }) : [];
+            await readingTimingController?.freezeAll(passages);
+        } catch (error) {
+            readingFailure('RECOVERY_SAVE_FAILED', 'save-draft', error);
+            global.alert?.('计时保存失败，请稍后重试提交。作答仍然保留。');
+            return;
+        } finally { state.timingSubmitPending = false; }
         const submissionSnapshot = state.suite?.inline
             ? buildInlineSuiteSubmissionSnapshot()
             : buildSubmissionSnapshot();
@@ -7028,6 +8051,7 @@
         const messageType = state.simulationMode ? 'SIMULATION_SUBMIT' : 'PRACTICE_COMPLETE';
         const timing = resolvePracticeTiming(1, submissionSnapshot.timerSnapshot);
         beginSubmission(messageType, Object.assign({
+            readingTiming: submissionSnapshot.readingTiming || null,
             duration: timing.duration,
             startTime: new Date(timing.startTimeMs).toISOString(),
             endTime: new Date(timing.endTimeMs).toISOString(),
@@ -7077,7 +8101,7 @@
             requestNormalPracticeRestart('retake-after-submit');
             return;
         }
-        if (state.readOnly || state.submitted) {
+        if (!canClearDraftAnswers()) {
             return;
         }
         closeReviewHighlightDictionary();
@@ -7126,6 +8150,7 @@
     function attachActionListeners() {
         dom.submitBtn?.addEventListener('click', handleSubmit);
         dom.resetBtn?.addEventListener('click', handleReset);
+        document.getElementById('options-clear-answers')?.addEventListener('click', handleReset);
         dom.exitBtn?.addEventListener('click', handleExitClick);
         document.addEventListener('change', () => updateNavStatuses());
         document.addEventListener('input', () => updateNavStatuses());
@@ -7197,6 +8222,7 @@
         if (!payload || typeof payload !== 'object') {
             return;
         }
+        if (payload.type === 'IELTS_DIAGNOSTIC_V1') return;
         const type = String(payload.type || payload.action || '').toUpperCase();
         const data = payload.data || {};
         const sourceWindow = event && typeof event === 'object' ? (event.source || null) : null;
@@ -7223,14 +8249,23 @@
             if (shouldIgnoreInlineSuiteEnvelope(data || {})) {
                 return;
             }
-            if (isDuplicateInit && state.sessionReadySent) {
+            if (isDuplicateInit && state.sessionReadySent
+                && normalizeWindowSessionToken(data.windowSessionToken) === state.windowSessionToken) {
                 return;
+            }
+            if (pendingSubmission && normalizeWindowSessionToken(data.windowSessionToken) !== state.windowSessionToken) {
+                settleSubmissionRetry('unconfirmed');
+                pendingSubmission = { ...pendingSubmission, token: normalizeWindowSessionToken(data.windowSessionToken),
+                    generation: Number(data.windowSessionGeneration) || 0, settle: null };
+                restoreDraftSubmissionState();
             }
             adoptWindowSessionMessage(data, sourceWindow);
             if (incomingExamId && !currentExamId) {
                 state.examId = incomingExamId;
             }
             if (data.sessionId && state.sessionId && String(data.sessionId) !== String(state.sessionId)) {
+                settleSubmissionRetry('unconfirmed');
+                pendingSubmission = null;
                 clearSubmissionAckTimer();
                 state.submissionStatus = 'draft';
                 state.submissionId = '';
@@ -7239,9 +8274,13 @@
             if (data.sessionId) {
                 state.sessionId = data.sessionId;
             }
+            if (Object.prototype.hasOwnProperty.call(data, 'libraryConfigurationId')) {
+                state.libraryConfigurationId = data.libraryConfigurationId;
+            }
             if (data.suiteSessionId) {
                 state.suiteSessionId = data.suiteSessionId;
             }
+            connectReadingDiagnostics(data);
             applyPracticeMode(data.practiceMode || data.mode || '');
             const initTimerAnchorMs = Number(data.suiteTimerAnchorMs ?? data.globalTimerAnchorMs);
             if (Number.isFinite(initTimerAnchorMs) && initTimerAnchorMs > 0) {
@@ -7332,6 +8371,7 @@
                 applyDraftToDom(singleDraft);
                 state.readingDraftFingerprint = buildDraftFingerprint(singleDraft);
             }
+            await activateReadingTiming(state.suite?.inline ? getActiveSuiteSlot()?.draft : singleDraft);
             syncPrimaryActionButtons();
             refreshSimulationDraftSyncLifecycle();
             refreshReadingDraftSyncLifecycle();
@@ -7366,7 +8406,21 @@
         }
         if (type === 'PRACTICE_SUBMIT_FAILED') {
             if (matchesPendingSubmission(data || {})) {
+                const submission = pendingSubmission;
+                // A retry's rejected write cannot disprove an earlier, lost ACK.
+                const operation = data.operation === 'not-committed' && !submission.hasUnconfirmedOutcome
+                    ? 'not-committed' : 'unconfirmed';
                 restoreDraftSubmissionState(String(data.submissionId || ''));
+                settleSubmissionRetry(operation);
+                if (operation === 'not-committed') {
+                    pendingSubmission = null;
+                    state.submissionId = '';
+                    state.pendingSubmissionPresentation = null;
+                    setReadOnlyMode(false);
+                    disableDragInteractions();
+                }
+                reportSubmissionFailure(Object.assign(new Error('Host could not confirm submission'), { name: 'AppDataError', code: data.errorCode }),
+                    'PRACTICE_SAVE_FAILED', operation, submission);
             }
             return;
         }
@@ -7392,6 +8446,7 @@
             }
             const recordId = data && data.recordId != null ? String(data.recordId).trim() : '';
             state.submittedRecordId = recordId;
+            if (recordId) readingStep('storage-confirmed', 'succeeded');
             return;
         }
         if (type === 'SUITE_NAVIGATE' && data.url) {
@@ -7400,6 +8455,7 @@
             if (targetSuiteSessionId && currentSuiteSessionId && targetSuiteSessionId !== currentSuiteSessionId) {
                 return;
             }
+            readingStep('suite-navigation', 'started');
             global.location.href = data.url;
             return;
         }
@@ -7502,6 +8558,7 @@
                 state.simulationDraftFingerprint = buildDraftFingerprint(draft);
                 persistSimulationDraftMirror(cloneDraftSafely(draft));
             }
+            await activateReadingTiming(state.suite?.inline ? getActiveSuiteSlot()?.draft : draft);
             refreshSimulationDraftSyncLifecycle();
             updateNavStatuses();
             return;
@@ -7547,7 +8604,11 @@
     }
 
     function attachMessageBridge() {
-        global.addEventListener('message', handleIncoming);
+        global.addEventListener('message', (event) => {
+            handleIncoming(event).catch((error) => {
+                readingFailure('UNEXPECTED_RUNTIME_ERROR', 'handshake', error);
+            });
+        });
     }
 
     function attachReadingDraftLifecycleHooks() {
@@ -7582,11 +8643,30 @@
             if (!detail || typeof detail.running !== 'boolean') {
                 return;
             }
+            syncActiveSuiteTimer(detail.running, Date.now());
+            interaction.timerRunning = detail.running;
             syncPagePauseState(detail.running);
+            readingTimingController?.refresh();
+            readingTimingController?.save().catch(() => {});
+            if (state.simulationMode && state.simulationContextReady && state.suiteSessionId) {
+                // A reload requests the host's timer state. Publish pause/resume
+                // with its draft now instead of relying on an unload message.
+                syncSimulationDraftSnapshot('timer');
+            }
         });
     }
 
     async function bootstrap() {
+        try {
+            global.AppDiagnostics?.subscribe((event) => {
+                if (event.notification.kind === 'dialog' || event.notification.kind === 'startup') closeFloatingPanels();
+            });
+            global.getMessageCenter?.();
+            const showHistory = () => { closeFloatingPanels(); global.getMessageCenter?.()?.showIncidentHistory(); };
+            document.getElementById('reading-diagnostics-btn')?.addEventListener('click', showHistory);
+            document.getElementById('messages-indicator')?.addEventListener('click', showHistory);
+        } catch (_) { }
+        readingStep('initialize', 'started');
         await loadReadingCandidateCodePreferences();
         if (global.PracticeTimerPreferences?.ready) await global.PracticeTimerPreferences.ready;
         parseQuery();
@@ -7623,13 +8703,16 @@
         refreshSimulationDraftSyncLifecycle();
         refreshReadingDraftSyncLifecycle();
         startInitLoop();
+        readingStep('initialize', 'succeeded');
+        try { global.AppDiagnostics?.markReady(); } catch (_) { }
     }
 
     document.addEventListener('DOMContentLoaded', () => {
         bootstrap().catch((error) => {
+            readingFailure('APP_BOOT_FAILED', 'initialize', error, 'not-committed');
             console.error('[UnifiedReadingPage] 初始化失败:', error);
             if (dom.groups) {
-                dom.groups.innerHTML = `<div class="group"><h4>加载失败</h4><p>${error.message}</p></div>`;
+                dom.groups.textContent = '加载失败。请保留页面并导出诊断信息。';
             }
         });
     });

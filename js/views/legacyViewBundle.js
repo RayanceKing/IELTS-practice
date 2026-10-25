@@ -215,9 +215,13 @@
     }
 
     function sortByDateDesc(records) {
-        return ensureArray(records).slice().sort(function (a, b) {
-            return new Date(b.date) - new Date(a.date);
-        });
+        // Parse each timestamp once instead of constructing Dates inside every
+        // comparator invocation. Preserve stable ordering for equal/invalid dates.
+        return ensureArray(records).map(function (record) {
+            return { record: record, timestamp: new Date(record.date).getTime() };
+        }).sort(function (a, b) {
+            return b.timestamp - a.timestamp;
+        }).map(function (entry) { return entry.record; });
     }
 
     function filterByExamType(records, exams, type) {
@@ -226,6 +230,14 @@
         }
         var targetType = normalizeTypeValue(type);
         var index = ensureArray(exams);
+        var examById = new Map();
+        var examByTitle = new Map();
+        index.forEach(function (exam, order) {
+            if (!exam) return;
+            var candidate = { exam: exam, order: order };
+            if (!examById.has(exam.id)) examById.set(exam.id, candidate);
+            if (!examByTitle.has(exam.title)) examByTitle.set(exam.title, candidate);
+        });
         return ensureArray(records).filter(function (record) {
             if (!record) {
                 return false;
@@ -245,9 +257,14 @@
             if (recordType) {
                 return recordType === targetType;
             }
-            var exam = index.find(function (item) {
-                return item && (item.id === record.examId || item.title === record.title);
-            });
+            var idMatch = examById.get(record.examId);
+            var titleMatch = examByTitle.get(record.title);
+            // Match the original find predicate's first item, including when
+            // an earlier title match competes with a later id match.
+            var match = idMatch && titleMatch
+                ? (idMatch.order < titleMatch.order ? idMatch : titleMatch)
+                : (idMatch || titleMatch);
+            var exam = match && match.exam;
             var examType = exam ? normalizeTypeValue(exam.type) : '';
             if (examType) {
                 return examType === targetType;
@@ -271,16 +288,149 @@
             total: options.totalId || 'total-practiced',
             average: options.averageId || 'avg-score',
             duration: options.durationId || 'study-time',
-            streak: options.streakId || 'streak-days'
+            streak: options.streakId || 'streak-days',
+            accuracyCard: options.accuracyCardId || 'practice-accuracy-card',
+            accuracyLabel: options.accuracyLabelId || 'practice-accuracy-label',
+            accuracyMeta: options.accuracyMetaId || 'practice-accuracy-meta'
         };
+        this.accuracyMode = 'average';
+        this.accuracyRecords = [];
+        this.accuracyExamType = 'all';
+        this.summary = {};
+        this.accuracyBound = false;
+        this._hydratePracticeDashboardPreferences();
     }
 
     PracticeDashboardView.prototype.updateSummary = function updateSummary(summary) {
         summary = summary || {};
+        this.summary = summary;
         this._setText(this.ids.total, typeof summary.totalPracticed === 'number' ? summary.totalPracticed : 0);
-        this._setText(this.ids.average, formatPercentage(summary.averageScore));
+        if (this.accuracyMode === 'average') {
+            this._setText(this.ids.average, formatPercentage(summary.averageScore));
+        }
         this._setText(this.ids.duration, formatMinutes(summary.totalStudyMinutes));
         this._setText(this.ids.streak, typeof summary.streak === 'number' ? summary.streak : 0);
+        this._ensureAccuracyInteractions();
+        this._renderAccuracy();
+    };
+
+    PracticeDashboardView.prototype.updateAccuracy = function updateAccuracy(records, examType) {
+        this.accuracyRecords = ensureArray(records).slice();
+        this.accuracyExamType = examType || 'all';
+        this._ensureAccuracyInteractions();
+        this._renderAccuracy();
+    };
+
+    PracticeDashboardView.prototype._hydratePracticeDashboardPreferences = function _hydratePracticeDashboardPreferences() {
+        var self = this;
+        var markReady = function () {
+            if (typeof document !== 'undefined') {
+                var view = document.getElementById('practice-view');
+                if (view) view.classList.add('practice-dashboard-ready');
+            }
+        };
+        if (!window.AppData || !window.AppData.preferences || typeof window.AppData.preferences.getPracticeDashboard !== 'function') {
+            markReady();
+            return;
+        }
+        Promise.resolve(window.AppData.ready)
+            .then(function () { return window.AppData.preferences.getPracticeDashboard(); })
+            .then(function (preference) {
+                var next = preference || {};
+                self.accuracyMode = next.accuracyMode === 'weighted' ? 'weighted' : 'average';
+                var practiceView = document.getElementById('practice-view');
+                if (practiceView) {
+                    practiceView.classList.toggle('is-practice-summary-collapsed', next.summaryCollapsed === true);
+                    var region = document.getElementById('practice-summary-region');
+                    var button = document.getElementById('practice-summary-toggle');
+                    if (region) {
+                        region.setAttribute('aria-hidden', next.summaryCollapsed === true ? 'true' : 'false');
+                        region.inert = next.summaryCollapsed === true;
+                    }
+                    if (button) {
+                        button.setAttribute('aria-expanded', next.summaryCollapsed === true ? 'false' : 'true');
+                        button.setAttribute('aria-label', next.summaryCollapsed === true ? '展开练习统计卡片' : '折叠练习统计卡片');
+                    }
+                }
+                self._renderAccuracy();
+                markReady();
+            })
+            .catch(function () { markReady(); });
+    };
+
+    PracticeDashboardView.prototype.setAccuracyMode = function setAccuracyMode(mode) {
+        this.accuracyMode = mode === 'weighted' ? 'weighted' : 'average';
+        if (window.AppData && window.AppData.preferences && typeof window.AppData.preferences.patchPracticeDashboard === 'function') {
+            window.AppData.preferences.patchPracticeDashboard({ accuracyMode: this.accuracyMode }).catch(function (error) {
+                console.warn('[PracticeDashboard] 正确率偏好保存失败:', error);
+            });
+        }
+        this._renderAccuracy();
+    };
+
+    PracticeDashboardView.prototype._renderAccuracy = function _renderAccuracy() {
+        if (typeof document === 'undefined') return;
+        var label = document.getElementById(this.ids.accuracyLabel);
+        var meta = document.getElementById(this.ids.accuracyMeta);
+        var value = document.getElementById(this.ids.average);
+        var card = document.getElementById(this.ids.accuracyCard);
+        if (!label || !meta || !value) return;
+        if (this.accuracyMode === 'average') {
+            label.textContent = '平均正确率';
+            meta.textContent = '全部正式记录';
+            value.textContent = formatPercentage(this.summary && this.summary.averageScore);
+        } else {
+            label.textContent = '加权平均正确率';
+            if (this.accuracyExamType === 'listening') {
+                value.textContent = '—';
+                meta.textContent = '仅适用于阅读';
+            } else {
+                var result = global.ReadingAnalytics && typeof global.ReadingAnalytics.aggregate === 'function'
+                    ? global.ReadingAnalytics.aggregate(this.accuracyRecords, { recordType: 'all' }) : null;
+                value.textContent = result && result.total && result.total.accuracy != null
+                    ? (Math.round(result.total.accuracy * 1000) / 10) + '%' : '—';
+                meta.textContent = result && result.total && result.total.accuracy != null ? '总得分 ÷ 总分' : '暂无成绩';
+            }
+        }
+        if (card) {
+            card.setAttribute('aria-label', this.accuracyMode === 'weighted' ? '加权平均正确率，点击设置' : '平均正确率，点击设置');
+            card.querySelectorAll('[data-practice-accuracy-mode]').forEach(function (option) {
+                var active = option.dataset.practiceAccuracyMode === this.accuracyMode;
+                option.classList.toggle('active', active);
+                option.setAttribute('aria-pressed', active ? 'true' : 'false');
+            }, this);
+        }
+    };
+
+    PracticeDashboardView.prototype._ensureAccuracyInteractions = function _ensureAccuracyInteractions() {
+        if (this.accuracyBound || typeof document === 'undefined') return;
+        var card = document.getElementById(this.ids.accuracyCard);
+        if (!card) return;
+        this.accuracyBound = true;
+        var self = this;
+        var flip = function () {
+            card.classList.toggle('is-flipped');
+            card.setAttribute('aria-pressed', card.classList.contains('is-flipped') ? 'true' : 'false');
+        };
+        card.addEventListener('click', function (event) {
+            var option = event.target && event.target.closest ? event.target.closest('[data-practice-accuracy-mode]') : null;
+            if (option) {
+                event.preventDefault();
+                event.stopPropagation();
+                self.setAccuracyMode(option.dataset.practiceAccuracyMode);
+                card.classList.remove('is-flipped');
+                card.setAttribute('aria-pressed', 'false');
+                return;
+            }
+            flip();
+        });
+        card.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            var option = event.target && event.target.closest ? event.target.closest('[data-practice-accuracy-mode]') : null;
+            if (option) return;
+            event.preventDefault();
+            flip();
+        });
     };
 
     PracticeDashboardView.prototype._setText = function _setText(id, value) {
@@ -475,20 +625,36 @@
                     value: Math.max(0, Math.min(100, value))
                 };
             })
-            .filter(Boolean)
-            .sort(function sortPoints(a, b) {
-                if (a.timestamp !== b.timestamp) {
-                    return a.timestamp - b.timestamp;
-                }
-                return a.order - b.order;
-            });
+            .filter(Boolean);
+        function comparePoints(a, b) {
+            return a.timestamp !== b.timestamp ? a.timestamp - b.timestamp : a.order - b.order;
+        }
 
         if (!range || points.length === 0) {
-            return points;
+            return points.sort(comparePoints);
         }
 
         if (range.mode === 'count') {
-            return points.slice(-range.value);
+            var limit = Number(range.value);
+            if (!(limit > 0 && Number.isInteger(limit))) {
+                return points.sort(comparePoints).slice(-range.value);
+            }
+            // The common recent10/recent20 view only needs a small ordered
+            // window, not an O(n log n) sort of the complete history.
+            var recent = [];
+            points.forEach(function selectRecent(point) {
+                if (recent.length === limit && comparePoints(point, recent[0]) <= 0) return;
+                var low = 0;
+                var high = recent.length;
+                while (low < high) {
+                    var middle = (low + high) >>> 1;
+                    if (comparePoints(recent[middle], point) <= 0) low = middle + 1;
+                    else high = middle;
+                }
+                recent.splice(low, 0, point);
+                if (recent.length > limit) recent.shift();
+            });
+            return recent;
         }
 
         if (range.mode === 'days') {
@@ -500,10 +666,10 @@
             var cutoff = anchor - range.value * 24 * 60 * 60 * 1000;
             return points.filter(function inWindow(point) {
                 return point.timestamp > 0 && point.timestamp >= cutoff;
-            });
+            }).sort(comparePoints);
         }
 
-        return points;
+        return points.sort(comparePoints);
     };
 
     PracticeTrendRenderer.prototype._drawEmpty = function _drawEmpty(canvas) {
@@ -1148,9 +1314,17 @@
             highFill: options.highFillId || 'practice-priority-high-fill',
             mediumFill: options.mediumFillId || 'practice-priority-medium-fill',
             highAccuracy: options.highAccuracyId || 'practice-priority-high-accuracy',
-            mediumAccuracy: options.mediumAccuracyId || 'practice-priority-medium-accuracy'
+            mediumAccuracy: options.mediumAccuracyId || 'practice-priority-medium-accuracy',
+            partsP1Accuracy: options.partsP1AccuracyId || 'practice-parts-p1-accuracy',
+            partsP2Accuracy: options.partsP2AccuracyId || 'practice-parts-p2-accuracy',
+            partsP3Accuracy: options.partsP3AccuracyId || 'practice-parts-p3-accuracy',
+            partsP1Score: options.partsP1ScoreId || 'practice-parts-p1-score',
+            partsP2Score: options.partsP2ScoreId || 'practice-parts-p2-score',
+            partsP3Score: options.partsP3ScoreId || 'practice-parts-p3-score',
+            partsUnavailable: options.partsUnavailableId || 'practice-parts-unavailable'
         };
         this.records = [];
+        this.partsRecords = [];
         this.exams = [];
         this.examType = 'all';
         // 优先沿用用户上次选中的组件；显式传入 defaultWidget 时只作为兜底。
@@ -1163,6 +1337,7 @@
     PracticePriorityRenderer.prototype.update = function update(records, exams, options) {
         options = options || {};
         this.records = Array.isArray(records) ? records.slice() : [];
+        this.partsRecords = Array.isArray(options.partsRecords) ? options.partsRecords.slice() : this.records.slice();
         this.exams = Array.isArray(exams) ? exams.slice() : [];
         this.examType = options.examType || 'all';
         this._ensureInteractions();
@@ -1181,7 +1356,8 @@
         if (titleElem) {
             titleElem.textContent = this.activeWidget === 'radar'
                 ? '阅读错题雷达'
-                : (this.activeWidget === 'priority' ? '中高频余量' : '练习热力图');
+                : (this.activeWidget === 'priority' ? '中高频余量'
+                    : (this.activeWidget === 'parts' ? 'P1 / P2 / P3 表现' : '练习热力图'));
         }
         
         var contents = card.querySelectorAll('.practice-custom-widget-content');
@@ -1201,6 +1377,8 @@
             this._renderGroup('medium', stats.medium);
         } else if (this.activeWidget === 'radar') {
             this._renderRadarChart();
+        } else if (this.activeWidget === 'parts') {
+            this._renderParts();
         }
         
         this._syncOptionState();
@@ -1300,6 +1478,30 @@
         );
         
         drawRadarChart(canvas, dataPoints);
+    };
+
+    PracticePriorityRenderer.prototype._renderParts = function _renderParts() {
+        var unavailable = document.getElementById(this.ids.partsUnavailable);
+        var rows = document.querySelectorAll('.practice-parts-widget__row');
+        var listening = this.examType === 'listening';
+        if (unavailable) unavailable.hidden = !listening;
+        rows.forEach(function (row) { row.hidden = listening; });
+        if (listening) return;
+        var result = global.ReadingAnalytics && typeof global.ReadingAnalytics.aggregate === 'function'
+            ? global.ReadingAnalytics.aggregate(this.partsRecords, { recordType: 'all' })
+            : null;
+        var categories = result && result.categories ? result.categories : {};
+        ['P1', 'P2', 'P3'].forEach(function (category) {
+            var key = category.toLowerCase();
+            var value = categories[category] || {};
+            var possible = Number(value.possible) || 0;
+            var earned = Number(value.earned) || 0;
+            var accuracy = value.accuracy == null ? '—' : Math.round(Number(value.accuracy) * 1000) / 10 + '%';
+            this._setText('parts' + category + 'Accuracy', accuracy);
+            this._setText('parts' + category + 'Score', possible > 0
+                ? (Math.round(earned * 10) / 10) + ' / ' + (Math.round(possible * 10) / 10) + ' 分'
+                : '暂无成绩');
+        }, this);
     };
 
     PracticePriorityRenderer.prototype.flipToBack = function flipToBack() {
@@ -1588,9 +1790,9 @@
         return new Date(month.getFullYear(), month.getMonth() + offset, 1);
     }
 
-    // 练习洞察卡片选中的组件（热力图 / 中高频余量 / 阅读雷达）持久化，
+    // 练习洞察卡片选中的组件（热力图 / 中高频余量 / 阅读雷达 / P1-P3 表现）持久化，
     // 刷新或重开页面后沿用用户上次的选中组件，而不是总回到默认的热力图。
-    var SUPPORTED_PRACTICE_WIDGETS = ['heatmap', 'priority', 'radar'];
+    var SUPPORTED_PRACTICE_WIDGETS = ['heatmap', 'priority', 'radar', 'parts'];
     var persistedPracticeWidget = null;
     if (window.AppData && window.AppData.preferences) {
         window.AppData.ready.then(function () { return window.AppData.preferences.getPracticeWidget(); }).then(function (value) {
@@ -2444,19 +2646,27 @@
 
             var maxHeight = 0;
             var samples = Math.min(list.length, 30);
-            for (var i = 0; i < samples; i += 1) {
-                var node = itemFactory(list[i], i);
-                if (!node || !(node instanceof Node)) continue;
-                node.style.position = 'relative';
-                node.style.width = targetWidth > 0 ? (targetWidth + 'px') : '100%';
-                wrapper.appendChild(node);
-                var h = node.offsetHeight || node.clientHeight || 0;
-                if (h > maxHeight) {
-                    maxHeight = h;
+            var sampleNodes = [];
+            try {
+                // Insert every sample before reading geometry: alternating writes
+                // and height reads forces a separate layout for each record.
+                for (var i = 0; i < samples; i += 1) {
+                    var node = itemFactory(list[i], i);
+                    if (!node || !(node instanceof Node)) continue;
+                    node.style.position = 'relative';
+                    node.style.width = targetWidth > 0 ? (targetWidth + 'px') : '100%';
+                    wrapper.appendChild(node);
+                    sampleNodes.push(node);
                 }
-                node.remove();
+                for (var j = 0; j < sampleNodes.length; j += 1) {
+                    var h = sampleNodes[j].offsetHeight || sampleNodes[j].clientHeight || 0;
+                    if (h > maxHeight) {
+                        maxHeight = h;
+                    }
+                }
+            } finally {
+                wrapper.remove();
             }
-            wrapper.remove();
             return maxHeight > 0 ? maxHeight : null;
         }
 
@@ -2657,7 +2867,7 @@
         options = options || {};
         var container = this._getContainer();
         if (!container) {
-            return;
+            return false;
         }
 
         var loadingSelector = options.loadingSelector || this.loadingSelector;
@@ -2667,7 +2877,7 @@
         if (normalizedExams.length === 0) {
             this._renderEmptyState(container, options.emptyState);
             this._hideLoading(loadingIndicator);
-            return;
+            return true;
         }
 
         var examList = this._createExamList();
@@ -2686,6 +2896,7 @@
 
         this._replaceContent(container, [examList]);
         this._hideLoading(loadingIndicator);
+        return true;
     };
 
     LegacyExamListView.prototype._createExamList = function _createExamList() {
@@ -2764,6 +2975,7 @@
             }
         }
         title.appendChild(document.createTextNode(exam.title || ''));
+        if (global.BrowseLearningControls) global.BrowseLearningControls.decorateCard(exam, title);
 
         var meta = this._createElement('div', { className: 'exam-meta' });
         var metaText;
@@ -2844,6 +3056,29 @@
                 pdfBtn.setAttribute('aria-disabled', 'true');
             }
             actions.appendChild(pdfBtn);
+        }
+
+        var isReadingExam = exam && (exam.type === 'reading' || !exam.type || String(exam.type).toLowerCase() !== 'listening') && exam.hasHtml !== false;
+        if (isReadingExam && exam.id) {
+            var vocabBtn = this._createElement('button', {
+                className: 'btn btn-outline exam-item-action-btn exam-item-vocab-btn',
+                dataset: { action: 'vocab-book', examId: exam.id },
+                type: 'button',
+                title: '打开该题全文精读与生词本'
+            }, '精读');
+            vocabBtn.dataset.examTitle = exam.title || exam.name || '';
+            if (Object.prototype.hasOwnProperty.call(exam, 'libraryConfigurationId')) {
+                vocabBtn.dataset.libraryConfigurationId = exam.libraryConfigurationId || '';
+                if (exam.libraryConfigurationId && global.AppData?.vocab?.readingModel?.contentRef) {
+                    vocabBtn.dataset.contentRef = global.AppData.vocab.readingModel.contentRef(exam);
+                }
+            }
+            if (isSelecting) {
+                vocabBtn.disabled = true;
+                vocabBtn.setAttribute('aria-disabled', 'true');
+            }
+            actions.appendChild(vocabBtn);
+            actions.classList.add('has-vocab-btn');
         }
 
         if (this._shouldShowGenerate(exam, options)) {
@@ -2939,7 +3174,7 @@
             className: className,
             ariaHidden: 'true'
         });
-        dot.title = '最近正确率 ' + Math.round(percentage) + '%';
+        dot.title = '最近正确率 ' + Number(percentage.toFixed(2)) + '%';
         return dot;
     };
 
@@ -3288,7 +3523,7 @@
         return Array.isArray(record.suiteEntries) ? record.suiteEntries : [];
     }
 
-    function rebuildBrowseCompletionIndex(records) {
+    function prepareBrowseCompletionIndex(records) {
         var byExamId = new Map();
         var byTitle = new Map();
         var recordSnapshot = ensureArray(records).slice();
@@ -3322,13 +3557,39 @@
                 }
             });
         });
-        browseCompletionIndex = {
+        return {
             byExamId: byExamId,
             byTitle: byTitle,
+            learningByIdentity: global.BrowseLearningState
+                ? global.BrowseLearningState.buildIndex(recordSnapshot) : new Map(),
             records: recordSnapshot,
             ready: true
         };
-        return browseCompletionIndex;
+    }
+
+    function isPreparedBrowseCompletionIndex(preparedIndex) {
+        return !!preparedIndex
+            && preparedIndex.byExamId instanceof Map
+            && preparedIndex.byTitle instanceof Map
+            && Array.isArray(preparedIndex.records)
+            && preparedIndex.ready === true;
+    }
+
+    function commitBrowseCompletionIndex(preparedIndex) {
+        if (!isPreparedBrowseCompletionIndex(preparedIndex)) {
+            return false;
+        }
+        // Preparation performs every operation that can fail. Publication is
+        // deliberately one assignment so later stages cannot observe a
+        // partially rebuilt completion map.
+        browseCompletionIndex = preparedIndex;
+        return true;
+    }
+
+    function rebuildBrowseCompletionIndex(records) {
+        var preparedIndex = prepareBrowseCompletionIndex(records);
+        commitBrowseCompletionIndex(preparedIndex);
+        return preparedIndex;
     }
 
     function ensureBrowseCompletionIndex() {
@@ -3339,6 +3600,9 @@
     }
 
     LegacyExamListView.prototype._getCompletionStatus = function _getCompletionStatus(exam) {
+        if (global.BrowseLearningState && exam && exam.type === 'reading') {
+            return getBrowseLearningStatus(exam);
+        }
         var index = ensureBrowseCompletionIndex();
         var byId = null;
         var byTitle = null;
@@ -3398,6 +3662,9 @@
         };
     };
 
+    global.prepareBrowseCompletionIndex = prepareBrowseCompletionIndex;
+    global.isPreparedBrowseCompletionIndex = isPreparedBrowseCompletionIndex;
+    global.commitBrowseCompletionIndex = commitBrowseCompletionIndex;
     global.rebuildBrowseCompletionIndex = rebuildBrowseCompletionIndex;
 
     // --- Legacy navigation controller ---
@@ -3483,7 +3750,7 @@
         }
 
         if (typeof window.showView === 'function') {
-            window.showView(viewName);
+            window.showView(viewName, false);
             return;
         }
 
@@ -3547,14 +3814,33 @@
         }
 
         event.preventDefault();
-        this.navigate(viewName, event);
-        if (alreadyActive && typeof this.options.onRepeatNavigate === 'function') {
+        if (viewName === 'browse') {
             try {
-                this.options.onRepeatNavigate(viewName, event);
+                event.__browseNavigationHandled = true;
+            } catch (_) { }
+        }
+        if (alreadyActive && typeof this.options.onRepeatNavigate === 'function') {
+            var repeatHandled = true;
+            try {
+                var repeatResult = this.options.onRepeatNavigate(viewName, event);
+                if (repeatResult === false) {
+                    repeatHandled = false;
+                } else if (repeatResult && typeof repeatResult.then === 'function') {
+                    Promise.resolve(repeatResult).catch(function handleRepeatFailure(repeatError) {
+                        console.warn('[LegacyNavigationController] onRepeatNavigate 执行失败', repeatError);
+                    });
+                }
             } catch (repeatError) {
                 console.warn('[LegacyNavigationController] onRepeatNavigate 执行失败', repeatError);
             }
+            if (repeatHandled) {
+                if (this.options.syncOnNavigate !== false) {
+                    this.syncActive(viewName);
+                }
+                return;
+            }
         }
+        this.navigate(viewName, event);
         if (this.options.syncOnNavigate !== false) {
             this.syncActive(viewName);
         }
@@ -3928,6 +4214,13 @@
         return parts.join(' · ');
     };
 
+    function getBrowseLearningStatus(exam) {
+        const index = ensureBrowseCompletionIndex();
+        const key = global.BrowseLearningState && global.BrowseLearningState.identity(exam, true);
+        return key && index.learningByIdentity ? index.learningByIdentity.get(key) || null : null;
+    }
+
+    global.getBrowseLearningStatus = getBrowseLearningStatus;
     global.PracticeStats = PracticeStats;
     global.PracticeDashboardView = PracticeDashboardView;
     global.PracticeTrendRenderer = PracticeTrendRenderer;

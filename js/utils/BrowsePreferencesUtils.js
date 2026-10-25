@@ -6,8 +6,15 @@
 
     let browsePreferencesCache = null;
     let browsePreferencesReady = null;
+    let browsePreferencesHydrated = false;
     let browsePreferenceWriteQueue = Promise.resolve();
+    let browsePreferenceWriteSequence = 0;
+    const ownBrowsePreferenceOperationIds = new Set();
+    let browsePreferenceCommitListenerBound = false;
     const pendingBrowsePreferenceWrites = [];
+    let browseAnchorProjection = null;
+    let browseAnchorProjectionRevision = 0;
+    let browseAnchorPersistenceDebt = null;
     let currentBrowseScrollElement = null;
     let removeBrowseScrollListener = null;
     let pendingBrowseAutoScroll = null;
@@ -97,6 +104,42 @@
         };
     }
 
+    function normalizeBrowsePreferencesSnapshot(parsed) {
+        const next = Object.assign({}, getDefaultBrowsePreferences(), parsed || {});
+        if (!next.scrollPositions || typeof next.scrollPositions !== 'object') {
+            next.scrollPositions = {};
+        }
+        next.listAnchors = mergeBrowseAnchors({}, next.listAnchors);
+        return next;
+    }
+
+    function bindBrowsePreferenceCommitListener() {
+        if (browsePreferenceCommitListenerBound) {
+            return;
+        }
+        const backups = global.AppData && global.AppData.backups;
+        if (!backups || typeof backups.onDataCommitted !== 'function') {
+            return;
+        }
+        browsePreferenceCommitListenerBound = true;
+        backups.onDataCommitted((event) => {
+            const targets = Array.isArray(event && event.targets) ? event.targets : [];
+            if (!targets.some((target) => target && target.logicalKey === 'preferences.values')) {
+                return;
+            }
+            const operationId = event && event.receipt && event.receipt.operationId
+                ? String(event.receipt.operationId)
+                : (event && event.operationId ? String(event.operationId) : '');
+            if (operationId && ownBrowsePreferenceOperationIds.delete(operationId)) {
+                return;
+            }
+            // Backup restores and legacy preference writers may commit outside
+            // this queue. Force the next queued partial write to merge against
+            // the new durable baseline instead of resurrecting stale cache.
+            browsePreferencesHydrated = false;
+        });
+    }
+
     function mergeBrowseAnchors(currentAnchors = {}, updates) {
         const next = Object.assign({}, currentAnchors);
         if (!updates || typeof updates !== 'object') {
@@ -140,25 +183,18 @@
     }
 
     function loadBrowsePreferencesFromStorage() {
+        bindBrowsePreferenceCommitListener();
         if (!browsePreferencesReady) {
             browsePreferencesReady = Promise.resolve().then(async () => {
                 if (!global.AppData || !global.AppData.preferences) return;
                 await global.AppData.ready;
                 const parsed = await global.AppData.preferences.getBrowse();
-                const defaults = getDefaultBrowsePreferences();
-                const next = Object.assign({}, defaults, parsed || {});
-                if (!next.scrollPositions || typeof next.scrollPositions !== 'object') next.scrollPositions = {};
-                next.listAnchors = mergeBrowseAnchors({}, next.listAnchors);
-                browsePreferencesCache = next;
+                browsePreferencesCache = normalizeBrowsePreferencesSnapshot(parsed);
+                browsePreferencesHydrated = true;
             }).catch((error) => console.warn('[BrowsePreferences] 无法读取浏览偏好，使用默认值', error));
         }
         try {
-            const next = Object.assign({}, getDefaultBrowsePreferences(), browsePreferencesCache || {});
-            if (!next.scrollPositions || typeof next.scrollPositions !== 'object') {
-                next.scrollPositions = {};
-            }
-            next.listAnchors = mergeBrowseAnchors({}, next.listAnchors);
-            return next;
+            return normalizeBrowsePreferencesSnapshot(browsePreferencesCache);
         } catch (error) {
             console.warn('[BrowsePreferences] 无法读取浏览偏好，使用默认值', error);
             return getDefaultBrowsePreferences();
@@ -169,7 +205,16 @@
         if (!browsePreferencesCache) {
             browsePreferencesCache = loadBrowsePreferencesFromStorage();
         }
-        return browsePreferencesCache;
+        if (!browseAnchorProjection) {
+            return browsePreferencesCache;
+        }
+        return Object.assign({}, browsePreferencesCache, {
+            // Anchors are a derived live projection. Keep the accepted
+            // generation visible while its durable write is still pending or
+            // has failed; user-authored preferences remain committed-cache
+            // values until their existing write contract completes.
+            listAnchors: mergeBrowseAnchors({}, browseAnchorProjection.anchors)
+        });
     }
 
     async function whenBrowseViewPreferencesReady() {
@@ -180,46 +225,116 @@
         return getBrowseViewPreferences();
     }
 
-    function mergeBrowsePreferences(current, partial = {}) {
-        return {
+    function mergeBrowsePreferences(current, partial = {}, options = {}) {
+        const replaceListAnchors = options.replaceListAnchors === true;
+        return Object.assign({}, current, partial, {
             scrollPositions: Object.assign({}, current.scrollPositions, partial.scrollPositions || {}),
-            listAnchors: mergeBrowseAnchors(current.listAnchors, partial.listAnchors),
+            listAnchors: replaceListAnchors
+                ? mergeBrowseAnchors({}, partial.listAnchors)
+                : mergeBrowseAnchors(current.listAnchors, partial.listAnchors),
             autoScrollEnabled: Object.prototype.hasOwnProperty.call(partial, 'autoScrollEnabled')
                 ? !!partial.autoScrollEnabled
                 : current.autoScrollEnabled,
             lastFilter: Object.prototype.hasOwnProperty.call(partial, 'lastFilter')
                 ? (partial.lastFilter || null)
                 : current.lastFilter
-        };
+        });
     }
 
-    function saveBrowseViewPreferences(partial = {}) {
-        const request = { partial: Object.assign({}, partial) };
+    function removePendingBrowsePreferenceWrite(request) {
+        const index = pendingBrowsePreferenceWrites.indexOf(request);
+        if (index >= 0) {
+            pendingBrowsePreferenceWrites.splice(index, 1);
+        }
+    }
+
+    function enqueueBrowsePreferenceWrite(partial = {}, options = {}) {
+        bindBrowsePreferenceCommitListener();
+        const request = {
+            partial: Object.assign({}, partial),
+            replaceListAnchors: options.replaceListAnchors === true,
+            anchorRevision: Number.isFinite(Number(options.anchorRevision))
+                ? Number(options.anchorRevision)
+                : null,
+            operationId: `browse-preference-${Date.now()}-${++browsePreferenceWriteSequence}`
+        };
         pendingBrowsePreferenceWrites.push(request);
         const preview = pendingBrowsePreferenceWrites.reduce(
-            (current, pending) => mergeBrowsePreferences(current, pending.partial),
+            (current, pending) => mergeBrowsePreferences(
+                current,
+                pending.partial,
+                pending
+            ),
             getBrowseViewPreferences()
         );
 
         if (!global.AppData || !global.AppData.preferences) {
-            pendingBrowsePreferenceWrites.splice(pendingBrowsePreferenceWrites.indexOf(request), 1);
+            removePendingBrowsePreferenceWrite(request);
+            if (request.anchorRevision != null
+                && browseAnchorPersistenceDebt
+                && browseAnchorPersistenceDebt.revision === request.anchorRevision) {
+                browseAnchorPersistenceDebt.status = 'failed';
+            }
             console.warn('[BrowsePreferences] AppData.preferences 不可用，偏好未保存');
-            return preview;
+            return { preview, outcome: Promise.resolve(false) };
         }
 
-        browsePreferenceWriteQueue = browsePreferenceWriteQueue.then(async () => {
+        const outcome = browsePreferenceWriteQueue.then(async () => {
             await global.AppData.ready;
             if (browsePreferencesReady) await browsePreferencesReady;
-            const next = mergeBrowsePreferences(getBrowseViewPreferences(), request.partial);
-            await global.AppData.preferences.patchBrowse(next);
+            // A lazy bundle may be queued before AppData is exposed. Hydrate
+            // that first queued write before merging it with the default
+            // preview; once the accepted baseline is loaded, subsequent
+            // writes must stay on this queue and must not start an unrelated
+            // preference read that can block the caller's flush barrier.
+            if (!browsePreferencesHydrated) {
+                const persisted = await global.AppData.preferences.getBrowse();
+                browsePreferencesCache = normalizeBrowsePreferencesSnapshot(persisted);
+                browsePreferencesHydrated = true;
+            }
+            const next = mergeBrowsePreferences(
+                getBrowseViewPreferences(),
+                request.partial,
+                request
+            );
+            // AppData merges patches against the latest durable preferences.
+            // Sending the whole cached snapshot can overwrite a sort/favorite
+            // change committed while this write waits in AppData's queue.
+            // Keep merged nested values, but only for fields this request owns.
+            const patch = Object.fromEntries(
+                Object.keys(request.partial).map((key) => [key, next[key]])
+            );
+            ownBrowsePreferenceOperationIds.add(request.operationId);
+            try {
+                await global.AppData.preferences.patchBrowse(patch, { operationId: request.operationId });
+            } catch (error) {
+                ownBrowsePreferenceOperationIds.delete(request.operationId);
+                throw error;
+            }
             browsePreferencesCache = next;
+            if (request.anchorRevision != null
+                && browseAnchorPersistenceDebt
+                && browseAnchorPersistenceDebt.revision === request.anchorRevision) {
+                browseAnchorPersistenceDebt = null;
+            }
+            return true;
         }).catch((error) => {
+            if (request.anchorRevision != null
+                && browseAnchorPersistenceDebt
+                && browseAnchorPersistenceDebt.revision === request.anchorRevision) {
+                browseAnchorPersistenceDebt.status = 'failed';
+            }
             console.warn('[BrowsePreferences] 保存浏览偏好失败，保留上次已提交值', error);
+            return false;
         }).finally(() => {
-            const index = pendingBrowsePreferenceWrites.indexOf(request);
-            if (index >= 0) pendingBrowsePreferenceWrites.splice(index, 1);
+            removePendingBrowsePreferenceWrite(request);
         });
-        return preview;
+        browsePreferenceWriteQueue = outcome.then(() => undefined);
+        return { preview, outcome };
+    }
+
+    function saveBrowseViewPreferences(partial = {}) {
+        return enqueueBrowsePreferenceWrite(partial).preview;
     }
 
     function flushBrowsePreferenceWrites() {
@@ -758,11 +873,10 @@
         }
     }
 
-    function updateBrowseAnchorsFromRecords(records, examIndex) {
+    function prepareBrowseAnchorUpdates(records, examIndex) {
         const list = Array.isArray(records) ? records : [];
         const indexSnapshot = Array.isArray(examIndex) ? examIndex : [];
         const updates = {};
-        const seenKeys = new Set();
 
         list.forEach((record) => {
             const info = resolveRecordExamInfo(record, indexSnapshot);
@@ -783,21 +897,96 @@
             if (!existing || timestamp > existing.timestamp) {
                 updates[key] = anchor;
             }
-            seenKeys.add(key);
         });
 
-        const currentAnchors = getBrowseViewPreferences().listAnchors || {};
-        Object.keys(currentAnchors || {}).forEach((key) => {
-            if (!seenKeys.has(key)) {
-                updates[key] = null;
-            }
-        });
+        // The Practice record list is authoritative, so stage a complete
+        // immutable projection instead of a delta against possibly stale
+        // durable preferences. A newer snapshot therefore replaces every
+        // anchor omitted from it without relying on deletion tombstones.
+        return mergeBrowseAnchors({}, updates);
+    }
 
-        if (Object.keys(updates).length === 0) {
-            return;
+    function readBrowseAnchorPublicationGeneration(publication) {
+        const raw = publication && typeof publication === 'object'
+            ? publication.practiceProjectionGeneration
+            : publication;
+        if (raw == null) {
+            return null;
+        }
+        const generation = Number(raw);
+        return Number.isFinite(generation) ? generation : null;
+    }
+
+    function getBrowseAnchorProjectionState() {
+        if (!browseAnchorProjection) {
+            return { revision: 0, generation: null, persistence: 'idle' };
+        }
+        const debt = browseAnchorPersistenceDebt
+            && browseAnchorPersistenceDebt.revision === browseAnchorProjection.revision
+            ? browseAnchorPersistenceDebt
+            : null;
+        return {
+            revision: browseAnchorProjection.revision,
+            generation: browseAnchorProjection.generation,
+            persistence: debt ? debt.status : 'persisted'
+        };
+    }
+
+    function commitBrowseAnchorUpdates(updates, publication = null) {
+        if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+            return false;
+        }
+        let anchors;
+        try {
+            anchors = mergeBrowseAnchors({}, updates);
+        } catch (_) {
+            return false;
+        }
+        const generation = readBrowseAnchorPublicationGeneration(publication);
+        if (generation != null
+            && browseAnchorProjection
+            && browseAnchorProjection.generation != null
+            && generation <= browseAnchorProjection.generation) {
+            return false;
         }
 
-        saveBrowseViewPreferences({ listAnchors: updates });
+        const revision = browseAnchorProjectionRevision + 1;
+        const acceptedProjection = {
+            anchors,
+            generation: generation != null
+                ? generation
+                : (browseAnchorProjection ? browseAnchorProjection.generation : null),
+            revision
+        };
+        // This is the anchor publication point: one synchronous assignment
+        // makes the newest full snapshot visible to consumers and subsequent
+        // preparation before any durable write can settle.
+        browseAnchorProjectionRevision = revision;
+        browseAnchorProjection = acceptedProjection;
+        // Keep only the current projection debt. A later accepted full
+        // snapshot supersedes it and retries through the same preference
+        // queue; no independent retry scheduler is introduced here.
+        browseAnchorPersistenceDebt = { revision, status: 'pending' };
+
+        try {
+            enqueueBrowsePreferenceWrite(
+                { listAnchors: anchors },
+                { replaceListAnchors: true, anchorRevision: revision }
+            );
+        } catch (error) {
+            if (browseAnchorPersistenceDebt
+                && browseAnchorPersistenceDebt.revision === revision) {
+                browseAnchorPersistenceDebt.status = 'failed';
+            }
+            console.warn('[BrowsePreferences] 浏览锚点持久化排队失败', error);
+        }
+        return true;
+    }
+
+    function updateBrowseAnchorsFromRecords(records, examIndex, publication = null) {
+        const updates = prepareBrowseAnchorUpdates(records, examIndex);
+        commitBrowseAnchorUpdates(updates, publication);
+        return updates;
     }
 
     // --- Global Event Listeners ---
@@ -823,9 +1012,13 @@
     global.getBrowseViewPreferences = getBrowseViewPreferences;
     global.whenBrowseViewPreferencesReady = whenBrowseViewPreferencesReady;
     global.saveBrowseViewPreferences = saveBrowseViewPreferences;
+    global.enqueueBrowsePreferenceWrite = enqueueBrowsePreferenceWrite;
     global.flushBrowsePreferenceWrites = flushBrowsePreferenceWrites;
     global.persistBrowseFilter = persistBrowseFilter;
     global.getPersistedBrowseFilter = getPersistedBrowseFilter;
+    global.prepareBrowseAnchorUpdates = prepareBrowseAnchorUpdates;
+    global.commitBrowseAnchorUpdates = commitBrowseAnchorUpdates;
+    global.getBrowseAnchorProjectionState = getBrowseAnchorProjectionState;
     global.updateBrowseAnchorsFromRecords = updateBrowseAnchorsFromRecords;
 
     global.setBrowseTitle = setBrowseTitle;
